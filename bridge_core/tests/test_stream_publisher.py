@@ -2,7 +2,7 @@ import asyncio
 import random
 from collections.abc import AsyncGenerator
 
-import httpx  # type: ignore[import-not-found]
+import httpx
 import pytest
 from bridge_core.stream.publisher import StreamPublisher
 
