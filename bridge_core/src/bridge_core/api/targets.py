@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from bridge_core.api.models import ErrorResponse
 from bridge_core.core import TargetRegistry
 
 router = APIRouter(prefix="/v1/targets", tags=["targets"])
@@ -37,13 +38,16 @@ async def list_targets(request: Request) -> TargetListResponse:
     return TargetListResponse(targets=targets)
 
 
-@router.get("/{target_id}")
+@router.get("/{target_id}", responses={404: {"model": ErrorResponse}})
 async def get_target(request: Request, target_id: str) -> dict[str, Any]:
     """Get details for a specific target."""
     registry: TargetRegistry = request.app.state.target_registry
     t = registry.get_target(target_id)
     if not t:
-        raise HTTPException(status_code=404, detail="Target not found")
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "TARGET_NOT_FOUND", "message": f"Target {target_id} not found"},
+        )
     return {
         "target_id": t.target_id,
         "renderer": t.renderer,
@@ -54,21 +58,49 @@ async def get_target(request: Request, target_id: str) -> dict[str, Any]:
     }
 
 
-@router.post("/{target_id}/heal")
+@router.post("/refresh")
+async def refresh_targets(request: Request) -> dict[str, Any]:
+    """Refresh targets from all registered adapters."""
+    registry: TargetRegistry = request.app.state.target_registry
+    await registry.refresh_targets()
+    return {"success": True}
+
+
+@router.post("/{target_id}/heal", responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
 async def heal_target(request: Request, target_id: str) -> dict[str, Any]:
     """Request topology/group healing for a target."""
     registry: TargetRegistry = request.app.state.target_registry
+    t = registry.get_target(target_id)
+    if not t:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "TARGET_NOT_FOUND", "message": f"Target {target_id} not found"},
+        )
+
     result = await registry.heal_target(target_id)
     if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error") or "Healing failed")
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "TARGET_HEAL_FAILED", "message": result.get("error") or "Healing failed"},
+        )
     return result
 
 
-@router.post("/{target_id}/volume")
+@router.post("/{target_id}/volume", responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
 async def set_volume(request: Request, target_id: str, body: VolumeRequest) -> dict[str, Any]:
     """Set volume for a target."""
     registry: TargetRegistry = request.app.state.target_registry
+    t = registry.get_target(target_id)
+    if not t:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "TARGET_NOT_FOUND", "message": f"Target {target_id} not found"},
+        )
+
     result = await registry.set_volume(target_id, body.volume)
     if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error") or "Failed to set volume")
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "TARGET_VOLUME_FAILED", "message": result.get("error") or "Failed to set volume"},
+        )
     return result
