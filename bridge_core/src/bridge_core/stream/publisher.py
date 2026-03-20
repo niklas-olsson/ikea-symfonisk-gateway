@@ -1,6 +1,7 @@
 """HTTP stream server for publishing encoded audio streams."""
 
 import logging
+import socket
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -14,9 +15,15 @@ logger = logging.getLogger(__name__)
 class StreamPublisher:
     """Publishes live audio streams over HTTP using FastAPI."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8080):
-        self.host = host
+    def __init__(
+        self,
+        bind_address: str = "0.0.0.0",
+        port: int = 8080,
+        advertised_host: str | None = None,
+    ):
+        self.bind_address = bind_address
         self.port = port
+        self.advertised_host = advertised_host or self._get_default_advertised_host()
         self.app = FastAPI(title="Bridge Stream Publisher")
         self._pipelines: dict[str, StreamPipeline] = {}
         self._setup_routes()
@@ -69,10 +76,22 @@ class StreamPublisher:
             return "audio/wav"
         return "application/octet-stream"
 
+    def _get_default_advertised_host(self) -> str:
+        """Detect the primary local IP address using a dummy UDP connection."""
+        try:
+            # We don't actually need to connect to this address, just use it
+            # to determine which interface would be used to reach it.
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return str(s.getsockname()[0])
+        except Exception as e:
+            logger.warning("Failed to auto-detect IP, falling back to localhost: %s", e)
+            return "127.0.0.1"
+
     def get_stream_url(self, session_id: str, profile_id: str) -> str:
         """Get the stream URL for a session."""
         ext = self._get_extension(profile_id)
-        return f"http://{self.host}:{self.port}/streams/{session_id}/live.{ext}"
+        return f"http://{self.advertised_host}:{self.port}/streams/{session_id}/live.{ext}"
 
     def register_pipeline(self, session_id: str, pipeline: StreamPipeline) -> None:
         """Register a pipeline for publishing."""
@@ -84,7 +103,12 @@ class StreamPublisher:
 
     async def start(self) -> None:
         """Start the stream server."""
-        config = uvicorn.Config(self.app, host=self.host, port=self.port, log_level="info")
+        config = uvicorn.Config(
+            self.app,
+            host=self.bind_address,
+            port=self.port,
+            log_level="info",
+        )
         self._server = uvicorn.Server(config)
         await self._server.serve()
 

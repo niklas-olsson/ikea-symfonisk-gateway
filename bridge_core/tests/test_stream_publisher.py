@@ -10,7 +10,7 @@ from bridge_core.stream.publisher import StreamPublisher
 @pytest.fixture
 async def publisher() -> AsyncGenerator[StreamPublisher, None]:
     port = random.randint(10000, 20000)
-    pub = StreamPublisher(host="127.0.0.1", port=port)
+    pub = StreamPublisher(bind_address="127.0.0.1", port=port, advertised_host="127.0.0.1")
     task = asyncio.create_task(pub.start())
     # Give it a moment to start
     await asyncio.sleep(0.5)
