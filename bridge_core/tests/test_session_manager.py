@@ -18,6 +18,23 @@ def session_manager(event_bus: EventBus) -> SessionManager:
 
 
 @pytest.mark.asyncio
+async def test_session_recovery_degraded(session_manager: SessionManager) -> None:
+    """Test session recovery from degraded state."""
+    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session.transition_to(SessionState.PREPARING)
+    session.transition_to(SessionState.READY)
+    await session_manager.start_session(session.session_id)
+
+    # Test DEGRADED -> HEALING -> PLAYING
+    session.transition_to(SessionState.HEALING)
+    session.transition_to(SessionState.DEGRADED)
+    assert session.state == SessionState.DEGRADED
+
+    await session_manager.recover(session.session_id)
+    assert session.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
+
+
+@pytest.mark.asyncio
 async def test_session_lifecycle(session_manager: SessionManager, event_bus: EventBus) -> None:
     """Test full successful session lifecycle."""
     # 1. Create

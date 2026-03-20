@@ -42,5 +42,5 @@ async def prepare_source(request: Request, source_id: str, body: PrepareRequest)
     registry: SourceRegistry = request.app.state.source_registry
     result = registry.prepare_source(source_id)
     if not result.success:
-        raise HTTPException(status_code=400, detail=result.error or "Preparation failed")
+        raise HTTPException(status_code=400, detail=result.message or result.error or "Preparation failed")
     return {"success": True, "source_id": source_id}

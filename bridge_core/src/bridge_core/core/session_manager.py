@@ -51,10 +51,10 @@ class Session:
             SessionState.CREATED: [SessionState.PREPARING],
             SessionState.PREPARING: [SessionState.READY, SessionState.FAILED],
             SessionState.READY: [SessionState.STARTING, SessionState.STOPPING, SessionState.FAILED],
-            SessionState.STARTING: [SessionState.PLAYING, SessionState.FAILED],
+            SessionState.STARTING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.PLAYING: [SessionState.HEALING, SessionState.STOPPING, SessionState.FAILED],
-            SessionState.HEALING: [SessionState.PLAYING, SessionState.DEGRADED, SessionState.FAILED],
-            SessionState.DEGRADED: [SessionState.PLAYING, SessionState.STOPPING, SessionState.FAILED],
+            SessionState.HEALING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.DEGRADED, SessionState.FAILED],
+            SessionState.DEGRADED: [SessionState.PLAYING, SessionState.HEALING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.STOPPING: [SessionState.STOPPED, SessionState.FAILED],
             SessionState.STOPPED: [SessionState.STARTING, SessionState.PREPARING, SessionState.FAILED],
             SessionState.FAILED: [SessionState.PREPARING, SessionState.HEALING],
@@ -130,6 +130,9 @@ class SessionManager:
         if not session:
             return False
 
+        if session.state == SessionState.PLAYING:
+            return True
+
         try:
             session.transition_to(SessionState.STARTING)
         except ValueError:
@@ -154,6 +157,9 @@ class SessionManager:
         session = self.get(session_id)
         if not session:
             return False
+
+        if session.state == SessionState.STOPPED:
+            return True
 
         try:
             session.transition_to(SessionState.STOPPING)
