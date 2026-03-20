@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.10.0",
     "soco>=0.30.0",
     "sse-starlette>=2.0.0",
+    "ui-web",
 ]
 
 [project.optional-dependencies]

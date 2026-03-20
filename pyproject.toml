@@ -18,6 +18,7 @@ adapter-linux-audio = { workspace = true }
 adapter-linux-bluetooth = { workspace = true }
 renderer-sonos = { workspace = true }
 shared = { workspace = true }
+ui-web = { workspace = true }
 
 [tool.ruff]
 line-length = 140

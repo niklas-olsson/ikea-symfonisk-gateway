@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IKEA SYMFONISK Gateway</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --panel-bg: #1e1e1e;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --border-color: #333333;
+            --accent-color: #0078d4;
+            --accent-hover: #0086f0;
+            --danger-color: #d13438;
+            --danger-hover: #e3383d;
+            --success-color: #107c10;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .panel-title {
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 18px;
+            color: var(--text-secondary);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        select {
+            width: 100%;
+            padding: 10px;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 16px;
+            appearance: none;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            color: white;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #playBtn {
+            background-color: var(--accent-color);
+        }
+
+        #playBtn:hover:not(:disabled) {
+            background-color: var(--accent-hover);
+        }
+
+        #stopBtn {
+            background-color: var(--danger-color);
+        }
+
+        #stopBtn:hover:not(:disabled) {
+            background-color: var(--danger-hover);
+        }
+
+        .state-display {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background-color: var(--bg-color);
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+        }
+
+        .state-label {
+            color: var(--text-secondary);
+        }
+
+        .state-value {
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .state-value.active {
+            color: var(--success-color);
+        }
+
+        .events-container {
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            height: 200px;
+            overflow-y: auto;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .event-item {
+            padding: 4px 0;
+            border-bottom: 1px solid #333;
+            color: var(--text-secondary);
+        }
+
+        .event-item:last-child {
+            border-bottom: none;
+        }
+
+        .event-time {
+            color: #888;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>IKEA SYMFONISK Gateway</h1>
+        </header>
+
+        <div class="panel">
+            <h2 class="panel-title">Playback Control</h2>
+
+            <div class="form-group">
+                <label for="sourceSelect">Source</label>
+                <select id="sourceSelect">
+                    <option value="">Loading sources...</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="targetSelect">Target</label>
+                <select id="targetSelect">
+                    <option value="">Loading targets...</option>
+                </select>
+            </div>
+
+            <div class="controls">
+                <button id="playBtn" disabled>Play</button>
+                <button id="stopBtn" disabled>Stop</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2 class="panel-title">Session State</h2>
+            <div class="state-display">
+                <span class="state-label">Current Status:</span>
+                <span id="sessionState" class="state-value">Disconnected</span>
+            </div>
+            <div class="state-display" style="margin-top: 10px; border-top: none; padding-top: 0;">
+                <span class="state-label">Session ID:</span>
+                <span id="sessionIdDisplay" class="state-value" style="font-size: 12px;">None</span>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2 class="panel-title">Event Stream</h2>
+            <div id="eventsContainer" class="events-container">
+                <!-- Events will be appended here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API Base URL
+        const API_BASE = '';
+
+        // State
+        let currentSessionId = null;
+        let sources = [];
+        let targets = [];
+
+        // DOM Elements
+        const sourceSelect = document.getElementById('sourceSelect');
+        const targetSelect = document.getElementById('targetSelect');
+        const playBtn = document.getElementById('playBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const sessionState = document.getElementById('sessionState');
+        const sessionIdDisplay = document.getElementById('sessionIdDisplay');
+        const eventsContainer = document.getElementById('eventsContainer');
+
+        // Initialize
+        async function init() {
+            await Promise.all([loadSources(), loadTargets()]);
+            updateControls();
+            setupEventListeners();
+            setupEventStream();
+        }
+
+        // Load Sources
+        async function loadSources() {
+            try {
+                const response = await fetch(`${API_BASE}/v1/sources`);
+                if (!response.ok) throw new Error('Failed to load sources');
+                const data = await response.json();
+                sources = data.sources || [];
+
+                sourceSelect.innerHTML = sources.length > 0
+                    ? sources.map(s => `<option value="${s.id || s.name || s}">${s.name || s.id || s}</option>`).join('')
+                    : '<option value="">No sources found</option>';
+            } catch (err) {
+                console.error(err);
+                sourceSelect.innerHTML = '<option value="">Error loading sources</option>';
+                addEventLog(`Error: ${err.message}`);
+            }
+        }
+
+        // Load Targets
+        async function loadTargets() {
+            try {
+                const response = await fetch(`${API_BASE}/v1/targets`);
+                if (!response.ok) throw new Error('Failed to load targets');
+                const data = await response.json();
+                targets = data.targets || [];
+
+                targetSelect.innerHTML = targets.length > 0
+                    ? targets.map(t => `<option value="${t.id || t.name || t}">${t.name || t.id || t}</option>`).join('')
+                    : '<option value="">No targets found</option>';
+            } catch (err) {
+                console.error(err);
+                targetSelect.innerHTML = '<option value="">Error loading targets</option>';
+                addEventLog(`Error: ${err.message}`);
+            }
+        }
+
+        // Setup Event Listeners
+        function setupEventListeners() {
+            sourceSelect.addEventListener('change', updateControls);
+            targetSelect.addEventListener('change', updateControls);
+
+            playBtn.addEventListener('click', handlePlay);
+            stopBtn.addEventListener('click', handleStop);
+        }
+
+        // Update UI Controls based on state
+        function updateControls() {
+            const hasSource = sourceSelect.value !== '';
+            const hasTarget = targetSelect.value !== '';
+            const hasSession = currentSessionId !== null;
+
+            playBtn.disabled = !hasSource || !hasTarget || hasSession;
+            stopBtn.disabled = !hasSession;
+        }
+
+        function updateSessionDisplay(state, id) {
+            sessionState.textContent = state;
+            if (state === 'active' || state === 'playing') {
+                sessionState.className = 'state-value active';
+            } else {
+                sessionState.className = 'state-value';
+            }
+
+            sessionIdDisplay.textContent = id || 'None';
+            currentSessionId = id;
+            updateControls();
+        }
+
+        // Handle Play
+        async function handlePlay() {
+            const sourceId = sourceSelect.value;
+            const targetId = targetSelect.value;
+
+            if (!sourceId || !targetId) return;
+
+            try {
+                playBtn.disabled = true;
+                playBtn.textContent = 'Starting...';
+
+                // 1. Create session
+                const createRes = await fetch(`${API_BASE}/v1/sessions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source_id: sourceId,
+                        target_id: targetId,
+                        stream_profile: "mp3_48k_stereo_320",
+                        auto_heal: true
+                    })
+                });
+
+                if (!createRes.ok) throw new Error('Failed to create session');
+                const sessionData = await createRes.json();
+                const sessionId = sessionData.session_id;
+
+                // 2. Start session
+                const startRes = await fetch(`${API_BASE}/v1/sessions/${sessionId}/start`, {
+                    method: 'POST'
+                });
+
+                if (!startRes.ok) throw new Error('Failed to start session');
+
+                updateSessionDisplay('Playing', sessionId);
+                addEventLog(`Started playback: ${sourceId} -> ${targetId}`);
+
+            } catch (err) {
+                console.error(err);
+                addEventLog(`Play Error: ${err.message}`);
+                updateSessionDisplay('Error', null);
+            } finally {
+                playBtn.textContent = 'Play';
+                updateControls();
+            }
+        }
+
+        // Handle Stop
+        async function handleStop() {
+            if (!currentSessionId) return;
+
+            try {
+                stopBtn.disabled = true;
+                stopBtn.textContent = 'Stopping...';
+
+                const stopRes = await fetch(`${API_BASE}/v1/sessions/${currentSessionId}/stop`, {
+                    method: 'POST'
+                });
+
+                if (!stopRes.ok) throw new Error('Failed to stop session');
+
+                updateSessionDisplay('Stopped', null);
+                addEventLog('Playback stopped');
+
+            } catch (err) {
+                console.error(err);
+                addEventLog(`Stop Error: ${err.message}`);
+            } finally {
+                stopBtn.textContent = 'Stop';
+                updateControls();
+            }
+        }
+
+        // Event Stream Setup
+        function setupEventStream() {
+            const evtSource = new EventSource(`${API_BASE}/events`);
+
+            evtSource.onmessage = function(event) {
+                let eventData = event.data;
+                try {
+                    const parsed = JSON.parse(event.data);
+                    eventData = JSON.stringify(parsed);
+                } catch(e) {}
+                addEventLog(eventData);
+            };
+
+            evtSource.onerror = function(err) {
+                console.error("EventSource failed:", err);
+                // addEventLog("Event stream connection error");
+            };
+
+            addEventLog("Connected to event stream");
+        }
+
+        // Add to Event Log (keep last 10)
+        function addEventLog(message) {
+            const time = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = 'event-item';
+            div.innerHTML = `<span class="event-time">[${time}]</span> ${escapeHtml(message)}`;
+
+            eventsContainer.prepend(div);
+
+            // Keep only last 10 events
+            while (eventsContainer.children.length > 10) {
+                eventsContainer.removeChild(eventsContainer.lastChild);
+            }
+        }
+
+        function escapeHtml(unsafe) {
+            return unsafe
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+        }
+
+        // Start app
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
