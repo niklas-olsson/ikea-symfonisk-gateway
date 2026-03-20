@@ -42,13 +42,35 @@ uv run pytest .
 
 Native git hooks are configured to validate code automatically:
 
-- **pre-commit**: Runs ruff format, ruff check (with auto-fix), and mypy
+- **pre-commit**: Runs code formatting (ruff), linting (ruff), type checking (mypy), and secret scanning (gitleaks)
 - **pre-push**: Runs ruff check, mypy, and pytest
 
 To install hooks on a new machine:
 ```bash
 ./scripts/install-hooks.sh
 ```
+
+### Secret Scanning
+
+This project uses [Gitleaks](https://github.com/gitleaks/gitleaks) for secret detection:
+
+- **Pre-commit hook**: Scans staged files for potential secrets before commit (uses `scripts/secrets-scan.sh`)
+- **CI workflow**: Runs gitleaks on push/PR to detect any secrets that slipped through
+
+**Requirements for pre-commit hook:**
+- `gitleaks` binary in PATH, OR
+- `mise` with gitleaks plugin, OR
+- `rg` (ripgrep) for fallback scanning
+
+**Allowlisted files** (defined in `.gitleaks.toml`):
+- `.env.example` - Contains empty/safe values
+- `.venv/` - Virtual environment
+- `__pycache__/` - Python cache
+
+**If secrets are detected:**
+1. Do NOT commit the file
+2. Remove the secret and recommit
+3. If the secret was already pushed, rotate it immediately
 
 ### Linting Configuration
 

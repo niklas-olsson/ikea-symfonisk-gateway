@@ -1,0 +1,18 @@
+title = "ikea-symfonisk-gateway"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlisted files and placeholder tokens"
+paths = [
+  '''\.env\.example''',
+  '''\.venv/.*''',
+  '''__pycache__/.*''',
+]
+regexes = [
+  '''Authorization: Bearer (your-token|<[^>]+>|\*+)''',
+]
+commits = [
+  "c495113e6928312c0943685a90ff2a018473a8ba",
+]

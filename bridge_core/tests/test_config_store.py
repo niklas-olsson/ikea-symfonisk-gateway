@@ -8,13 +8,13 @@ from bridge_core.core.config_store import ConfigStore
 
 
 @pytest.fixture
-def config_store(tmp_path: Path):
+def config_store(tmp_path: Path) -> ConfigStore:
     """Provide a ConfigStore instance using a temporary database file."""
     db_path = tmp_path / "test_config.db"
     return ConfigStore(db_path)
 
 
-def test_config_store_get_set_delete(config_store: ConfigStore):
+def test_config_store_get_set_delete(config_store: ConfigStore) -> None:
     """Test basic CRUD operations on the ConfigStore."""
     config_store.set("key1", "value1")
     config_store.set("key2", {"a": 1, "b": 2})
@@ -27,7 +27,7 @@ def test_config_store_get_set_delete(config_store: ConfigStore):
     assert config_store.get("key1") is None
 
 
-def test_config_store_list_all(config_store: ConfigStore):
+def test_config_store_list_all(config_store: ConfigStore) -> None:
     """Test listing all configuration entries."""
     data = {"key1": "val1", "key2": 100}
     for k, v in data.items():
@@ -36,7 +36,7 @@ def test_config_store_list_all(config_store: ConfigStore):
     assert config_store.list_all() == data
 
 
-def test_config_store_persistence(tmp_path: Path):
+def test_config_store_persistence(tmp_path: Path) -> None:
     """Test that configuration data persists across ConfigStore instances."""
     db_path = tmp_path / "persistent_config.db"
 
@@ -49,7 +49,7 @@ def test_config_store_persistence(tmp_path: Path):
     assert store2.get("persist_key") == "persist_val"
 
 
-def test_config_store_file_ops(config_store: ConfigStore, tmp_path: Path):
+def test_config_store_file_ops(config_store: ConfigStore, tmp_path: Path) -> None:
     """Test loading and saving configuration from/to a file."""
     # Test saving to file
     config_store.set("key_f", "val_f")
