@@ -4,6 +4,9 @@ from collections.abc import Sequence
 
 from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
 
+from .heal import HealController
+from .playback import PlaybackController
+
 
 class SonosTargetDescriptor(TargetDescriptor):
     """Describes a Sonos playback target."""
@@ -53,6 +56,8 @@ class SonosRendererAdapter(RendererAdapter):
     def __init__(self) -> None:
         self._discovered: bool = False
         self._targets: list[SonosTargetDescriptor] = []
+        self._playback = PlaybackController()
+        self._heal = HealController()
 
     def id(self) -> str:
         return "sonos-renderer-v1"
@@ -76,17 +81,47 @@ class SonosRendererAdapter(RendererAdapter):
         stream_url: str,
         metadata: dict[str, str] | None = None,
     ) -> dict[str, str]:
-        return {
-            "success": "true",
-            "target_id": target_id,
-            "stream_url": stream_url,
-        }
+        try:
+            self._playback.play_stream(target_id, stream_url, metadata)
+            return {
+                "success": "true",
+                "target_id": target_id,
+                "stream_url": stream_url,
+            }
+        except Exception as e:
+            return {
+                "success": "false",
+                "target_id": target_id,
+                "stream_url": stream_url,
+                "error": str(e),
+            }
 
     async def stop(self, target_id: str) -> dict[str, str]:
-        return {"success": "true", "target_id": target_id}
+        try:
+            self._playback.stop(target_id)
+            return {"success": "true", "target_id": target_id}
+        except Exception as e:
+            return {"success": "false", "target_id": target_id, "error": str(e)}
 
     async def set_volume(self, target_id: str, volume: float) -> dict[str, str | float]:
-        return {"success": "true", "target_id": target_id, "volume": volume}
+        try:
+            self._playback.set_volume(target_id, volume)
+            return {"success": "true", "target_id": target_id, "volume": volume}
+        except Exception as e:
+            return {"success": "false", "target_id": target_id, "volume": volume, "error": str(e)}
 
     async def heal(self, target_id: str) -> dict[str, str | bool]:
-        return {"success": "true", "target_id": target_id, "healed": True}
+        # For full integration, this would retrieve the specific SoCo device.
+        # Here we attempt to heal using the available tools, assuming the playback
+        # controller has the device registered.
+        device = self._playback.get_device(target_id)
+        if not device:
+            return {"success": "false", "target_id": target_id, "error": "Device not found"}
+
+        expected_coord_id = self._heal.get_expected_coordinator(target_id)
+        coordinator_device = None
+        if expected_coord_id:
+            coordinator_device = self._playback.get_device(expected_coord_id)
+
+        healed = await self._heal.heal_group_membership(target_id, device, coordinator_device)
+        return {"success": str(healed).lower(), "target_id": target_id, "healed": healed}
