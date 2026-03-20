@@ -284,7 +284,7 @@ curl -X POST http://localhost:8732/api/sessions \
 When `BRIDGE_AUTH_TOKEN` is set, include it in requests:
 
 ```bash
-curl -H "Authorization: Bearer your-token" http://localhost:8732/api/sources
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:8732/api/sources
 ```
 
 ---

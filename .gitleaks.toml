@@ -3,10 +3,14 @@ title = "ikea-symfonisk-gateway"
 [extend]
 useDefault = true
 
-[allowlist]
-description = "Allowlisted files and patterns"
+[[allowlists]]
+description = "Allowlisted files"
 files = [
   ".env.example",
   ".venv/.*",
   "__pycache__/.*",
 ]
+
+[[allowlists]]
+description = "Allow documentation examples with placeholder tokens"
+regex = "Authorization: Bearer (your-token|<[^>]+>|\\*+)"
