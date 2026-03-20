@@ -156,6 +156,10 @@ Before approving a PR that modifies `.gitignore`:
 
 PRs modifying `.gitignore` trigger a `gitignore-review` job that posts a review checklist as a CI notice.
 
+## Agent Skills
+
+See [SKILLS.md](./SKILLS.md) for available skills and usage guides.
+
 ### If You Commit __pycache__ Files
 
 If you accidentally commit `__pycache__` files:
