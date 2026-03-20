@@ -2,8 +2,10 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+
+from bridge_core.core import TargetRegistry
 
 router = APIRouter(prefix="/v1/targets", tags=["targets"])
 
@@ -17,15 +19,39 @@ class VolumeRequest(BaseModel):
 
 
 @router.get("", response_model=TargetListResponse)
-async def list_targets() -> TargetListResponse:
+async def list_targets(request: Request) -> TargetListResponse:
     """List all available render targets."""
-    return TargetListResponse(targets=[])
+    registry: TargetRegistry = request.app.state.target_registry
+    targets = []
+    for t in registry.list_targets():
+        targets.append(
+            {
+                "target_id": t.target_id,
+                "renderer": t.renderer,
+                "type": t.target_type,
+                "display_name": t.display_name,
+                "members": t.members,
+                "coordinator_id": t.coordinator_id,
+            }
+        )
+    return TargetListResponse(targets=targets)
 
 
 @router.get("/{target_id}")
-async def get_target(target_id: str) -> dict[str, Any]:
+async def get_target(request: Request, target_id: str) -> dict[str, Any]:
     """Get details for a specific target."""
-    raise HTTPException(status_code=404, detail="Target not found")
+    registry: TargetRegistry = request.app.state.target_registry
+    t = registry.get_target(target_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Target not found")
+    return {
+        "target_id": t.target_id,
+        "renderer": t.renderer,
+        "type": t.target_type,
+        "display_name": t.display_name,
+        "members": t.members,
+        "coordinator_id": t.coordinator_id,
+    }
 
 
 @router.post("/{target_id}/heal")
