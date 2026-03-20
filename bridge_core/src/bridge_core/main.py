@@ -71,12 +71,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Clean up
-    # Note: publisher.start() uses uvicorn.Server.serve() which doesn't have a simple 'stop'
-    # but the task will be cancelled when the main loop stops.
+    await publisher.stop()
     publisher_task.cancel()
     try:
         await publisher_task
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, SystemExit):
         pass
 
 
