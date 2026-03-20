@@ -16,9 +16,7 @@ class ConfigStore:
     def _init_db(self) -> None:
         """Initialize the SQLite database."""
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)"
-            )
+            conn.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
             conn.commit()
 
     def get(self, key: str, default: Any = None) -> Any:
