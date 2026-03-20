@@ -151,3 +151,7 @@ git push
 ```
 
 Do NOT add `__pycache__` removal to `.gitignore` changes - the damage is already done.
+
+## Web UI Module
+
+The `ui_web/` directory contains the web UI package. See [ui_web/AGENTS.md](ui_web/AGENTS.md) for frontend design guidelines.
