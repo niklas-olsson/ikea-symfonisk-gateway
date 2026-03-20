@@ -2,8 +2,10 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+
+from bridge_core.core import SourceRegistry
 
 router = APIRouter(prefix="/v1/sources", tags=["sources"])
 
@@ -17,15 +19,21 @@ class PrepareRequest(BaseModel):
 
 
 @router.get("", response_model=SourceListResponse)
-async def list_sources() -> SourceListResponse:
+async def list_sources(request: Request) -> SourceListResponse:
     """List all available audio sources from all ingress adapters."""
-    return SourceListResponse(sources=[])
+    registry: SourceRegistry = request.app.state.source_registry
+    sources = [s.model_dump() for s in registry.list_sources()]
+    return SourceListResponse(sources=sources)
 
 
 @router.get("/{source_id}")
-async def get_source(source_id: str) -> dict[str, Any]:
+async def get_source(request: Request, source_id: str) -> dict[str, Any]:
     """Get details for a specific source."""
-    raise HTTPException(status_code=404, detail="Source not found")
+    registry: SourceRegistry = request.app.state.source_registry
+    source = registry.get_source(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return source.model_dump()
 
 
 @router.post("/{source_id}/prepare")

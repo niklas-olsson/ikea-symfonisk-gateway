@@ -11,7 +11,7 @@ router = APIRouter(prefix="", tags=["health"])
 class HealthResponse(BaseModel):
     status: str
     version: str
-    uptime_s: float
+    uptime: float
 
 
 _start_time = time.time()
@@ -23,5 +23,5 @@ async def get_health() -> HealthResponse:
     return HealthResponse(
         status="ok",
         version="0.1.0",
-        uptime_s=time.time() - _start_time,
+        uptime=time.time() - _start_time,
     )

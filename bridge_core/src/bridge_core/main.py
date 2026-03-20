@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from bridge_core.api import (
     events_router,
@@ -13,15 +14,41 @@ from bridge_core.api import (
     sources_router,
     targets_router,
 )
+from bridge_core.core import EventBus, SessionManager, SourceRegistry, TargetRegistry
 from bridge_core.stream.publisher import StreamPublisher
+from renderer_sonos import SonosRendererAdapter
+from adapter_synthetic import SyntheticAdapter
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifespan."""
-    # Initialize stream publisher
+    # Initialize core components
+    event_bus = EventBus()
+    source_registry = SourceRegistry(event_bus)
+    target_registry = TargetRegistry(event_bus)
     publisher = StreamPublisher(port=8080)
+    session_manager = SessionManager(event_bus, publisher)
+
+    # Store in app state
+    app.state.event_bus = event_bus
+    app.state.source_registry = source_registry
+    app.state.target_registry = target_registry
     app.state.stream_publisher = publisher
+    app.state.session_manager = session_manager
+
+    # Register adapters
+    sonos_adapter = SonosRendererAdapter()
+    await target_registry.register_adapter(sonos_adapter)
+
+    synthetic_adapter = SyntheticAdapter()
+    source_registry.register_adapter(
+        adapter_id=synthetic_adapter.id(),
+        platform=synthetic_adapter.platform(),
+        version="0.1.0",
+        capabilities=synthetic_adapter.capabilities(),
+        sources=synthetic_adapter.list_sources()
+    )
 
     # Start stream publisher in the background
     publisher_task = asyncio.create_task(publisher.start())
@@ -43,6 +70,14 @@ app = FastAPI(
     description="Local bridge platform for IKEA SYMFONISK speakers",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(health_router)
