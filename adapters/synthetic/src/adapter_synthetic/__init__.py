@@ -99,9 +99,9 @@ class SyntheticAdapter(IngressAdapter):
 
     async def _generate_loop(self) -> None:
         while self._running:
-            frame = self._generate_frame()
             pts_ns = int(self._phase * 1_000_000_000 / SAMPLE_RATE)
             duration_ns = int(SAMPLES_PER_FRAME * 1_000_000_000 / SAMPLE_RATE)
+            frame = self._generate_frame()
 
             if self._frame_sink:
                 self._frame_sink.on_frame(frame, pts_ns, duration_ns)
@@ -110,15 +110,30 @@ class SyntheticAdapter(IngressAdapter):
 
     def _generate_frame(self) -> bytes:
         if self._mode == SyntheticMode.SILENCE:
+            self._phase += SAMPLES_PER_FRAME
             return b"\x00" * FRAME_SIZE
 
         samples = []
+
+        # Pink noise state variables (Voss-McCartney approximation)
+        if not hasattr(self, '_pink_b'):
+            self._pink_b = [0.0] * 7
+
         for i in range(SAMPLES_PER_FRAME):
             t = (self._phase + i) / SAMPLE_RATE
             if self._mode == SyntheticMode.SINE_WAVE:
                 sample = 0.5 * math.sin(2 * math.pi * 440 * t)
             elif self._mode == SyntheticMode.PINK_NOISE:
-                sample = np.random.randn() * 0.3
+                white = np.random.randn()
+                self._pink_b[0] = 0.99886 * self._pink_b[0] + white * 0.0555179
+                self._pink_b[1] = 0.99332 * self._pink_b[1] + white * 0.0750759
+                self._pink_b[2] = 0.96900 * self._pink_b[2] + white * 0.1538520
+                self._pink_b[3] = 0.86650 * self._pink_b[3] + white * 0.3104856
+                self._pink_b[4] = 0.55000 * self._pink_b[4] + white * 0.5329522
+                self._pink_b[5] = -0.7616 * self._pink_b[5] - white * 0.0168980
+                pink = sum(self._pink_b[:6]) + white * 0.5362 + self._pink_b[6]
+                self._pink_b[6] = white * 0.115926
+                sample = pink * 0.1  # Scale to reasonable amplitude
             else:
                 sample = 0.0
 
