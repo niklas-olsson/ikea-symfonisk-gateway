@@ -18,35 +18,23 @@ def session_manager(event_bus: EventBus) -> SessionManager:
 
 
 @pytest.mark.asyncio
-async def test_session_recovery_legacy(session_manager: SessionManager) -> None:
-    """Test session recovery (original test case)."""
+async def test_session_recovery(session_manager: SessionManager) -> None:
+    """Test session recovery from FAILED and DEGRADED states."""
     session = session_manager.create(source_id="src_1", target_id="tgt_1")
     session.transition_to(SessionState.PREPARING)
     session.transition_to(SessionState.READY)
     await session_manager.start_session(session.session_id)
 
-    # Simulate failure
+    # 1. Recover from FAILED
     session.transition_to(SessionState.FAILED)
     assert session.state == SessionState.FAILED
-
-    # Recover
     await session_manager.recover(session.session_id)
     assert session.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
 
-
-@pytest.mark.asyncio
-async def test_session_recovery_degraded(session_manager: SessionManager) -> None:
-    """Test session recovery from degraded state."""
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
-    session.transition_to(SessionState.PREPARING)
-    session.transition_to(SessionState.READY)
-    await session_manager.start_session(session.session_id)
-
-    # Test DEGRADED -> HEALING -> PLAYING
+    # 2. Recover from DEGRADED
     session.transition_to(SessionState.HEALING)
     session.transition_to(SessionState.DEGRADED)
     assert session.state == SessionState.DEGRADED
-
     await session_manager.recover(session.session_id)
     assert session.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
 
