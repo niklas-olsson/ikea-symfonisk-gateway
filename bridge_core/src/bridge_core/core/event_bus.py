@@ -126,7 +126,7 @@ class EventBus:
         for et in [None, EventType(event.type) if event.type in [e.value for e in EventType] else None]:
             if et in self._handlers:
                 for handler in self._handlers[et]:
-                    asyncio.create_task(handler(event))
+                    asyncio.create_task(handler(event))  # type: ignore[arg-type]
 
     def emit(
         self,

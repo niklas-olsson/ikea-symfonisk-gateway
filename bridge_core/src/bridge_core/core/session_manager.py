@@ -1,11 +1,13 @@
 """Session lifecycle management."""
 
+import asyncio
 import time
 from enum import Enum
 from typing import Any
 from uuid import uuid4
 
 from bridge_core.core.event_bus import EventBus, EventType
+from bridge_core.stream.pipeline import StreamPipeline
 
 
 class SessionState(str, Enum):
@@ -41,6 +43,7 @@ class Session:
         self.created_at = time.time()
         self.started_at: float | None = None
         self.stopped_at: float | None = None
+        self.pipeline: StreamPipeline | None = None
 
     def transition_to(self, new_state: SessionState) -> None:
         """Transitions the session to a new state if valid."""
@@ -84,9 +87,10 @@ class Session:
 class SessionManager:
     """Manages session lifecycle."""
 
-    def __init__(self, event_bus: EventBus) -> None:
+    def __init__(self, event_bus: EventBus, stream_publisher: Any | None = None) -> None:
         self._sessions: dict[str, Session] = {}
         self._event_bus = event_bus
+        self._stream_publisher = stream_publisher
 
     def create(
         self,
@@ -114,31 +118,66 @@ class SessionManager:
         """List all sessions."""
         return list(self._sessions.values())
 
-    def start(self, session_id: str) -> None:
-        """Start a session."""
+    async def start_session(self, session_id: str) -> bool:
+        """Start a session and its pipeline."""
         session = self.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            return False
 
-        session.transition_to(SessionState.STARTING)
+        try:
+            session.transition_to(SessionState.STARTING)
+        except ValueError:
+            return False
+
         self._event_bus.emit(EventType.SESSION_STARTING, session_id=session_id)
 
-        # In a real implementation, this would involve setting up the pipeline
-        # For now we simulate success
+        if session.pipeline is None and self._stream_publisher:
+            session.pipeline = StreamPipeline(session.session_id, session.stream_profile)
+            self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
+            session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
+
+        if session.pipeline is not None:
+            await session.pipeline.start()
+
         session.transition_to(SessionState.PLAYING)
         self._event_bus.emit(EventType.SESSION_STARTED, session_id=session_id)
+        return True
 
-    def stop(self, session_id: str) -> None:
-        """Stop a session."""
+    async def stop_session(self, session_id: str) -> bool:
+        """Stop a session and its pipeline."""
         session = self.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            return False
 
-        session.transition_to(SessionState.STOPPING)
+        try:
+            session.transition_to(SessionState.STOPPING)
+        except ValueError:
+            return False
+
         self._event_bus.emit(EventType.SESSION_STOPPING, session_id=session_id)
+
+        if session.pipeline:
+            await session.pipeline.stop()
+            if self._stream_publisher:
+                self._stream_publisher.unregister_pipeline(session.session_id)
 
         session.transition_to(SessionState.STOPPED)
         self._event_bus.emit(EventType.SESSION_STOPPED, session_id=session_id)
+        return True
+
+    def start(self, session_id: str) -> None:
+        """Start a session (synchronous shim)."""
+        if asyncio.get_event_loop().is_running():
+            asyncio.create_task(self.start_session(session_id))
+        else:
+            asyncio.run(self.start_session(session_id))
+
+    def stop(self, session_id: str) -> None:
+        """Stop a session (synchronous shim)."""
+        if asyncio.get_event_loop().is_running():
+            asyncio.create_task(self.stop_session(session_id))
+        else:
+            asyncio.run(self.stop_session(session_id))
 
     def recover(self, session_id: str) -> None:
         """Attempt to recover a failed or degraded session."""
@@ -149,7 +188,6 @@ class SessionManager:
         session.transition_to(SessionState.HEALING)
         self._event_bus.emit(EventType.HEAL_ATTEMPTED, session_id=session_id)
 
-        # Simulating recovery success
         session.transition_to(SessionState.PLAYING)
         self._event_bus.emit(EventType.HEAL_SUCCEEDED, session_id=session_id)
 
@@ -160,13 +198,9 @@ class SessionManager:
             return
 
         if session.state not in [SessionState.STOPPED, SessionState.FAILED]:
-            try:
-                self.stop(session_id)
-            except Exception:
-                # Force to failed if stop fails during termination
-                session.state = SessionState.FAILED
+            self.stop(session_id)
 
-        self.delete(session_id)
+        self._sessions.pop(session_id, None)
 
     def update_state(self, session_id: str, state: SessionState) -> None:
         """Update session state directly (bypass validation, use with caution)."""
@@ -174,6 +208,7 @@ class SessionManager:
         if session:
             session.state = state
 
-    def delete(self, session_id: str) -> bool:
+    async def delete(self, session_id: str) -> bool:
         """Delete a session."""
+        await self.stop_session(session_id)
         return self._sessions.pop(session_id, None) is not None
