@@ -12,6 +12,7 @@ from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
     HealthResult,
+    PairingResult,
     PrepareResult,
     SourceCapabilities,
     SourceDescriptor,
@@ -136,6 +137,14 @@ class SyntheticAdapter(IngressAdapter):
             dropped_frames=self._dropped_frames,
             last_error=None,
         )
+
+    def start_pairing(self, timeout_seconds: int = 60) -> PairingResult:
+        """Synthetic adapter doesn't support pairing."""
+        return PairingResult(success=False, error="Pairing not supported by synthetic adapter")
+
+    def stop_pairing(self) -> PairingResult:
+        """Synthetic adapter doesn't support pairing."""
+        return PairingResult(success=True)
 
     async def _generate_loop(self) -> None:
         start_time = asyncio.get_event_loop().time()

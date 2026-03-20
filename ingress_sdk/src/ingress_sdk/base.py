@@ -6,6 +6,7 @@ from typing import Protocol
 from ingress_sdk.types import (
     AdapterCapabilities,
     HealthResult,
+    PairingResult,
     PrepareResult,
     SourceDescriptor,
     StartResult,
@@ -64,4 +65,14 @@ class IngressAdapter(ABC):
     @abstractmethod
     def probe_health(self, source_id: str) -> HealthResult:
         """Probe the health of a specific source."""
+        ...
+
+    @abstractmethod
+    def start_pairing(self, timeout_seconds: int = 60) -> PairingResult:
+        """Start adapter pairing mode (if supported)."""
+        ...
+
+    @abstractmethod
+    def stop_pairing(self) -> PairingResult:
+        """Stop adapter pairing mode."""
         ...
