@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 from bridge_core.core.event_bus import EventBus, EventType
-from bridge_core.core.session_manager import Session, SessionManager, SessionState
+from bridge_core.core.session_manager import SessionManager, SessionState
 
 
 @pytest.fixture
