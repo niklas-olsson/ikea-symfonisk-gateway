@@ -20,6 +20,7 @@ from ingress_sdk.types import (
 
 logger = logging.getLogger(__name__)
 
+
 class LinuxAudioAdapter(IngressAdapter):
     """Adapter for capturing system audio on Linux."""
 
@@ -41,6 +42,7 @@ class LinuxAudioAdapter(IngressAdapter):
     def _start_hotplug_listener(self) -> None:
         """Starts a background task to listen for pactl subscribe events."""
         import shutil
+
         if shutil.which("pactl"):
             self._hotplug_task = asyncio.create_task(self._hotplug_loop())
 
@@ -48,7 +50,8 @@ class LinuxAudioAdapter(IngressAdapter):
         """Listens for PulseAudio events using pactl subscribe."""
         try:
             process = await asyncio.create_subprocess_exec(
-                "pactl", "subscribe",
+                "pactl",
+                "subscribe",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -102,11 +105,9 @@ class LinuxAudioAdapter(IngressAdapter):
 
         # Try to discover PulseAudio sinks
         import subprocess
+
         try:
-            result = subprocess.run(
-                ["pactl", "list", "short", "sources"],
-                capture_output=True, text=True, check=True
-            )
+            result = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
                     continue
@@ -139,10 +140,7 @@ class LinuxAudioAdapter(IngressAdapter):
         except (subprocess.SubprocessError, FileNotFoundError):
             # Fallback to ALSA if pactl fails or not found
             try:
-                result = subprocess.run(
-                    ["arecord", "-l"],
-                    capture_output=True, text=True, check=True
-                )
+                result = subprocess.run(["arecord", "-l"], capture_output=True, text=True, check=True)
                 for line in result.stdout.split("\n"):
                     if line.startswith("card "):
                         # e.g. card 0: PCH [HDA Intel PCH], device 0: ALC294 Analog [ALC294 Analog]
@@ -156,7 +154,7 @@ class LinuxAudioAdapter(IngressAdapter):
                         sources.append(
                             SourceDescriptor(
                                 source_id=source_id,
-                                source_type=SourceType.LINE_IN, # hard to know, assume Line-in
+                                source_type=SourceType.LINE_IN,  # hard to know, assume Line-in
                                 display_name=display_name,
                                 platform="linux",
                                 capabilities=SourceCapabilities(
@@ -247,6 +245,7 @@ class LinuxAudioAdapter(IngressAdapter):
     async def _capture_loop(self, source_id: str) -> None:
         # Check if pactl exists to decide between parec and arecord
         import shutil
+
         cmd = []
 
         if shutil.which("parec"):
@@ -282,7 +281,7 @@ class LinuxAudioAdapter(IngressAdapter):
             chunk_size = 1920
 
             pts_ns = 0
-            duration_ns = int(480 * 1_000_000_000 / 48000) # 10ms
+            duration_ns = int(480 * 1_000_000_000 / 48000)  # 10ms
 
             while self._running:
                 data = await self._process.stdout.readexactly(chunk_size)

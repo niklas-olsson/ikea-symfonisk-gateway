@@ -2,8 +2,9 @@
 
 from typing import Any
 
-from bridge_core.core.event_bus import EventBus, EventType
 from ingress_sdk.types import AdapterCapabilities, HealthResult, SourceDescriptor
+
+from bridge_core.core.event_bus import EventBus, EventType
 
 
 class AdapterInfo:
@@ -111,11 +112,7 @@ class SourceRegistry:
             )
 
         if not old_health or old_health.signal_present != health.signal_present:
-            event_type = (
-                EventType.SOURCE_SIGNAL_DETECTED
-                if health.signal_present
-                else EventType.SOURCE_SIGNAL_LOST
-            )
+            event_type = EventType.SOURCE_SIGNAL_DETECTED if health.signal_present else EventType.SOURCE_SIGNAL_LOST
             self._event_bus.emit(
                 event_type,
                 payload={"source_id": source_id},

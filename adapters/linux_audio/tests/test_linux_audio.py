@@ -8,6 +8,7 @@ def test_linux_audio_adapter_initializes() -> None:
     assert adapter.id() == "linux-audio-adapter"
     assert adapter.platform() == "linux"
 
+
 def test_linux_audio_capabilities() -> None:
     """Test that capabilities are correctly reported."""
     adapter = LinuxAudioAdapter()
@@ -16,6 +17,7 @@ def test_linux_audio_capabilities() -> None:
     assert caps.supports_bluetooth_audio is False
     assert 48000 in caps.supports_sample_rates
     assert 2 in caps.supports_channels
+
 
 def test_list_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test source listing, with mock subprocess to avoid real system dependencies."""
@@ -31,6 +33,7 @@ def test_list_sources(monkeypatch: pytest.MonkeyPatch) -> None:
         raise FileNotFoundError()
 
     import subprocess
+
     monkeypatch.setattr(subprocess, "run", mock_run)
 
     sources = adapter.list_sources()
