@@ -34,8 +34,22 @@ class Envelope(BaseModel):
 
     @classmethod
     def from_msgpack(cls, data: bytes) -> "Envelope":
-        unpacked = msgpack.unpackb(data, raw=False)
-        return cls(**cast(dict[str, Any], unpacked))
+        unpacked = cast(dict[str, Any], msgpack.unpackb(data, raw=False))
+        msg_type = unpacked.get("type")
+
+        # Map message types to their respective classes for polymorphic instantiation
+        type_map: dict[str, type[Envelope]] = {
+            MessageType.HELLO: HelloMessage,
+            MessageType.ACCEPT: AcceptMessage,
+            MessageType.AUDIO_FRAME: AudioFrame,
+            MessageType.HEARTBEAT: Heartbeat,
+            MessageType.HEALTH: HealthMessage,
+            MessageType.ERROR: ErrorMessage,
+            MessageType.STOP: StopMessage,
+        }
+
+        target_cls = type_map.get(cast(str, msg_type), Envelope)
+        return target_cls(**unpacked)
 
 
 class HelloMessage(Envelope):
@@ -115,4 +129,14 @@ class ErrorMessage(Envelope):
 
     def __init__(self, **data: Any) -> None:
         data["type"] = MessageType.ERROR
+        super().__init__(**data)
+
+
+class StopMessage(Envelope):
+    """Notification to stop capture."""
+
+    type: MessageType = MessageType.STOP
+
+    def __init__(self, **data: Any) -> None:
+        data["type"] = MessageType.STOP
         super().__init__(**data)
