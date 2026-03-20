@@ -6,6 +6,7 @@ from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
     HealthResult,
+    PairingResult,
     PrepareResult,
     SourceDescriptor,
     StartResult,
@@ -191,3 +192,28 @@ class SourceRegistry:
         adapter_info = self._get_adapter_info_for_source(source_id)
         if adapter_info and adapter_info.adapter:
             adapter_info.adapter.stop(adapter_session_id)
+
+    def start_pairing(self, adapter_id: str, timeout_seconds: int = 60) -> PairingResult:
+        """Start pairing mode on an adapter."""
+        adapter_info = self.get_adapter(adapter_id)
+        if not adapter_info:
+            return PairingResult(success=False, error=f"Adapter {adapter_id} not found")
+
+        if not adapter_info.adapter:
+            return PairingResult(success=False, error=f"Adapter {adapter_id} not active")
+
+        if not adapter_info.capabilities.supports_pairing:
+            return PairingResult(success=False, error=f"Adapter {adapter_id} does not support pairing")
+
+        return adapter_info.adapter.start_pairing(timeout_seconds)
+
+    def stop_pairing(self, adapter_id: str) -> PairingResult:
+        """Stop pairing mode on an adapter."""
+        adapter_info = self.get_adapter(adapter_id)
+        if not adapter_info:
+            return PairingResult(success=False, error=f"Adapter {adapter_id} not found")
+
+        if not adapter_info.adapter:
+            return PairingResult(success=False, error=f"Adapter {adapter_id} not active")
+
+        return adapter_info.adapter.stop_pairing()

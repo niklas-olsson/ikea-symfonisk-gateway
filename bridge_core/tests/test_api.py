@@ -16,6 +16,7 @@ def client():
         # publisher.start() is awaited in lifespan
         async def async_noop():
             pass
+
         mock_pub.start.return_value = async_noop()
         mock_pub.stop.return_value = async_noop()
 

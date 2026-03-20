@@ -41,5 +41,6 @@ async def main():
         print("Error: No sources found")
         sys.exit(1)
 
+
 if __name__ == "__main__":
     asyncio.run(main())

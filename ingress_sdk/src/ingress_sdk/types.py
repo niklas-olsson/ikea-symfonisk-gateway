@@ -54,6 +54,12 @@ class StartResult(BaseModel):
     message: str = ""
 
 
+class PairingResult(BaseModel):
+    success: bool
+    message: str = ""
+    error: str | None = None
+
+
 class HealthResult(BaseModel):
     healthy: bool
     source_state: str
