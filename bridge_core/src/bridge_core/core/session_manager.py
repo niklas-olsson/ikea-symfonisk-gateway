@@ -169,7 +169,11 @@ class SessionManager:
         except ValueError:
             return False
 
-        self._event_bus.emit(EventType.SESSION_STARTING, session_id=session_id)
+        self._event_bus.emit(
+            EventType.SESSION_STARTING,
+            session_id=session_id,
+            payload=session.to_dict(),
+        )
 
         try:
             # 1. Prepare and start source
@@ -178,13 +182,17 @@ class SessionManager:
                 raise RuntimeError(f"Failed to prepare source: {prepare_res.error or prepare_res.message}")
 
             # 2. Setup pipeline and publisher
-            if session.pipeline is None and self._stream_publisher:
-                session.pipeline = StreamPipeline(session.session_id, session.stream_profile)
-                self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
-                session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
-
             if session.pipeline is None:
                 session.pipeline = StreamPipeline(session.session_id, session.stream_profile)
+
+            if self._stream_publisher:
+                self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
+                session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
+                self._event_bus.emit(
+                    EventType.PUBLISHER_ACTIVE,
+                    session_id=session_id,
+                    payload={"stream_url": session.stream_url},
+                )
 
             # 3. Start source with frame sink
             frame_sink = SessionFrameSink(session.pipeline)
@@ -192,22 +200,48 @@ class SessionManager:
             if not start_res.success:
                 raise RuntimeError(f"Failed to start source: {start_res.message}")
             session.adapter_session_id = start_res.session_id
+            self._event_bus.emit(
+                EventType.SOURCE_STARTED,
+                session_id=session_id,
+                payload={"adapter_session_id": session.adapter_session_id},
+            )
 
             # 4. Start pipeline
             await session.pipeline.start()
 
             # 5. Prepare and start renderer
-            prep_target_res = await self._target_registry.prepare_target(session.target_id)
-            if not prep_target_res.get("success"):
-                raise RuntimeError(f"Failed to prepare target: {prep_target_res.get('error')}")
+            try:
+                prep_target_res = await self._target_registry.prepare_target(session.target_id)
+                if not prep_target_res.get("success"):
+                    raise RuntimeError(f"Failed to prepare target: {prep_target_res.get('error')}")
 
-            if session.stream_url:
-                play_res = await self._target_registry.play_stream(session.target_id, session.stream_url)
-                if not play_res.get("success"):
-                    raise RuntimeError(f"Failed to start renderer playback: {play_res.get('error')}")
+                if session.stream_url:
+                    play_res = await self._target_registry.play_stream(session.target_id, session.stream_url)
+                    if not play_res.get("success"):
+                        raise RuntimeError(f"Failed to start renderer playback: {play_res.get('error')}")
+
+                    self._event_bus.emit(
+                        EventType.RENDERER_PLAYBACK_STARTED,
+                        session_id=session_id,
+                        payload={
+                            "target_id": session.target_id,
+                            "stream_url": session.stream_url,
+                        },
+                    )
+            except Exception as e:
+                self._event_bus.emit(
+                    EventType.RENDERER_PLAYBACK_FAILED,
+                    session_id=session_id,
+                    payload={"error": str(e)},
+                )
+                raise
 
             session.transition_to(SessionState.PLAYING)
-            self._event_bus.emit(EventType.SESSION_STARTED, session_id=session_id)
+            self._event_bus.emit(
+                EventType.SESSION_STARTED,
+                session_id=session_id,
+                payload=session.to_dict(),
+            )
             return True
 
         except Exception as e:
@@ -243,7 +277,11 @@ class SessionManager:
             if session.state != SessionState.FAILED:
                 return False
 
-        self._event_bus.emit(EventType.SESSION_STOPPING, session_id=session_id)
+        self._event_bus.emit(
+            EventType.SESSION_STOPPING,
+            session_id=session_id,
+            payload=session.to_dict(),
+        )
 
         # 1. Stop renderer
         try:
@@ -275,7 +313,11 @@ class SessionManager:
                 self._stream_publisher.unregister_pipeline(session.session_id)
 
         session.transition_to(SessionState.STOPPED)
-        self._event_bus.emit(EventType.SESSION_STOPPED, session_id=session_id)
+        self._event_bus.emit(
+            EventType.SESSION_STOPPED,
+            session_id=session_id,
+            payload=session.to_dict(),
+        )
         return True
 
     def start(self, session_id: str) -> None:
