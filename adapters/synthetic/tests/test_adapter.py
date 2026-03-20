@@ -20,20 +20,20 @@ from adapter_synthetic import (
 
 
 class MockFrameSink(FrameSink):
-    def __init__(self):
-        self.frames = []
+    def __init__(self) -> None:
+        self.frames: List[tuple[bytes, int, int]] = []
 
     def on_frame(self, data: bytes, pts_ns: int, duration_ns: int) -> None:
         self.frames.append((data, pts_ns, duration_ns))
 
 
 @pytest.fixture
-def adapter():
+def adapter() -> SyntheticAdapter:
     return SyntheticAdapter()
 
 
 @pytest.mark.asyncio
-async def test_adapter_capabilities(adapter):
+async def test_adapter_capabilities(adapter: SyntheticAdapter) -> None:
     caps = adapter.capabilities()
     assert caps.supports_synthetic_test_source is True
     assert 48000 in caps.supports_sample_rates
@@ -41,7 +41,7 @@ async def test_adapter_capabilities(adapter):
 
 
 @pytest.mark.asyncio
-async def test_adapter_list_sources(adapter):
+async def test_adapter_list_sources(adapter: SyntheticAdapter) -> None:
     sources = adapter.list_sources()
     assert len(sources) == 1
     source = sources[0]
@@ -52,7 +52,7 @@ async def test_adapter_list_sources(adapter):
 
 
 @pytest.mark.asyncio
-async def test_adapter_prepare_and_start(adapter):
+async def test_adapter_prepare_and_start(adapter: SyntheticAdapter) -> None:
     sources = adapter.list_sources()
     source_id = sources[0].source_id
 
@@ -77,7 +77,7 @@ async def test_adapter_prepare_and_start(adapter):
 
 
 @pytest.mark.asyncio
-async def test_silence_mode(adapter):
+async def test_silence_mode(adapter: SyntheticAdapter) -> None:
     adapter.set_mode(SyntheticMode.SILENCE)
 
     frame = adapter._generate_frame()
@@ -86,7 +86,7 @@ async def test_silence_mode(adapter):
 
 
 @pytest.mark.asyncio
-async def test_sine_wave_mode(adapter):
+async def test_sine_wave_mode(adapter: SyntheticAdapter) -> None:
     adapter.set_mode(SyntheticMode.SINE_WAVE)
 
     frame1 = adapter._generate_frame()
@@ -100,7 +100,7 @@ async def test_sine_wave_mode(adapter):
 
 
 @pytest.mark.asyncio
-async def test_pink_noise_mode(adapter):
+async def test_pink_noise_mode(adapter: SyntheticAdapter) -> None:
     adapter.set_mode(SyntheticMode.PINK_NOISE)
 
     frame = adapter._generate_frame()
