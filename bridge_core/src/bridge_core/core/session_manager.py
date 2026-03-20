@@ -1,5 +1,6 @@
 """Session lifecycle management."""
 
+import asyncio
 import time
 from enum import Enum
 from typing import Any
@@ -117,29 +118,68 @@ class SessionManager:
         """List all sessions."""
         return list(self._sessions.values())
 
-    def start(self, session_id: str) -> None:
-        """Start a session."""
+    async def start_session(self, session_id: str) -> bool:
+        """Start a session and its pipeline."""
         session = self.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            return False
 
-        session.transition_to(SessionState.STARTING)
+        try:
+            session.transition_to(SessionState.STARTING)
+        except ValueError:
+            return False
+
         self._event_bus.emit(EventType.SESSION_STARTING, session_id=session_id)
+
+        if session.pipeline is None:
+            session.pipeline = StreamPipeline(session.session_id, session.stream_profile)
+            if self._stream_publisher:
+                self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
+                session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
+
+        await session.pipeline.start()
 
         session.transition_to(SessionState.PLAYING)
         self._event_bus.emit(EventType.SESSION_STARTED, session_id=session_id)
+        return True
 
-    def stop(self, session_id: str) -> None:
-        """Stop a session."""
+    async def stop_session(self, session_id: str) -> bool:
+        """Stop a session and its pipeline."""
         session = self.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            return False
 
-        session.transition_to(SessionState.STOPPING)
+        try:
+            session.transition_to(SessionState.STOPPING)
+        except ValueError:
+            return False
+
         self._event_bus.emit(EventType.SESSION_STOPPING, session_id=session_id)
+
+        if session.pipeline:
+            await session.pipeline.stop()
+            if self._stream_publisher:
+                self._stream_publisher.unregister_pipeline(session.session_id)
 
         session.transition_to(SessionState.STOPPED)
         self._event_bus.emit(EventType.SESSION_STOPPED, session_id=session_id)
+        return True
+
+    def start(self, session_id: str) -> None:
+        """Start a session (synchronous shim)."""
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(self.start_session(session_id))
+        else:
+            loop.run_until_complete(self.start_session(session_id))
+
+    def stop(self, session_id: str) -> None:
+        """Stop a session (synchronous shim)."""
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(self.stop_session(session_id))
+        else:
+            loop.run_until_complete(self.stop_session(session_id))
 
     def recover(self, session_id: str) -> None:
         """Attempt to recover a failed or degraded session."""
@@ -160,48 +200,15 @@ class SessionManager:
             return
 
         if session.state not in [SessionState.STOPPED, SessionState.FAILED]:
-            try:
-                self.stop(session_id)
-            except Exception:
-                session.state = SessionState.FAILED
+            self.stop(session_id)
 
-        self.delete(session_id)
+        self._sessions.pop(session_id, None)
 
     def update_state(self, session_id: str, state: SessionState) -> None:
         """Update session state directly (bypass validation, use with caution)."""
         session = self._sessions.get(session_id)
         if session:
             session.state = state
-
-    async def start_session(self, session_id: str) -> bool:
-        """Start a session and its pipeline."""
-        session = self._sessions.get(session_id)
-        if not session:
-            return False
-
-        if session.pipeline is None:
-            session.pipeline = StreamPipeline(session.session_id, session.stream_profile)
-            if self._stream_publisher:
-                self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
-                session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
-
-        await session.pipeline.start()
-        session.state = SessionState.PLAYING
-        return True
-
-    async def stop_session(self, session_id: str) -> bool:
-        """Stop a session and its pipeline."""
-        session = self._sessions.get(session_id)
-        if not session:
-            return False
-
-        if session.pipeline:
-            await session.pipeline.stop()
-            if self._stream_publisher:
-                self._stream_publisher.unregister_pipeline(session.session_id)
-
-        session.state = SessionState.STOPPED
-        return True
 
     async def delete(self, session_id: str) -> bool:
         """Delete a session."""
