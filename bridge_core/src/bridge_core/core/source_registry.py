@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from ingress_sdk.types import AdapterCapabilities, SourceDescriptor
+from ingress_sdk.types import AdapterCapabilities, SourceDescriptor, HealthResult
 
 
 class AdapterInfo:
@@ -37,6 +37,7 @@ class SourceRegistry:
     def __init__(self) -> None:
         self._adapters: dict[str, AdapterInfo] = {}
         self._sources: dict[str, SourceDescriptor] = {}
+        self._source_health: dict[str, HealthResult] = {}
 
     def register_adapter(
         self,
@@ -52,12 +53,26 @@ class SourceRegistry:
         self._adapters[adapter_id] = adapter
         self._sources.update(adapter.sources)
 
+    def update_source_health(self, source_id: str, health: HealthResult) -> None:
+        """Update health status for a source."""
+        if source_id in self._sources:
+            self._source_health[source_id] = health
+
+    def get_source_health(self, source_id: str) -> HealthResult | None:
+        """Get health status for a source."""
+        return self._source_health.get(source_id)
+
+    def adapter_connected(self, adapter_id: str) -> bool:
+        """Check if an adapter is currently connected/registered."""
+        return adapter_id in self._adapters
+
     def unregister_adapter(self, adapter_id: str) -> None:
         """Unregister an adapter and its sources."""
         adapter = self._adapters.pop(adapter_id, None)
         if adapter:
             for source_id in adapter.sources:
                 self._sources.pop(source_id, None)
+                self._source_health.pop(source_id, None)
 
     def get_adapter(self, adapter_id: str) -> AdapterInfo | None:
         """Get adapter info."""
