@@ -7,11 +7,12 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from ingress_sdk.protocol import AudioFrame
+
 from bridge_core.core.event_bus import EventBus, EventType
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
 from bridge_core.stream.pipeline import StreamPipeline
-from ingress_sdk.protocol import AudioFrame
 
 logger = logging.getLogger(__name__)
 
