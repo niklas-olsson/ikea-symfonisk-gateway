@@ -18,6 +18,28 @@ def session_manager(event_bus: EventBus) -> SessionManager:
 
 
 @pytest.mark.asyncio
+async def test_session_recovery(session_manager: SessionManager) -> None:
+    """Test session recovery from FAILED and DEGRADED states."""
+    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session.transition_to(SessionState.PREPARING)
+    session.transition_to(SessionState.READY)
+    await session_manager.start_session(session.session_id)
+
+    # 1. Recover from FAILED
+    session.transition_to(SessionState.FAILED)
+    assert session.state == SessionState.FAILED
+    await session_manager.recover(session.session_id)
+    assert session.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
+
+    # 2. Recover from DEGRADED
+    session.transition_to(SessionState.HEALING)
+    session.transition_to(SessionState.DEGRADED)
+    assert session.state == SessionState.DEGRADED
+    await session_manager.recover(session.session_id)
+    assert session.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
+
+
+@pytest.mark.asyncio
 async def test_session_lifecycle(session_manager: SessionManager, event_bus: EventBus) -> None:
     """Test full successful session lifecycle."""
     # 1. Create
@@ -55,29 +77,6 @@ async def test_invalid_transitions(session_manager: SessionManager) -> None:
     # Cannot jump from CREATED to STOPPED
     with pytest.raises(ValueError, match="Invalid transition"):
         session.transition_to(SessionState.STOPPED)
-
-
-@pytest.mark.asyncio
-async def test_session_recovery(session_manager: SessionManager) -> None:
-    """Test session recovery."""
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
-    await session_manager.start_session(session.session_id)
-
-    # Simulate failure
-    session.transition_to(SessionState.FAILED)
-    assert session.state == SessionState.FAILED
-
-    # Recover
-    session_manager.recover(session.session_id)
-    assert session.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
-
-    # Test DEGRADED -> HEALING -> PLAYING
-    session.transition_to(SessionState.HEALING)
-    session.transition_to(SessionState.DEGRADED)
-    assert session.state == SessionState.DEGRADED
-
-    session_manager.recover(session.session_id)
-    assert session.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
 
 
 @pytest.mark.asyncio

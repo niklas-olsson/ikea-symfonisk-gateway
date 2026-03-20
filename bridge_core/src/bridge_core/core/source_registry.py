@@ -2,7 +2,13 @@
 
 from typing import Any
 
-from ingress_sdk.types import AdapterCapabilities, HealthResult, SourceDescriptor
+from ingress_sdk.base import IngressAdapter
+from ingress_sdk.types import (
+    AdapterCapabilities,
+    HealthResult,
+    PrepareResult,
+    SourceDescriptor,
+)
 
 from bridge_core.core.event_bus import EventBus, EventType
 
@@ -16,11 +22,13 @@ class AdapterInfo:
         platform: str,
         version: str,
         capabilities: AdapterCapabilities,
+        adapter: IngressAdapter | None = None,
     ):
         self.adapter_id = adapter_id
         self.platform = platform
         self.version = version
         self.capabilities = capabilities
+        self.adapter = adapter
         self.sources: dict[str, SourceDescriptor] = {}
 
     def to_dict(self) -> dict[str, Any]:
@@ -50,9 +58,10 @@ class SourceRegistry:
         version: str,
         capabilities: AdapterCapabilities,
         sources: list[SourceDescriptor],
+        adapter_instance: IngressAdapter | None = None,
     ) -> None:
         """Register a new adapter and its sources."""
-        adapter = AdapterInfo(adapter_id, platform, version, capabilities)
+        adapter = AdapterInfo(adapter_id, platform, version, capabilities, adapter_instance)
         adapter.sources = {s.source_id: s for s in sources}
         self._adapters[adapter_id] = adapter
         self._sources.update(adapter.sources)
@@ -137,3 +146,23 @@ class SourceRegistry:
     def list_sources(self) -> list[SourceDescriptor]:
         """List all available sources."""
         return list(self._sources.values())
+
+    def prepare_source(self, source_id: str) -> PrepareResult:
+        """Prepare a source for capture."""
+        source = self.get_source(source_id)
+        if not source:
+            return PrepareResult(success=False, source_id=source_id, error="Source not found")
+
+        # Find which adapter owns this source
+        for adapter_info in self._adapters.values():
+            if source_id in adapter_info.sources:
+                if adapter_info.adapter:
+                    return adapter_info.adapter.prepare(source_id)
+                else:
+                    return PrepareResult(
+                        success=False,
+                        source_id=source_id,
+                        error=f"Adapter {adapter_info.adapter_id} does not support direct prepare",
+                    )
+
+        return PrepareResult(success=False, source_id=source_id, error="Adapter not found for source")

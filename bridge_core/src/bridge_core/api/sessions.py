@@ -75,3 +75,16 @@ async def stop_session(request: Request, session_id: str) -> dict[str, Any]:
     if not success:
         raise HTTPException(status_code=400, detail="Failed to stop session")
     return {"success": True}
+
+
+@router.post("/{session_id}/recover")
+async def recover_session(request: Request, session_id: str) -> dict[str, Any]:
+    """Attempt to recover a failed or degraded session."""
+    manager: SessionManager = request.app.state.session_manager
+    try:
+        await manager.recover(session_id)
+        return {"success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

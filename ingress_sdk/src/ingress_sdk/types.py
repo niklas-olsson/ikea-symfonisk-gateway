@@ -44,6 +44,7 @@ class AdapterCapabilities(BaseModel):
 class PrepareResult(BaseModel):
     success: bool
     message: str = ""
+    error: str | None = None
     source_id: str
 
 

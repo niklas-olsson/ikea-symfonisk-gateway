@@ -1,5 +1,7 @@
 """Target registry - tracks renderer adapters and available playback targets."""
 
+from typing import Any
+
 from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
 from bridge_core.core.event_bus import EventBus, EventType
 
@@ -74,3 +76,17 @@ class TargetRegistry:
         if not adapter_id:
             return None
         return self._adapters.get(adapter_id)
+
+    async def heal_target(self, target_id: str) -> dict[str, Any]:
+        """Attempt to heal a target's group/topology."""
+        adapter = self.get_adapter_for_target(target_id)
+        if not adapter:
+            return {"success": False, "error": f"No adapter found for target {target_id}"}
+        return await adapter.heal(target_id)
+
+    async def set_volume(self, target_id: str, volume: float) -> dict[str, Any]:
+        """Set volume on a target."""
+        adapter = self.get_adapter_for_target(target_id)
+        if not adapter:
+            return {"success": False, "error": f"No adapter found for target {target_id}"}
+        return await adapter.set_volume(target_id, volume)

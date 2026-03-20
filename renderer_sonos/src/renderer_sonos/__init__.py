@@ -161,15 +161,27 @@ class SonosRendererAdapter(RendererAdapter):
         }
 
     async def prepare_target(self, target_id: str) -> dict[str, Any]:
-        # For Sonos, preparation might involve clearing queue or ensuring it's in a good state
-        # For now, we just ensure it exists
-        if target_id not in self._players:
+        """Prepare a Sonos target for playback."""
+        # Ensure we have discovered the target
+        player = self._players.get(target_id)
+        if not player:
             await self.list_targets()
+            player = self._players.get(target_id)
 
-        if target_id not in self._players:
+        if not player:
             return {"success": False, "error": f"Target {target_id} not found"}
 
-        return {"success": True, "target_id": target_id}
+        try:
+            # Verify the player is reachable and in a good state by fetching transport info
+            def _check_status(p: soco.SoCo) -> None:
+                # This will raise an exception if the player is unreachable
+                _ = p.get_current_transport_info()
+
+            await self._run_with_retry(_check_status, player)
+            return {"success": True, "target_id": target_id}
+        except Exception as e:
+            logger.error("Failed to prepare Sonos target %s: %s", target_id, e)
+            return {"success": False, "error": f"Target {target_id} unreachable: {e}"}
 
     async def play_stream(
         self,
