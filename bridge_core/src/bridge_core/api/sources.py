@@ -3,11 +3,11 @@
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from ingress_sdk.types import HealthResult
 from pydantic import BaseModel
 
 from bridge_core.api.models import ErrorResponse
 from bridge_core.core import SourceRegistry
-from ingress_sdk.types import HealthResult
 
 router = APIRouter(prefix="/v1/sources", tags=["sources"])
 

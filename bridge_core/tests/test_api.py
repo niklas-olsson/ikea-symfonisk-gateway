@@ -1,11 +1,11 @@
 """API integration tests."""
 
-import asyncio
-import pytest
-from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 from bridge_core.main import app
+from fastapi.testclient import TestClient
+
 
 @pytest.fixture
 def client():
