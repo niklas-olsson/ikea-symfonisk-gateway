@@ -2,12 +2,13 @@
 
 from typing import Any
 
-from ingress_sdk.base import IngressAdapter
+from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
     HealthResult,
     PrepareResult,
     SourceDescriptor,
+    StartResult,
 )
 
 from bridge_core.core.event_bus import EventBus, EventType
@@ -147,22 +148,46 @@ class SourceRegistry:
         """List all available sources."""
         return list(self._sources.values())
 
+    def _get_adapter_info_for_source(self, source_id: str) -> AdapterInfo | None:
+        """Find which adapter owns this source."""
+        for adapter_info in self._adapters.values():
+            if source_id in adapter_info.sources:
+                return adapter_info
+        return None
+
     def prepare_source(self, source_id: str) -> PrepareResult:
         """Prepare a source for capture."""
         source = self.get_source(source_id)
         if not source:
             return PrepareResult(success=False, source_id=source_id, error="Source not found")
 
-        # Find which adapter owns this source
-        for adapter_info in self._adapters.values():
-            if source_id in adapter_info.sources:
-                if adapter_info.adapter:
-                    return adapter_info.adapter.prepare(source_id)
-                else:
-                    return PrepareResult(
-                        success=False,
-                        source_id=source_id,
-                        error=f"Adapter {adapter_info.adapter_id} does not support direct prepare",
-                    )
+        adapter_info = self._get_adapter_info_for_source(source_id)
+        if not adapter_info:
+            return PrepareResult(success=False, source_id=source_id, error="Adapter not found for source")
 
-        return PrepareResult(success=False, source_id=source_id, error="Adapter not found for source")
+        if adapter_info.adapter:
+            return adapter_info.adapter.prepare(source_id)
+        else:
+            return PrepareResult(
+                success=False,
+                source_id=source_id,
+                error=f"Adapter {adapter_info.adapter_id} does not support direct prepare",
+            )
+
+    def start_source(self, source_id: str, frame_sink: FrameSink) -> StartResult:
+        """Start capturing from a source."""
+        source = self.get_source(source_id)
+        if not source:
+            return StartResult(success=False, message="Source not found")
+
+        adapter_info = self._get_adapter_info_for_source(source_id)
+        if not adapter_info or not adapter_info.adapter:
+            return StartResult(success=False, message="Adapter not found or not connected")
+
+        return adapter_info.adapter.start(source_id, frame_sink)
+
+    def stop_source(self, source_id: str, adapter_session_id: str) -> None:
+        """Stop capturing from a source."""
+        adapter_info = self._get_adapter_info_for_source(source_id)
+        if adapter_info and adapter_info.adapter:
+            adapter_info.adapter.stop(adapter_session_id)

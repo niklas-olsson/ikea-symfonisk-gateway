@@ -90,3 +90,29 @@ class TargetRegistry:
         if not adapter:
             return {"success": False, "error": f"No adapter found for target {target_id}"}
         return await adapter.set_volume(target_id, volume)
+
+    async def prepare_target(self, target_id: str) -> dict[str, Any]:
+        """Prepare a target for playback."""
+        adapter = self.get_adapter_for_target(target_id)
+        if not adapter:
+            return {"success": False, "error": f"No adapter found for target {target_id}"}
+        return await adapter.prepare_target(target_id)
+
+    async def play_stream(
+        self,
+        target_id: str,
+        stream_url: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Start playback of a stream on a target."""
+        adapter = self.get_adapter_for_target(target_id)
+        if not adapter:
+            return {"success": False, "error": f"No adapter found for target {target_id}"}
+        return await adapter.play_stream(target_id, stream_url, metadata)
+
+    async def stop_target(self, target_id: str) -> dict[str, Any]:
+        """Stop playback on a target."""
+        adapter = self.get_adapter_for_target(target_id)
+        if not adapter:
+            return {"success": False, "error": f"No adapter found for target {target_id}"}
+        return await adapter.stop(target_id)
