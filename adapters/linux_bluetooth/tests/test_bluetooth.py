@@ -1,7 +1,6 @@
 """Unit tests for the Linux Bluetooth ingress adapter."""
 
 import asyncio
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
