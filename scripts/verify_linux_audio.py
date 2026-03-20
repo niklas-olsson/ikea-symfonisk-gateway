@@ -1,6 +1,6 @@
 import asyncio
 import sys
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, patch
 
 # Add relevant paths to sys.path
 sys.path.append("adapters/linux_audio/src")
@@ -9,6 +9,7 @@ sys.path.append("ingress_sdk/src")
 
 from adapter_linux_audio import LinuxAudioAdapter
 from ingress_sdk.base import FrameSink
+
 
 class MockFrameSink(FrameSink):
     def __init__(self):
@@ -31,7 +32,7 @@ async def verify_capture():
     ]
 
     with patch("shutil.which", return_value="parec"):
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             adapter = LinuxAudioAdapter()
             sink = MockFrameSink()
 
@@ -74,7 +75,7 @@ async def verify_restart_behavior():
             adapter = LinuxAudioAdapter()
             sink = MockFrameSink()
 
-            start_res = adapter.start("default", sink)
+            adapter.start("default", sink)
 
             # Wait for crash
             await asyncio.sleep(0.5)

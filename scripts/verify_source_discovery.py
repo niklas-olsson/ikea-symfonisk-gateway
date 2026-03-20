@@ -1,7 +1,6 @@
-import sys
-import os
 import asyncio
-from unittest.mock import MagicMock, patch
+import sys
+from unittest.mock import patch
 
 # Add relevant paths to sys.path
 sys.path.append("adapters/linux_audio/src")
@@ -10,6 +9,7 @@ sys.path.append("ingress_sdk/src")
 
 from adapter_linux_audio import LinuxAudioAdapter
 from bridge_core.core import EventBus, SourceRegistry
+
 
 async def main():
     event_bus = EventBus()
