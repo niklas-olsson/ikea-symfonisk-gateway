@@ -1,0 +1,42 @@
+[tool.uv.workspace]
+members = [
+    "bridge_core",
+    "ingress_sdk",
+    "adapters/synthetic",
+    "adapters/linux_audio",
+    "adapters/linux_bluetooth",
+    "renderer_sonos",
+    "ui_web",
+    "integration_homeassistant",
+    "shared",
+]
+
+[tool.uv.sources]
+ingress-sdk = { workspace = true }
+adapter-synthetic = { workspace = true }
+adapter-linux-audio = { workspace = true }
+adapter-linux-bluetooth = { workspace = true }
+renderer-sonos = { workspace = true }
+shared = { workspace = true }
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501", "UP042"]
+
+[tool.pytest.ini_options]
+testpaths = ["**/tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "ruff>=0.15.7",
+]

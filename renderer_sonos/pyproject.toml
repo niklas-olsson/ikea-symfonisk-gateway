@@ -1,0 +1,24 @@
+[project]
+name = "renderer-sonos"
+version = "0.1.0"
+description = "Sonos renderer adapter for the IKEA SYMFONISK bridge"
+requires-python = ">=3.12"
+dependencies = [
+    "soco>=0.30.0",
+    "pydantic>=2.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.9.0",
+    "mypy>=1.15.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/renderer_sonos"]
