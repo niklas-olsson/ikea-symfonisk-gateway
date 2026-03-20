@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from adapter_linux_audio import LinuxAudioAdapter
 from adapter_synthetic import SyntheticAdapter
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,16 +55,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         adapter_instance=synthetic_adapter,
     )
 
-    # In a real system, we might also register LinuxAudioAdapter here if on Linux
-    # from adapter_linux_audio import LinuxAudioAdapter
-    # linux_audio_adapter = LinuxAudioAdapter()
-    # source_registry.register_adapter(
-    #     adapter_id=linux_audio_adapter.id(),
-    #     platform=linux_audio_adapter.platform(),
-    #     version="0.1.0",
-    #     capabilities=linux_audio_adapter.capabilities(),
-    #     sources=linux_audio_adapter.list_sources(),
-    # )
+    # Register Linux Audio adapter
+    linux_audio_adapter = LinuxAudioAdapter()
+    source_registry.register_adapter(
+        adapter_id=linux_audio_adapter.id(),
+        platform=linux_audio_adapter.platform(),
+        version="0.1.0",
+        capabilities=linux_audio_adapter.capabilities(),
+        sources=linux_audio_adapter.list_sources(),
+        adapter_instance=linux_audio_adapter,
+    )
 
     # Start stream publisher in the background
     publisher_task = asyncio.create_task(publisher.start())
