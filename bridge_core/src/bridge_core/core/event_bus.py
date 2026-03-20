@@ -27,6 +27,9 @@ class EventType(str, Enum):
     HEAL_FAILED = "heal.failed"
     STREAM_UNDERRUN = "stream.underrun"
     STREAM_OVERRUN = "stream.overrun"
+    ADAPTER_REGISTERED = "adapter.registered"
+    ADAPTER_UNREGISTERED = "adapter.unregistered"
+    CONFIG_CHANGED = "config.changed"
 
 
 class Severity(str, Enum):
@@ -46,15 +49,18 @@ class BridgeEvent:
         payload: dict[str, Any] | None = None,
         severity: Severity = Severity.INFO,
         session_id: str | None = None,
+        event_id: str | None = None,
+        timestamp: str | None = None,
     ):
-        self.event_id = f"evt_{uuid4().hex[:12]}"
-        self.timestamp = datetime.now(UTC).isoformat()
+        self.event_id = event_id or f"evt_{uuid4().hex[:12]}"
+        self.timestamp = timestamp or datetime.now(UTC).isoformat()
         self.type = event_type.value
         self.severity = severity.value
         self.session_id = session_id
         self.payload = payload or {}
 
     def to_dict(self) -> dict[str, Any]:
+        """Convert the event to a dictionary."""
         return {
             "event_id": self.event_id,
             "timestamp": self.timestamp,
@@ -72,12 +78,11 @@ class EventBus:
     """Publish-subscribe event bus for the bridge."""
 
     def __init__(self) -> None:
-        self._handlers: dict[EventType, list[EventHandler]] = {}
+        self._handlers: dict[EventType | None, list[EventHandler]] = {}
         self._queues: dict[asyncio.Queue[BridgeEvent], EventType | None] = {}
 
     def subscribe(
         self,
-        handler: EventHandler,
         event_type: EventType | None = None,
     ) -> asyncio.Queue[BridgeEvent]:
         """Subscribe to events. Returns a queue for consuming events."""
@@ -89,11 +94,39 @@ class EventBus:
         """Unsubscribe a queue from events."""
         self._queues.pop(queue, None)
 
+    def subscribe_handler(
+        self,
+        handler: EventHandler,
+        event_type: EventType | None = None,
+    ) -> None:
+        """Subscribe a callback handler to events."""
+        if event_type not in self._handlers:
+            self._handlers[event_type] = []
+        if handler not in self._handlers[event_type]:
+            self._handlers[event_type].append(handler)
+
+    def unsubscribe_handler(
+        self,
+        handler: EventHandler,
+        event_type: EventType | None = None,
+    ) -> None:
+        """Unsubscribe a callback handler from events."""
+        if event_type in self._handlers:
+            if handler in self._handlers[event_type]:
+                self._handlers[event_type].remove(handler)
+
     async def publish(self, event: BridgeEvent) -> None:
         """Publish an event to all subscribers."""
+        # Deliver to queues
         for queue, event_type in self._queues.items():
             if event_type is None or event_type.value == event.type:
                 await queue.put(event)
+
+        # Deliver to handlers
+        for et in [None, EventType(event.type) if event.type in [e.value for e in EventType] else None]:
+            if et in self._handlers:
+                for handler in self._handlers[et]:
+                    asyncio.create_task(handler(event))
 
     def emit(
         self,
