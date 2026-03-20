@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from bridge_core.core.event_bus import EventBus, EventType
+from bridge_core.stream.pipeline import StreamPipeline
 
 
 class SessionState(str, Enum):
@@ -41,6 +42,7 @@ class Session:
         self.created_at = time.time()
         self.started_at: float | None = None
         self.stopped_at: float | None = None
+        self.pipeline: StreamPipeline | None = None
 
     def transition_to(self, new_state: SessionState) -> None:
         """Transitions the session to a new state if valid."""
@@ -84,9 +86,10 @@ class Session:
 class SessionManager:
     """Manages session lifecycle."""
 
-    def __init__(self, event_bus: EventBus) -> None:
+    def __init__(self, event_bus: EventBus, stream_publisher: Any | None = None) -> None:
         self._sessions: dict[str, Session] = {}
         self._event_bus = event_bus
+        self._stream_publisher = stream_publisher
 
     def create(
         self,
@@ -123,8 +126,6 @@ class SessionManager:
         session.transition_to(SessionState.STARTING)
         self._event_bus.emit(EventType.SESSION_STARTING, session_id=session_id)
 
-        # In a real implementation, this would involve setting up the pipeline
-        # For now we simulate success
         session.transition_to(SessionState.PLAYING)
         self._event_bus.emit(EventType.SESSION_STARTED, session_id=session_id)
 
@@ -149,7 +150,6 @@ class SessionManager:
         session.transition_to(SessionState.HEALING)
         self._event_bus.emit(EventType.HEAL_ATTEMPTED, session_id=session_id)
 
-        # Simulating recovery success
         session.transition_to(SessionState.PLAYING)
         self._event_bus.emit(EventType.HEAL_SUCCEEDED, session_id=session_id)
 
@@ -163,7 +163,6 @@ class SessionManager:
             try:
                 self.stop(session_id)
             except Exception:
-                # Force to failed if stop fails during termination
                 session.state = SessionState.FAILED
 
         self.delete(session_id)
@@ -174,6 +173,37 @@ class SessionManager:
         if session:
             session.state = state
 
-    def delete(self, session_id: str) -> bool:
+    async def start_session(self, session_id: str) -> bool:
+        """Start a session and its pipeline."""
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+
+        if session.pipeline is None:
+            session.pipeline = StreamPipeline(session.session_id, session.stream_profile)
+            if self._stream_publisher:
+                self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
+                session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
+
+        await session.pipeline.start()
+        session.state = SessionState.PLAYING
+        return True
+
+    async def stop_session(self, session_id: str) -> bool:
+        """Stop a session and its pipeline."""
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+
+        if session.pipeline:
+            await session.pipeline.stop()
+            if self._stream_publisher:
+                self._stream_publisher.unregister_pipeline(session.session_id)
+
+        session.state = SessionState.STOPPED
+        return True
+
+    async def delete(self, session_id: str) -> bool:
         """Delete a session."""
+        await self.stop_session(session_id)
         return self._sessions.pop(session_id, None) is not None
