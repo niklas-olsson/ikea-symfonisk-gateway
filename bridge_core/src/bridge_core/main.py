@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     source_registry = SourceRegistry(event_bus)
     target_registry = TargetRegistry(event_bus)
     publisher = StreamPublisher(port=8080)
-    session_manager = SessionManager(event_bus, publisher, target_registry)
+    session_manager = SessionManager(event_bus, source_registry, target_registry, publisher)
 
     # Store in app state
     app.state.event_bus = event_bus
