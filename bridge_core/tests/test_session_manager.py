@@ -77,7 +77,7 @@ async def test_session_recovery(session_manager: SessionManager) -> None:
     assert session.state == SessionState.DEGRADED
 
     session_manager.recover(session.session_id)
-    assert session.state == SessionState.PLAYING # type: ignore[comparison-overlap]
+    assert session.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
 
 
 @pytest.mark.asyncio

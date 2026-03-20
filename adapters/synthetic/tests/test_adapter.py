@@ -32,6 +32,28 @@ def test_list_sources() -> None:
     assert "Synthetic" in sources[0].display_name
 
 
+def test_prepare_and_health() -> None:
+    adapter = SyntheticAdapter()
+    sources = adapter.list_sources()
+    source_id = sources[0].source_id
+
+    # Initial health
+    health = adapter.probe_health(source_id)
+    assert health.healthy is True
+    assert health.source_state == "idle"
+    assert health.signal_present is False
+
+    # Prepare
+    prepare_result = adapter.prepare(source_id)
+    assert prepare_result.success is True
+    assert prepare_result.source_id == source_id
+
+    # Health after prepare
+    health = adapter.probe_health(source_id)
+    assert health.healthy is True
+    assert health.source_state == "active"
+
+
 @pytest.mark.asyncio
 async def test_sine_wave_generation() -> None:
     adapter = SyntheticAdapter()
@@ -39,11 +61,25 @@ async def test_sine_wave_generation() -> None:
     adapter.set_mode(SyntheticMode.SINE_WAVE)
 
     sources = adapter.list_sources()
-    result = adapter.start(sources[0].source_id, sink)
+    source_id = sources[0].source_id
+
+    adapter.prepare(source_id)
+    result = adapter.start(source_id, sink)
+
+    # Check health while running
+    health = adapter.probe_health(source_id)
+    assert health.healthy is True
+    assert health.source_state == "active"
+    assert health.signal_present is True
 
     # Wait for a few frames
     await asyncio.sleep(0.1)
     adapter.stop(result.session_id)
+
+    # Health after stop
+    health = adapter.probe_health(source_id)
+    assert health.source_state == "idle"
+    assert health.signal_present is False
 
     assert len(sink.frames) >= 5
     for frame in sink.frames:
@@ -64,7 +100,9 @@ async def test_silence_generation() -> None:
     adapter.set_mode(SyntheticMode.SILENCE)
 
     sources = adapter.list_sources()
-    result = adapter.start(sources[0].source_id, sink)
+    source_id = sources[0].source_id
+    adapter.prepare(source_id)
+    result = adapter.start(source_id, sink)
 
     await asyncio.sleep(0.1)
     adapter.stop(result.session_id)
@@ -82,7 +120,9 @@ async def test_pink_noise_generation() -> None:
     adapter.set_mode(SyntheticMode.PINK_NOISE)
 
     sources = adapter.list_sources()
-    result = adapter.start(sources[0].source_id, sink)
+    source_id = sources[0].source_id
+    adapter.prepare(source_id)
+    result = adapter.start(source_id, sink)
 
     await asyncio.sleep(0.1)
     adapter.stop(result.session_id)
