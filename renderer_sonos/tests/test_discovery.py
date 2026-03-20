@@ -29,6 +29,7 @@ async def test_list_targets_single_speaker() -> None:
         assert targets[0].target_id == "RINCON_1"
         assert targets[0].coordinator_id == "RINCON_1"
         assert targets[0].members == ["RINCON_1"]
+        assert targets[0].target_type == "speaker"
 
 
 @pytest.mark.asyncio
@@ -92,11 +93,12 @@ async def test_list_targets_stereo_pair() -> None:
         assert targets[0].target_id == "RINCON_LEFT"  # coordinator ID
         assert set(targets[0].members) == {"RINCON_LEFT", "RINCON_RIGHT"}
         assert targets[0].display_name == "Bedroom"
+        assert targets[0].target_type == "stereo_pair"
 
 
 @pytest.mark.asyncio
 async def test_list_targets_grouped_speakers() -> None:
-    # Two speakers grouped together
+    # Three speakers grouped together
     mock_soco1 = MagicMock()
     mock_soco1.player_name = "Living Room"
     mock_soco1.uid = "RINCON_1"
@@ -105,24 +107,29 @@ async def test_list_targets_grouped_speakers() -> None:
     mock_soco2.player_name = "Kitchen"
     mock_soco2.uid = "RINCON_2"
 
+    mock_soco3 = MagicMock()
+    mock_soco3.player_name = "Hallway"
+    mock_soco3.uid = "RINCON_3"
+
     mock_group = MagicMock()
     mock_group.coordinator = mock_soco1
-    mock_group.members = [mock_soco1, mock_soco2]
+    mock_group.members = [mock_soco1, mock_soco2, mock_soco3]
 
     mock_soco1.group = mock_group
     mock_soco2.group = mock_group
+    mock_soco3.group = mock_group
 
     with patch("soco.discover") as mock_discover:
-        mock_discover.return_value = {mock_soco1, mock_soco2}
+        mock_discover.return_value = {mock_soco1, mock_soco2, mock_soco3}
 
         adapter = SonosRendererAdapter()
         targets = await adapter.list_targets()
 
         # Groups are also logical targets.
-        # Usually, if they are grouped, they act as one.
         assert len(targets) == 1
         assert targets[0].target_id == "RINCON_1"
-        assert set(targets[0].members) == {"RINCON_1", "RINCON_2"}
+        assert set(targets[0].members) == {"RINCON_1", "RINCON_2", "RINCON_3"}
+        assert targets[0].target_type == "group"
 
 
 @pytest.mark.asyncio

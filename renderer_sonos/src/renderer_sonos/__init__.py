@@ -62,6 +62,8 @@ class SonosRendererAdapter(RendererAdapter):
         self._discovered: bool = False
         self._targets: dict[str, SonosTargetDescriptor] = {}
         self._players: dict[str, soco.SoCo] = {}
+        # Track last played stream per target for healing
+        self._last_played: dict[str, dict[str, Any]] = {}
 
     def id(self) -> str:
         return "sonos-renderer-v1"
@@ -128,6 +130,8 @@ class SonosRendererAdapter(RendererAdapter):
                 members = [m.uid for m in group.members]
                 target_type = "speaker"
                 if len(members) == 2:
+                    # In soco, a stereo pair is often represented as a single visible player,
+                    # but it might have 2 members if the hidden member is discovered.
                     target_type = "stereo_pair"
                 elif len(members) > 2:
                     target_type = "group"
@@ -162,26 +166,28 @@ class SonosRendererAdapter(RendererAdapter):
 
     async def prepare_target(self, target_id: str) -> dict[str, Any]:
         """Prepare a Sonos target for playback."""
-        # Ensure we have discovered the target
+        # Always refresh discovery to ensure IP addresses are up-to-date
+        await self.list_targets()
         player = self._players.get(target_id)
-        if not player:
-            await self.list_targets()
-            player = self._players.get(target_id)
 
         if not player:
-            return {"success": False, "error": f"Target {target_id} not found"}
+            return {"success": False, "error": f"Target {target_id} not found after discovery"}
 
         try:
             # Verify the player is reachable and in a good state by fetching transport info
-            def _check_status(p: soco.SoCo) -> None:
+            def _check_status(p: soco.SoCo) -> dict[str, str]:
                 # This will raise an exception if the player is unreachable
-                _ = p.get_current_transport_info()
+                info: dict[str, str] = p.get_current_transport_info()
+                # Check if it's still a coordinator
+                if not p.is_coordinator:
+                    raise RuntimeError("Target is no longer a coordinator")
+                return info
 
             await self._run_with_retry(_check_status, player)
             return {"success": True, "target_id": target_id}
         except Exception as e:
             logger.error("Failed to prepare Sonos target %s: %s", target_id, e)
-            return {"success": False, "error": f"Target {target_id} unreachable: {e}"}
+            return {"success": False, "error": f"Target {target_id} preparation failed: {e}"}
 
     async def play_stream(
         self,
@@ -191,11 +197,37 @@ class SonosRendererAdapter(RendererAdapter):
     ) -> dict[str, Any]:
         """Start playback of a stream on a target."""
         player = self._players.get(target_id)
-        if not player:
+        target = self._targets.get(target_id)
+
+        if not player or not target:
             return {"success": False, "error": f"Target {target_id} not found"}
 
         try:
-            await self._run_with_retry(player.play_uri, stream_url)
+            # 1. Enforce grouping before playback
+            for member_id in target.members:
+                if member_id == target.coordinator_id:
+                    continue
+                member = self._players.get(member_id)
+                if not member:
+                    continue
+
+                def _join_if_needed(m: soco.SoCo, c: soco.SoCo) -> None:
+                    if not m.group or not m.group.coordinator or m.group.coordinator.uid != c.uid:
+                        m.join(c)
+
+                await self._run_with_retry(_join_if_needed, member, player)
+
+            # 2. Store playback state for healing
+            self._last_played[target_id] = {
+                "stream_url": stream_url,
+                "metadata": metadata or {},
+                "timestamp": asyncio.get_event_loop().time(),
+            }
+
+            # 3. Start playback with metadata if provided
+            title = (metadata or {}).get("title", "IKEA SYMFONISK Bridge")
+            await self._run_with_retry(player.play_uri, stream_url, title=title)
+
             return {
                 "success": True,
                 "target_id": target_id,
@@ -203,7 +235,7 @@ class SonosRendererAdapter(RendererAdapter):
             }
         except Exception as e:
             logger.error("Failed to play stream on %s: %s", target_id, e)
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": f"Playback failed: {e}"}
 
     async def stop(self, target_id: str) -> dict[str, Any]:
         """Stop playback on a target."""
@@ -211,15 +243,18 @@ class SonosRendererAdapter(RendererAdapter):
         if not player:
             return {"success": False, "error": f"Target {target_id} not found"}
 
+        # Clear last played state to prevent healing from restarting playback
+        self._last_played.pop(target_id, None)
+
         try:
             await self._run_with_retry(player.stop)
             return {"success": True, "target_id": target_id}
         except Exception as e:
             logger.error("Failed to stop playback on %s: %s", target_id, e)
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": f"Stop failed: {e}"}
 
     async def set_volume(self, target_id: str, volume: float) -> dict[str, Any]:
-        """Set volume on a target (0.0 to 1.0)."""
+        """Set volume on a target group (0.0 to 1.0)."""
         player = self._players.get(target_id)
         if not player:
             return {"success": False, "error": f"Target {target_id} not found"}
@@ -228,20 +263,27 @@ class SonosRendererAdapter(RendererAdapter):
             # Sonos volume is 0-100
             sonos_volume = int(max(0.0, min(1.0, volume)) * 100)
 
-            def _set_vol(p: soco.SoCo, v: int) -> None:
-                p.volume = v
+            def _set_group_vol(p: soco.SoCo, v: int) -> None:
+                # Set volume on the group if available, else individual
+                if p.group:
+                    p.group.volume = v
+                else:
+                    p.volume = v
 
-            await self._run_with_retry(_set_vol, player, sonos_volume)
+            await self._run_with_retry(_set_group_vol, player, sonos_volume)
             return {"success": True, "target_id": target_id, "volume": volume}
         except Exception as e:
             logger.error("Failed to set volume on %s: %s", target_id, e)
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": f"Set volume failed: {e}"}
 
     async def heal(self, target_id: str) -> dict[str, Any]:
         """Attempt to heal a target's group/topology."""
+        # Always refresh targets to ensure topology is current
+        await self.list_targets()
+
         target = self._targets.get(target_id)
         if not target:
-            return {"success": False, "error": f"Target {target_id} not found in topology"}
+            return {"success": False, "error": f"Target {target_id} not found in topology after refresh"}
 
         if self._event_bus:
             self._event_bus.emit(
@@ -252,14 +294,9 @@ class SonosRendererAdapter(RendererAdapter):
         try:
             coordinator = self._players.get(target.coordinator_id)
             if not coordinator:
-                # Try to refresh targets if player not found
-                await self.list_targets()
-                coordinator = self._players.get(target.coordinator_id)
-
-            if not coordinator:
                 raise RuntimeError(f"Coordinator {target.coordinator_id} not found")
 
-            # Ensure all members are joined to the coordinator
+            # 1. Ensure all members are joined to the coordinator
             for member_id in target.members:
                 if member_id == target.coordinator_id:
                     continue
@@ -271,19 +308,44 @@ class SonosRendererAdapter(RendererAdapter):
 
                 # Check if already in group
                 def _check_and_join(m: soco.SoCo, c: soco.SoCo) -> None:
-                    if m.group and m.group.coordinator and m.group.coordinator.uid == c.uid:
-                        return
-                    m.join(c)
+                    if not m.group or not m.group.coordinator or m.group.coordinator.uid != c.uid:
+                        m.join(c)
 
                 await self._run_with_retry(_check_and_join, member, coordinator)
+
+            # 2. Check if we should be playing and restart if needed
+            playback_restarted = False
+            last_played = self._last_played.get(target_id)
+
+            if last_played:
+
+                def _check_and_restart(p: soco.SoCo, url: str, t: str) -> bool:
+                    transport_info = p.get_current_transport_info()
+                    if transport_info.get("current_transport_state") != "PLAYING":
+                        p.play_uri(url, title=t)
+                        return True
+                    return False
+
+                stream_url = last_played["stream_url"]
+                title = last_played["metadata"].get("title", "IKEA SYMFONISK Bridge")
+                playback_restarted = await self._run_with_retry(_check_and_restart, coordinator, stream_url, title)
 
             if self._event_bus:
                 self._event_bus.emit(
                     EventType.HEAL_SUCCEEDED,
-                    payload={"target_id": target_id, "renderer": "sonos"},
+                    payload={
+                        "target_id": target_id,
+                        "renderer": "sonos",
+                        "playback_restarted": playback_restarted,
+                    },
                 )
 
-            return {"success": True, "target_id": target_id, "healed": True}
+            return {
+                "success": True,
+                "target_id": target_id,
+                "healed": True,
+                "playback_restarted": playback_restarted,
+            }
 
         except Exception as e:
             logger.error("Failed to heal target %s: %s", target_id, e)
