@@ -37,6 +37,10 @@ async def get_source(request: Request, source_id: str) -> dict[str, Any]:
 
 
 @router.post("/{source_id}/prepare")
-async def prepare_source(source_id: str, request: PrepareRequest) -> dict[str, Any]:
+async def prepare_source(request: Request, source_id: str, body: PrepareRequest) -> dict[str, Any]:
     """Prepare a source for capture."""
-    raise HTTPException(status_code=404, detail="Source not found")
+    registry: SourceRegistry = request.app.state.source_registry
+    result = registry.prepare_source(source_id)
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error or "Preparation failed")
+    return {"success": True, "source_id": source_id}

@@ -87,10 +87,16 @@ class Session:
 class SessionManager:
     """Manages session lifecycle."""
 
-    def __init__(self, event_bus: EventBus, stream_publisher: Any | None = None) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus,
+        stream_publisher: Any | None = None,
+        target_registry: Any | None = None,
+    ) -> None:
         self._sessions: dict[str, Session] = {}
         self._event_bus = event_bus
         self._stream_publisher = stream_publisher
+        self._target_registry = target_registry
 
     def create(
         self,
@@ -179,7 +185,7 @@ class SessionManager:
         else:
             asyncio.run(self.stop_session(session_id))
 
-    def recover(self, session_id: str) -> None:
+    async def recover(self, session_id: str) -> None:
         """Attempt to recover a failed or degraded session."""
         session = self.get(session_id)
         if not session:
@@ -188,8 +194,23 @@ class SessionManager:
         session.transition_to(SessionState.HEALING)
         self._event_bus.emit(EventType.HEAL_ATTEMPTED, session_id=session_id)
 
-        session.transition_to(SessionState.PLAYING)
-        self._event_bus.emit(EventType.HEAL_SUCCEEDED, session_id=session_id)
+        try:
+            # 1. Re-heal the target
+            if self._target_registry:
+                heal_result = await self._target_registry.heal_target(session.target_id)
+                if not heal_result.get("success"):
+                    raise RuntimeError(f"Failed to heal target: {heal_result.get('error')}")
+
+            # 2. Transition back to PLAYING
+            session.transition_to(SessionState.PLAYING)
+            self._event_bus.emit(EventType.HEAL_SUCCEEDED, session_id=session_id)
+        except Exception as e:
+            session.transition_to(SessionState.FAILED)
+            self._event_bus.emit(
+                EventType.HEAL_FAILED,
+                session_id=session_id,
+                payload={"error": str(e)},
+            )
 
     def terminate(self, session_id: str) -> None:
         """Stop and remove a session."""

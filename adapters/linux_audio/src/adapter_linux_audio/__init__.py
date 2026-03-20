@@ -186,8 +186,17 @@ class LinuxAudioAdapter(IngressAdapter):
         return sources
 
     def prepare(self, source_id: str) -> PrepareResult:
-        # In a real implementation we might check if device is available
-        return PrepareResult(success=True, source_id=source_id)
+        """Verify the specified source exists in the system."""
+        # Special case for default
+        if source_id == "default":
+            return PrepareResult(success=True, source_id=source_id)
+
+        sources = self.list_sources()
+        for s in sources:
+            if s.source_id == source_id:
+                return PrepareResult(success=True, source_id=source_id)
+
+        return PrepareResult(success=False, source_id=source_id, error=f"Source {source_id} not found in system")
 
     def start(self, source_id: str, frame_sink: FrameSink) -> StartResult:
         self._session_id = f"sess_{id(self)}"

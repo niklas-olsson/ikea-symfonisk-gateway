@@ -55,12 +55,20 @@ async def get_target(request: Request, target_id: str) -> dict[str, Any]:
 
 
 @router.post("/{target_id}/heal")
-async def heal_target(target_id: str) -> dict[str, Any]:
+async def heal_target(request: Request, target_id: str) -> dict[str, Any]:
     """Request topology/group healing for a target."""
-    raise HTTPException(status_code=404, detail="Target not found")
+    registry: TargetRegistry = request.app.state.target_registry
+    result = await registry.heal_target(target_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "Healing failed")
+    return result
 
 
 @router.post("/{target_id}/volume")
-async def set_volume(target_id: str, request: VolumeRequest) -> dict[str, Any]:
+async def set_volume(request: Request, target_id: str, body: VolumeRequest) -> dict[str, Any]:
     """Set volume for a target."""
-    raise HTTPException(status_code=404, detail="Target not found")
+    registry: TargetRegistry = request.app.state.target_registry
+    result = await registry.set_volume(target_id, body.volume)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "Failed to set volume")
+    return result

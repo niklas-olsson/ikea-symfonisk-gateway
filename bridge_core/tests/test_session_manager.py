@@ -75,7 +75,7 @@ async def test_session_recovery(session_manager: SessionManager) -> None:
     assert session.state == SessionState.FAILED
 
     # Recover
-    session_manager.recover(session.session_id)
+    await session_manager.recover(session.session_id)
     assert session.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
 
 
