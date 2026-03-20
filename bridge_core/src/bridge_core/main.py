@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.session_manager = session_manager
 
     # Register adapters
-    sonos_adapter = SonosRendererAdapter()
+    sonos_adapter = SonosRendererAdapter(event_bus)
     await target_registry.register_adapter(sonos_adapter)
 
     synthetic_adapter = SyntheticAdapter()
