@@ -9,22 +9,27 @@
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: oklch(15% 0.01 240);
-            --surface: oklch(20% 0.01 240);
-            --surface-hover: oklch(25% 0.01 240);
-            --text: oklch(90% 0.01 240);
-            --text-muted: oklch(70% 0.01 240);
-            --accent: oklch(60% 0.15 240);
-            --accent-hover: oklch(65% 0.15 240);
+            /* Impeccable Design System: OKLCH Colors */
+            --bg: oklch(12% 0.01 240);
+            --surface: oklch(18% 0.01 240);
+            --surface-hover: oklch(22% 0.02 240);
+            --text: oklch(92% 0.01 240);
+            --text-muted: oklch(65% 0.01 240);
+            --accent: oklch(65% 0.18 240);
+            --accent-hover: oklch(70% 0.18 240);
             --error: oklch(60% 0.15 20);
-            --success: oklch(60% 0.15 140);
+            --success: oklch(65% 0.15 150);
 
-            --radius: 8px;
-            --spacing-xs: 4px;
-            --spacing-sm: 8px;
-            --spacing-md: 16px;
-            --spacing-lg: 24px;
-            --spacing-xl: 48px;
+            /* 4pt Grid System */
+            --radius: 12px;
+            --spacing-4: 4px;
+            --spacing-8: 8px;
+            --spacing-12: 12px;
+            --spacing-16: 16px;
+            --spacing-24: 24px;
+            --spacing-32: 32px;
+            --spacing-48: 48px;
+            --spacing-64: 64px;
         }
 
         * {
@@ -37,40 +42,52 @@
             background-color: var(--bg);
             color: var(--text);
             font-family: 'Instrument Sans', sans-serif;
-            line-height: 1.5;
+            line-height: 1.6;
             display: flex;
             justify-content: center;
-            padding: var(--spacing-xl) var(--spacing-md);
+            padding: var(--spacing-64) var(--spacing-24);
         }
 
         main {
             width: 100%;
-            max-width: 800px;
+            max-width: 720px;
             display: flex;
             flex-direction: column;
-            gap: var(--spacing-lg);
+            gap: var(--spacing-32);
+        }
+
+        header {
+            margin-bottom: var(--spacing-16);
         }
 
         h1 {
-            font-size: clamp(1.5rem, 5vw, 2.5rem);
+            font-size: clamp(2rem, 8vw, 3.5rem);
             font-weight: 600;
-            letter-spacing: -0.02em;
-            margin-bottom: var(--spacing-sm);
+            letter-spacing: -0.04em;
+            line-height: 1.1;
+            margin-bottom: var(--spacing-8);
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            font-weight: 400;
         }
 
         .card {
             background-color: var(--surface);
-            padding: var(--spacing-lg);
+            padding: var(--spacing-32);
             border-radius: var(--radius);
             display: flex;
             flex-direction: column;
-            gap: var(--spacing-md);
+            gap: var(--spacing-24);
+            border: 1px solid oklch(100% 0 0 / 5%);
         }
 
         .controls {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: var(--spacing-md);
+            gap: var(--spacing-24);
         }
 
         @media (max-width: 600px) {
@@ -82,40 +99,50 @@
         .field {
             display: flex;
             flex-direction: column;
-            gap: var(--spacing-xs);
+            gap: var(--spacing-8);
+        }
+
+        .field-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         label {
-            font-size: 0.875rem;
+            font-size: 0.75rem;
             color: var(--text-muted);
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
 
         select, button {
             font-family: inherit;
             font-size: 1rem;
-            padding: var(--spacing-sm) var(--spacing-md);
+            padding: var(--spacing-12) var(--spacing-16);
             border-radius: var(--radius);
-            border: 1px solid transparent;
+            border: 1px solid oklch(100% 0 0 / 10%);
             background-color: var(--bg);
             color: var(--text);
             cursor: pointer;
-            transition: background-color 0.2s, border-color 0.2s;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         select:hover {
             background-color: var(--surface-hover);
+            border-color: oklch(100% 0 0 / 20%);
         }
 
         select:focus {
             outline: none;
             border-color: var(--accent);
+            box-shadow: 0 0 0 4px oklch(from var(--accent) l c h / 20%);
         }
 
         .actions {
             display: flex;
-            gap: var(--spacing-md);
-            margin-top: var(--spacing-sm);
+            gap: var(--spacing-16);
+            margin-top: var(--spacing-8);
         }
 
         button {
@@ -123,30 +150,50 @@
             font-weight: 600;
             background-color: var(--accent);
             color: var(--bg);
+            border: none;
         }
 
         button:hover {
             background-color: var(--accent-hover);
+            transform: translateY(-1px);
         }
 
         button:active {
-            transform: scale(0.98);
+            transform: translateY(0);
         }
 
         button:disabled {
-            opacity: 0.5;
+            opacity: 0.4;
             cursor: not-allowed;
-            transform: none;
+            transform: none !important;
         }
 
         button.secondary {
-            background-color: var(--bg);
+            background-color: transparent;
             color: var(--text);
-            border: 1px solid var(--text-muted);
+            border: 1px solid oklch(100% 0 0 / 20%);
         }
 
         button.secondary:hover {
             background-color: var(--surface-hover);
+            border-color: var(--text-muted);
+        }
+
+        button.small-text {
+            flex: none;
+            padding: 2px 8px;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            background: transparent;
+            color: var(--accent);
+            border: 1px solid oklch(from var(--accent) l c h / 30%);
+            border-radius: 6px;
+        }
+
+        button.small-text:hover {
+            background: oklch(from var(--accent) l c h / 10%);
+            transform: none;
         }
 
         .status-bar {
@@ -154,63 +201,99 @@
             justify-content: space-between;
             align-items: center;
             font-size: 0.875rem;
-            padding: var(--spacing-sm) var(--spacing-md);
+            padding: var(--spacing-16) var(--spacing-24);
             background-color: var(--bg);
             border-radius: var(--radius);
+            margin-top: var(--spacing-8);
         }
 
         .status-tag {
-            padding: 2px 8px;
-            border-radius: 4px;
+            padding: 4px 12px;
+            border-radius: 20px;
             font-weight: 600;
             text-transform: uppercase;
-            font-size: 0.75rem;
+            font-size: 0.7rem;
+            letter-spacing: 0.05em;
         }
 
-        .status-idle { background-color: var(--text-muted); color: var(--bg); }
-        .status-active { background-color: var(--success); color: var(--bg); }
-        .status-error { background-color: var(--error); color: var(--bg); }
+        .status-idle { background-color: oklch(40% 0 0 / 20%); color: var(--text-muted); border: 1px solid oklch(40% 0 0 / 30%); }
+        .status-active { background-color: oklch(from var(--success) l c h / 20%); color: var(--success); border: 1px solid oklch(from var(--success) l c h / 30%); }
+        .status-error { background-color: oklch(from var(--error) l c h / 20%); color: var(--error); border: 1px solid oklch(from var(--error) l c h / 30%); }
+
+        .log-section {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-16);
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h2 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
 
         .events-log {
-            font-family: monospace;
-            font-size: 0.8125rem;
-            background-color: var(--bg);
-            padding: var(--spacing-md);
+            font-family: 'ui-monospace', 'Cascadia Code', 'Source Code Pro', monospace;
+            font-size: 0.8rem;
+            background-color: var(--surface);
+            padding: var(--spacing-24);
             border-radius: var(--radius);
-            height: 200px;
+            height: 240px;
             overflow-y: auto;
             display: flex;
             flex-direction: column-reverse;
-            gap: var(--spacing-xs);
+            gap: var(--spacing-12);
+            border: 1px solid oklch(100% 0 0 / 5%);
         }
 
         .event-item {
             display: flex;
-            gap: var(--spacing-md);
-            color: var(--text-muted);
+            gap: var(--spacing-16);
+            align-items: flex-start;
+            padding-bottom: var(--spacing-8);
+            border-bottom: 1px solid oklch(100% 0 0 / 5%);
         }
 
-        .event-time { color: var(--accent); min-width: 80px; }
-        .event-type { font-weight: 600; min-width: 120px; }
+        .event-item:last-child {
+            border-bottom: none;
+        }
+
+        .event-time { color: var(--text-muted); opacity: 0.5; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+        .event-type { font-weight: 600; color: var(--accent); min-width: 140px; flex-shrink: 0; }
+        .event-message { color: var(--text); word-break: break-all; }
     </style>
 </head>
 <body>
     <main>
         <header>
-            <h1>Bridge Control</h1>
-            <p style="color: var(--text-muted)">IKEA SYMFONISK Gateway v0.1.0</p>
+            <h1>Bridge</h1>
+            <p class="subtitle">IKEA SYMFONISK Gateway v0.1.0</p>
         </header>
 
         <section class="card">
             <div class="controls">
                 <div class="field">
-                    <label for="source-select">Source</label>
+                    <div class="field-header">
+                        <label for="source-select">Audio Source</label>
+                        <button id="refresh-sources" class="small-text">Refresh</button>
+                    </div>
                     <select id="source-select">
                         <option value="">Loading sources...</option>
                     </select>
                 </div>
                 <div class="field">
-                    <label for="target-select">Target</label>
+                    <div class="field-header">
+                        <label for="target-select">Playback Target</label>
+                        <button id="refresh-targets" class="small-text">Refresh</button>
+                    </div>
                     <select id="target-select">
                         <option value="">Loading targets...</option>
                     </select>
@@ -218,18 +301,20 @@
             </div>
 
             <div class="actions">
-                <button id="play-btn">Play</button>
+                <button id="play-btn">Start Session</button>
                 <button id="stop-btn" class="secondary" disabled>Stop</button>
             </div>
 
             <div class="status-bar">
                 <span>Session Status</span>
-                <span id="session-state" class="status-tag status-idle">Disconnected</span>
+                <span id="session-state" class="status-tag status-idle">Idle</span>
             </div>
         </section>
 
-        <section>
-            <h2 style="font-size: 1rem; margin-bottom: var(--spacing-sm); color: var(--text-muted)">Recent Events</h2>
+        <section class="log-section">
+            <div class="log-header">
+                <h2>Activity Log</h2>
+            </div>
             <div id="events-log" class="events-log">
                 <!-- Events will appear here -->
             </div>
@@ -241,6 +326,8 @@
         const targetSelect = document.getElementById('target-select');
         const playBtn = document.getElementById('play-btn');
         const stopBtn = document.getElementById('stop-btn');
+        const refreshSourcesBtn = document.getElementById('refresh-sources');
+        const refreshTargetsBtn = document.getElementById('refresh-targets');
         const sessionState = document.getElementById('session-state');
         const eventsLog = document.getElementById('events-log');
 
@@ -255,6 +342,7 @@
                 ).join('') || '<option value="">No sources available</option>';
             } catch (err) {
                 console.error('Failed to fetch sources', err);
+                addLog('ERROR', 'Failed to fetch sources');
             }
         }
 
@@ -267,6 +355,18 @@
                 ).join('') || '<option value="">No targets available</option>';
             } catch (err) {
                 console.error('Failed to fetch targets', err);
+                addLog('ERROR', 'Failed to fetch targets');
+            }
+        }
+
+        async function refreshTargets() {
+            addLog('SYSTEM', 'Refreshing targets...');
+            try {
+                await fetch('/v1/targets/refresh', { method: 'POST' });
+                await fetchTargets();
+            } catch (err) {
+                console.error('Refresh targets failed', err);
+                addLog('ERROR', 'Refresh targets failed');
             }
         }
 
@@ -274,48 +374,74 @@
             const source_id = sourceSelect.value;
             const target_id = targetSelect.value;
 
-            if (!source_id || !target_id) return;
+            if (!source_id || !target_id) {
+                addLog('SYSTEM', 'Select a source and target first');
+                return;
+            }
 
             playBtn.disabled = true;
             addLog('SYSTEM', 'Creating session...');
 
             try {
-                // 1. Create session
                 const createRes = await fetch('/v1/sessions', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ source_id, target_id })
                 });
+
+                if (!createRes.ok) {
+                    const err = await createRes.json();
+                    throw new Error(err.detail?.message || 'Failed to create session');
+                }
+
                 const { session_id } = await createRes.json();
                 currentSessionId = session_id;
 
-                // 2. Start session
                 addLog('SYSTEM', `Starting session ${session_id}...`);
-                await fetch(`/v1/sessions/${session_id}/start`, { method: 'POST' });
+                const startRes = await fetch(`/v1/sessions/${session_id}/start`, { method: 'POST' });
+
+                if (!startRes.ok) {
+                    const err = await startRes.json();
+                    throw new Error(err.detail?.message || 'Failed to start session');
+                }
 
                 stopBtn.disabled = false;
-                updateSessionUI('ACTIVE', 'Playing');
+                updateSessionUI('ACTIVE', 'Starting');
             } catch (err) {
-                console.error('Failed to start session', err);
-                addLog('ERROR', 'Failed to start session');
+                console.error('Session failed', err);
+                addLog('ERROR', err.message);
                 playBtn.disabled = false;
                 updateSessionUI('ERROR', 'Failed');
             }
         }
 
         async function stopCurrentSession() {
-            if (!currentSessionId) return;
+            if (!currentSessionId) {
+                // Try to find any active session to stop if we don't have the ID
+                addLog('SYSTEM', 'Looking for sessions to stop...');
+                try {
+                    const res = await fetch('/v1/sessions');
+                    const { sessions } = await res.json();
+                    const active = sessions.find(s => ['playing', 'starting', 'preparing'].includes(s.state));
+                    if (active) {
+                        currentSessionId = active.session_id;
+                    } else {
+                        addLog('SYSTEM', 'No active sessions found');
+                        return;
+                    }
+                } catch (e) {
+                    return;
+                }
+            }
 
             stopBtn.disabled = true;
-            addLog('SYSTEM', 'Stopping session...');
+            addLog('SYSTEM', `Stopping session ${currentSessionId}...`);
 
             try {
                 await fetch(`/v1/sessions/${currentSessionId}/stop`, { method: 'POST' });
-                currentSessionId = null;
-                playBtn.disabled = false;
-                updateSessionUI('IDLE', 'Stopped');
+                updateSessionUI('IDLE', 'Stopping');
             } catch (err) {
-                console.error('Failed to stop session', err);
+                console.error('Stop failed', err);
                 addLog('ERROR', 'Failed to stop session');
                 stopBtn.disabled = false;
             }
@@ -331,7 +457,14 @@
             item.className = 'event-item';
             const time = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-            let message = typeof data === 'string' ? data : JSON.stringify(data);
+            let message = '';
+            if (typeof data === 'string') {
+                message = data;
+            } else if (data.payload) {
+                message = typeof data.payload === 'string' ? data.payload : JSON.stringify(data.payload);
+            } else {
+                message = JSON.stringify(data);
+            }
 
             item.innerHTML = `
                 <span class="event-time">${time}</span>
@@ -341,34 +474,62 @@
 
             eventsLog.prepend(item);
 
-            // Limit to 20 events in the UI for performance/clutter
-            while (eventsLog.children.length > 20) {
+            while (eventsLog.children.length > 50) {
                 eventsLog.removeChild(eventsLog.lastChild);
             }
         }
 
         function setupSSE() {
             const evtSource = new EventSource("/events");
-            evtSource.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                addLog(event.type || 'EVENT', data.payload || data);
 
-                // Auto-update session state from events if it's our session
-                if (data.session_id === currentSessionId) {
-                    if (data.type === 'SESSION_STARTED') updateSessionUI('ACTIVE', 'Playing');
-                    if (data.type === 'SESSION_STOPPED') {
-                        updateSessionUI('IDLE', 'Stopped');
-                        currentSessionId = null;
-                        playBtn.disabled = false;
-                        stopBtn.disabled = true;
+            evtSource.addEventListener('message', (event) => {
+                // Generic message if any
+            });
+
+            // Listen for specific event types from the bridge
+            const eventTypes = [
+                'session.created', 'session.starting', 'session.started',
+                'session.stopped', 'session.failed', 'topology.changed',
+                'publisher.active', 'source.started'
+            ];
+
+            eventTypes.forEach(type => {
+                evtSource.addEventListener(type, (event) => {
+                    const data = JSON.parse(event.data);
+                    addLog(type.toUpperCase(), data);
+
+                    // Update UI based on events
+                    if (data.session_id === currentSessionId || !currentSessionId) {
+                        if (type === 'session.started') {
+                            updateSessionUI('ACTIVE', 'Playing');
+                            playBtn.disabled = true;
+                            stopBtn.disabled = false;
+                            currentSessionId = data.session_id;
+                        }
+                        if (type === 'session.stopped') {
+                            updateSessionUI('IDLE', 'Idle');
+                            currentSessionId = null;
+                            playBtn.disabled = false;
+                            stopBtn.disabled = true;
+                        }
+                        if (type === 'session.failed') {
+                            updateSessionUI('ERROR', 'Failed');
+                            playBtn.disabled = false;
+                            stopBtn.disabled = true;
+                        }
                     }
-                    if (data.type === 'SESSION_FAILED') updateSessionUI('ERROR', 'Failed');
-                }
-            };
+
+                    if (type === 'topology.changed') {
+                        fetchSources();
+                        fetchTargets();
+                    }
+                });
+            });
 
             evtSource.onerror = (err) => {
                 console.error("SSE connection failed", err);
-                addLog('SYSTEM', 'Lost connection to bridge');
+                // evtSource.close();
+                // setTimeout(setupSSE, 5000);
             };
         }
 
@@ -379,6 +540,24 @@
 
         playBtn.onclick = createAndStartSession;
         stopBtn.onclick = stopCurrentSession;
+        refreshSourcesBtn.onclick = fetchSources;
+        refreshTargetsBtn.onclick = refreshTargets;
+
+        // Check for existing active sessions on load
+        async function checkActiveSessions() {
+            try {
+                const res = await fetch('/v1/sessions');
+                const { sessions } = await res.json();
+                const active = sessions.find(s => ['playing', 'starting', 'preparing'].includes(s.state));
+                if (active) {
+                    currentSessionId = active.session_id;
+                    updateSessionUI('ACTIVE', active.state.charAt(0).toUpperCase() + active.state.slice(1));
+                    playBtn.disabled = true;
+                    stopBtn.disabled = false;
+                }
+            } catch (e) {}
+        }
+        checkActiveSessions();
     </script>
 </body>
 </html>

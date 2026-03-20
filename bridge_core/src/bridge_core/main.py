@@ -13,13 +13,20 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from bridge_core.api import (
+    config_router,
     events_router,
     health_router,
     sessions_router,
     sources_router,
     targets_router,
 )
-from bridge_core.core import EventBus, SessionManager, SourceRegistry, TargetRegistry
+from bridge_core.core import (
+    ConfigStore,
+    EventBus,
+    SessionManager,
+    SourceRegistry,
+    TargetRegistry,
+)
 from bridge_core.stream.publisher import StreamPublisher
 from renderer_sonos import SonosRendererAdapter
 
@@ -28,6 +35,7 @@ from renderer_sonos import SonosRendererAdapter
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifespan."""
     # Initialize core components
+    config_store = ConfigStore(db_path="config.db")
     event_bus = EventBus()
     source_registry = SourceRegistry(event_bus)
     target_registry = TargetRegistry(event_bus)
@@ -35,6 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     session_manager = SessionManager(event_bus, source_registry, target_registry, publisher)
 
     # Store in app state
+    app.state.config_store = config_store
     app.state.event_bus = event_bus
     app.state.source_registry = source_registry
     app.state.target_registry = target_registry
@@ -100,6 +109,7 @@ app.include_router(sources_router)
 app.include_router(targets_router)
 app.include_router(sessions_router)
 app.include_router(events_router)
+app.include_router(config_router)
 
 # Resolve the path to the web UI
 # We expect the ui_web package to be installed or available in the path

@@ -56,8 +56,10 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
 
         if state == "playing":
             return MediaPlayerState.PLAYING
-        if state in ("starting", "preparing"):
+        if state in ("starting", "preparing", "healing"):
             return MediaPlayerState.BUFFERING
+        if state == "degraded":
+            return MediaPlayerState.ON
 
         return MediaPlayerState.IDLE
 
