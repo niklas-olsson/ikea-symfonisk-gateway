@@ -1,17 +1,18 @@
-import pytest
-from bridge_core.core.session_manager import SessionManager, SessionState
-from bridge_core.core.event_bus import EventBus, EventType
+import pytest # type: ignore[import-not-found]
+from bridge_core.core.session_manager import SessionManager, SessionState # type: ignore[import-untyped]
+from bridge_core.core.event_bus import EventBus, EventType # type: ignore[import-untyped]
+from typing import AsyncGenerator
 
-@pytest.fixture
-def event_bus():
+@pytest.fixture # type: ignore[untyped-decorator]
+def event_bus() -> EventBus:
     return EventBus()
 
-@pytest.fixture
-def session_manager(event_bus):
+@pytest.fixture # type: ignore[untyped-decorator]
+def session_manager(event_bus: EventBus) -> SessionManager:
     return SessionManager(event_bus)
 
-@pytest.mark.asyncio
-async def test_create_session(session_manager, event_bus):
+@pytest.mark.asyncio # type: ignore[untyped-decorator]
+async def test_create_session(session_manager: SessionManager, event_bus: EventBus) -> None:
     queue = event_bus.subscribe(None)
     session = session_manager.create("source-1", "target-1")
 
@@ -25,8 +26,8 @@ async def test_create_session(session_manager, event_bus):
     assert event.type == EventType.SESSION_CREATED.value
     assert event.session_id == session.session_id
 
-@pytest.mark.asyncio
-async def test_start_session(session_manager, event_bus):
+@pytest.mark.asyncio # type: ignore[untyped-decorator]
+async def test_start_session(session_manager: SessionManager, event_bus: EventBus) -> None:
     queue = event_bus.subscribe(None)
     session = session_manager.create("source-1", "target-1")
 
@@ -45,8 +46,8 @@ async def test_start_session(session_manager, event_bus):
     event2 = await queue.get()
     assert event2.type == EventType.SESSION_STARTED.value
 
-@pytest.mark.asyncio
-async def test_stop_session(session_manager, event_bus):
+@pytest.mark.asyncio # type: ignore[untyped-decorator]
+async def test_stop_session(session_manager: SessionManager, event_bus: EventBus) -> None:
     queue = event_bus.subscribe(None)
     session = session_manager.create("source-1", "target-1")
     session_manager.start(session.session_id, "http://stream")
@@ -66,8 +67,8 @@ async def test_stop_session(session_manager, event_bus):
     event2 = await queue.get()
     assert event2.type == EventType.SESSION_STOPPED.value
 
-@pytest.mark.asyncio
-async def test_recover_session(session_manager, event_bus):
+@pytest.mark.asyncio # type: ignore[untyped-decorator]
+async def test_recover_session(session_manager: SessionManager, event_bus: EventBus) -> None:
     queue = event_bus.subscribe(None)
     session = session_manager.create("source-1", "target-1")
 
@@ -84,16 +85,16 @@ async def test_recover_session(session_manager, event_bus):
     event2 = await queue.get()
     assert event2.type == EventType.HEAL_SUCCEEDED.value
 
-@pytest.mark.asyncio
-async def test_recover_session_disabled_auto_heal(session_manager, event_bus):
+@pytest.mark.asyncio # type: ignore[untyped-decorator]
+async def test_recover_session_disabled_auto_heal(session_manager: SessionManager, event_bus: EventBus) -> None:
     session = session_manager.create("source-1", "target-1", auto_heal=False)
 
     success = session_manager.recover(session.session_id)
     assert success is False
     assert session.state == SessionState.CREATED
 
-@pytest.mark.asyncio
-async def test_terminate_session(session_manager, event_bus):
+@pytest.mark.asyncio # type: ignore[untyped-decorator]
+async def test_terminate_session(session_manager: SessionManager, event_bus: EventBus) -> None:
     queue = event_bus.subscribe(None)
     session = session_manager.create("source-1", "target-1")
 

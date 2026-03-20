@@ -1,13 +1,13 @@
-import pytest
-from bridge_core.core.source_registry import SourceRegistry, AdapterInfo
-from ingress_sdk.types import AdapterCapabilities, SourceDescriptor, SourceType, SourceCapabilities, HealthResult
+import pytest # type: ignore[import-not-found]
+from bridge_core.core.source_registry import SourceRegistry, AdapterInfo # type: ignore[import-untyped]
+from ingress_sdk.types import AdapterCapabilities, SourceDescriptor, SourceType, SourceCapabilities, HealthResult # type: ignore[import-untyped]
 
-@pytest.fixture
-def capabilities():
+@pytest.fixture # type: ignore[untyped-decorator]
+def capabilities() -> AdapterCapabilities:
     return AdapterCapabilities(supports_bluetooth_audio=True)
 
-@pytest.fixture
-def source_descriptor():
+@pytest.fixture # type: ignore[untyped-decorator]
+def source_descriptor() -> SourceDescriptor:
     return SourceDescriptor(
         source_id="src-1",
         source_type=SourceType.BLUETOOTH_AUDIO,
@@ -16,11 +16,11 @@ def source_descriptor():
         capabilities=SourceCapabilities()
     )
 
-@pytest.fixture
-def source_registry():
+@pytest.fixture # type: ignore[untyped-decorator]
+def source_registry() -> SourceRegistry:
     return SourceRegistry()
 
-def test_register_adapter(source_registry, capabilities, source_descriptor):
+def test_register_adapter(source_registry: SourceRegistry, capabilities: AdapterCapabilities, source_descriptor: SourceDescriptor) -> None:
     source_registry.register_adapter(
         adapter_id="adapter-1",
         platform="test_platform",
@@ -39,7 +39,7 @@ def test_register_adapter(source_registry, capabilities, source_descriptor):
     assert source is not None
     assert source.source_id == "src-1"
 
-def test_unregister_adapter(source_registry, capabilities, source_descriptor):
+def test_unregister_adapter(source_registry: SourceRegistry, capabilities: AdapterCapabilities, source_descriptor: SourceDescriptor) -> None:
     source_registry.register_adapter(
         adapter_id="adapter-1",
         platform="test_platform",
@@ -54,7 +54,7 @@ def test_unregister_adapter(source_registry, capabilities, source_descriptor):
     assert source_registry.get_adapter("adapter-1") is None
     assert source_registry.get_source("src-1") is None
 
-def test_source_health(source_registry, capabilities, source_descriptor):
+def test_source_health(source_registry: SourceRegistry, capabilities: AdapterCapabilities, source_descriptor: SourceDescriptor) -> None:
     source_registry.register_adapter(
         adapter_id="adapter-1",
         platform="test_platform",
@@ -81,7 +81,7 @@ def test_source_health(source_registry, capabilities, source_descriptor):
     source_registry.unregister_adapter("adapter-1")
     assert source_registry.get_source_health("src-1") is None
 
-def test_adapter_connected(source_registry, capabilities, source_descriptor):
+def test_adapter_connected(source_registry: SourceRegistry, capabilities: AdapterCapabilities, source_descriptor: SourceDescriptor) -> None:
     assert source_registry.adapter_connected("adapter-1") is False
 
     source_registry.register_adapter(
