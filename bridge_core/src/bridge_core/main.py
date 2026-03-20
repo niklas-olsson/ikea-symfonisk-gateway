@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from adapter_linux_audio import LinuxAudioAdapter
+from adapter_linux_bluetooth import LinuxBluetoothAdapter
 from adapter_synthetic import SyntheticAdapter
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from bridge_core.api import (
+    adapters_router,
     config_router,
     events_router,
     health_router,
@@ -75,6 +77,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         adapter_instance=linux_audio_adapter,
     )
 
+    # Register Linux Bluetooth adapter
+    linux_bluetooth_adapter = LinuxBluetoothAdapter()
+    source_registry.register_adapter(
+        adapter_id=linux_bluetooth_adapter.id(),
+        platform=linux_bluetooth_adapter.platform(),
+        version="0.1.0",
+        capabilities=linux_bluetooth_adapter.capabilities(),
+        sources=linux_bluetooth_adapter.list_sources(),
+        adapter_instance=linux_bluetooth_adapter,
+    )
+
     # Start stream publisher in the background
     publisher_task = asyncio.create_task(publisher.start())
 
@@ -109,6 +122,7 @@ app.include_router(sources_router)
 app.include_router(targets_router)
 app.include_router(sessions_router)
 app.include_router(events_router)
+app.include_router(adapters_router)
 app.include_router(config_router)
 
 # Resolve the path to the web UI

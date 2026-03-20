@@ -11,6 +11,7 @@ from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
     HealthResult,
+    PairingResult,
     PrepareResult,
     SourceCapabilities,
     SourceDescriptor,
@@ -250,6 +251,14 @@ class LinuxAudioAdapter(IngressAdapter):
             dropped_frames=0,
             last_error=None,
         )
+
+    def start_pairing(self, timeout_seconds: int = 60) -> PairingResult:
+        """Linux audio adapter doesn't support pairing."""
+        return PairingResult(success=False, error="Pairing not supported by linux audio adapter")
+
+    def stop_pairing(self) -> PairingResult:
+        """Linux audio adapter doesn't support pairing."""
+        return PairingResult(success=True)
 
     async def _capture_loop(self, source_id: str) -> None:
         # Check if pactl exists to decide between parec and arecord
