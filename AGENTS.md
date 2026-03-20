@@ -100,3 +100,54 @@ All code should pass strict mypy type checking. Use type annotations for:
 def process_audio(data: bytes) -> AudioFrame:
     ...
 ```
+
+## Git Ignore Guidelines
+
+The `.gitignore` file is critical for repository hygiene. Changes to it require thorough review.
+
+### Required Exclusions
+
+The following patterns **must** always be excluded:
+
+| Pattern | Purpose |
+|---------|---------|
+| `__pycache__/` | Python bytecode cache |
+| `*.py[cod]` | Python compiled files (.pyc, .pyo) |
+| `.pytest_cache/` | Pytest cache directories |
+| `.coverage` | Coverage reports |
+| `*.egg-info/` | Python package metadata |
+| `.env` | Environment variables (may contain secrets) |
+| `uv.lock` | Lockfile (use project lockfile only) |
+
+### Review Checklist for .gitignore Changes
+
+Before approving a PR that modifies `.gitignore`:
+
+1. **Verify __pycache__ exclusion** - Must always be present
+2. **Verify *.pyc/*.pyo exclusion** - Must always be present  
+3. **Verify test artifacts** - `.pytest_cache/`, `.coverage`, `htmlcov/`
+4. **Verify secrets protection** - `.env`, `config/` with credentials
+5. **No over-broad exclusions** - Don't exclude entire languages/frameworks
+6. **Documentation** - Add comment explaining non-obvious entries
+
+### CI Gate
+
+PRs modifying `.gitignore` trigger a `gitignore-review` job that posts a review checklist as a CI notice.
+
+### If You Commit __pycache__ Files
+
+If you accidentally commit `__pycache__` files:
+
+```bash
+# Remove from git tracking (but keep locally)
+git rm -r --cached __pycache__/
+git rm -r --cached *.pyc
+
+# Commit the removal
+git commit -m "chore: remove accidentally committed cache files"
+
+# Push
+git push
+```
+
+Do NOT add `__pycache__` removal to `.gitignore` changes - the damage is already done.
