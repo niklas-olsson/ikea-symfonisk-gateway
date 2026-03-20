@@ -4,6 +4,7 @@ Generates sine waves, pink noise, and silence for testing.
 """
 
 import asyncio
+import logging
 from uuid import uuid4
 
 import numpy as np
@@ -25,11 +26,14 @@ BYTES_PER_SAMPLE = 2
 SAMPLES_PER_FRAME = 480
 FRAME_SIZE = SAMPLES_PER_FRAME * CHANNELS * BYTES_PER_SAMPLE
 
+logger = logging.getLogger(__name__)
+
 
 class SyntheticAdapter(IngressAdapter):
     """Test adapter that generates synthetic audio."""
 
     def __init__(self) -> None:
+        self._adapter_id = f"synthetic-{uuid4().hex[:8]}"
         self._session_id: str | None = None
         self._running = False
         self._task: asyncio.Task[None] | None = None
@@ -37,6 +41,8 @@ class SyntheticAdapter(IngressAdapter):
         self._mode: SyntheticMode = SyntheticMode.SINE_WAVE
         self._sample_index = 0
         self._source_id = f"synthetic:{uuid4().hex[:8]}"
+        self._source_state = "idle"
+        self._dropped_frames = 0
 
         # Pink noise state (Voss-McCartney algorithm)
         # Using 16 rows for a good 1/f approximation
@@ -45,7 +51,7 @@ class SyntheticAdapter(IngressAdapter):
         self._pink_key = 0
 
     def id(self) -> str:
-        return f"synthetic-{uuid4().hex[:8]}"
+        return self._adapter_id
 
     def platform(self) -> str:
         return "any"
@@ -75,30 +81,59 @@ class SyntheticAdapter(IngressAdapter):
         ]
 
     def prepare(self, source_id: str) -> PrepareResult:
+        if source_id != self._source_id:
+            return PrepareResult(success=False, message="Source not found", source_id=source_id)
+
+        self._source_state = "preparing"
+        # Reset internal state for a fresh start
+        self._sample_index = 0
+        self._dropped_frames = 0
+        self._source_state = "active"
+
+        logger.info(f"Prepared synthetic source {source_id}")
         return PrepareResult(success=True, source_id=source_id)
 
     def start(self, source_id: str, frame_sink: FrameSink) -> StartResult:
+        if source_id != self._source_id:
+            return StartResult(success=False, message="Source not found")
+
+        if self._running:
+            return StartResult(success=True, session_id=self._session_id or "")
+
         self._session_id = f"sess_{uuid4().hex[:12]}"
         self._frame_sink = frame_sink
         self._running = True
-        self._sample_index = 0
         self._task = asyncio.create_task(self._generate_loop())
+        logger.info(f"Started synthetic source {source_id} (session: {self._session_id})")
         return StartResult(success=True, session_id=self._session_id)
 
     def stop(self, session_id: str) -> None:
+        if self._session_id != session_id:
+            return
+
         self._running = False
         if self._task:
             self._task.cancel()
             self._task = None
         self._session_id = None
         self._frame_sink = None
+        self._source_state = "idle"
+        logger.info(f"Stopped synthetic session {session_id}")
 
     def probe_health(self, source_id: str) -> HealthResult:
+        if source_id != self._source_id:
+            return HealthResult(
+                healthy=False,
+                source_state="error",
+                signal_present=False,
+                last_error="Source not found",
+            )
+
         return HealthResult(
             healthy=True,
-            source_state="active",
-            signal_present=True,
-            dropped_frames=0,
+            source_state=self._source_state,
+            signal_present=self._running,
+            dropped_frames=self._dropped_frames,
             last_error=None,
         )
 
@@ -106,24 +141,36 @@ class SyntheticAdapter(IngressAdapter):
         start_time = asyncio.get_event_loop().time()
         frames_sent = 0
 
-        while self._running:
-            pts_ns = int(self._sample_index * 1_000_000_000 / SAMPLE_RATE)
-            duration_ns = int(SAMPLES_PER_FRAME * 1_000_000_000 / SAMPLE_RATE)
+        try:
+            while self._running:
+                pts_ns = int(self._sample_index * 1_000_000_000 / SAMPLE_RATE)
+                duration_ns = int(SAMPLES_PER_FRAME * 1_000_000_000 / SAMPLE_RATE)
 
-            frame = self._generate_frame()
+                frame = self._generate_frame()
 
-            if self._frame_sink:
-                self._frame_sink.on_frame(frame, pts_ns, duration_ns)
+                if self._frame_sink:
+                    try:
+                        self._frame_sink.on_frame(frame, pts_ns, duration_ns)
+                    except Exception as e:
+                        logger.error(f"Error in frame sink: {e}")
+                        self._dropped_frames += 1
 
-            frames_sent += 1
-            # Calculate when the next frame should be sent relative to the start
-            next_frame_time = start_time + (frames_sent * SAMPLES_PER_FRAME / SAMPLE_RATE)
-            sleep_time = next_frame_time - asyncio.get_event_loop().time()
-            if sleep_time > 0:
-                await asyncio.sleep(sleep_time)
-            else:
-                # We are behind, don't sleep but yield
-                await asyncio.sleep(0)
+                frames_sent += 1
+                # Calculate when the next frame should be sent relative to the start
+                next_frame_time = start_time + (frames_sent * SAMPLES_PER_FRAME / SAMPLE_RATE)
+                sleep_time = next_frame_time - asyncio.get_event_loop().time()
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
+                else:
+                    # We are behind, don't sleep but yield
+                    await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in synthetic generation loop: {e}")
+            self._source_state = "error"
+        finally:
+            self._running = False
 
     def _generate_frame(self) -> bytes:
         if self._mode == SyntheticMode.SILENCE:

@@ -1,4 +1,5 @@
 """Button platform for IKEA SYMFONISK Gateway."""
+
 from __future__ import annotations
 
 import logging

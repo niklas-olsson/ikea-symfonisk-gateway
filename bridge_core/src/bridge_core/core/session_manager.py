@@ -48,8 +48,8 @@ class Session:
     def transition_to(self, new_state: SessionState) -> None:
         """Transitions the session to a new state if valid."""
         valid_transitions = {
-            SessionState.CREATED: [SessionState.PREPARING],
-            SessionState.PREPARING: [SessionState.READY, SessionState.FAILED],
+            SessionState.CREATED: [SessionState.PREPARING, SessionState.STARTING, SessionState.FAILED],
+            SessionState.PREPARING: [SessionState.READY, SessionState.STOPPING, SessionState.FAILED],
             SessionState.READY: [SessionState.STARTING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.STARTING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.PLAYING: [SessionState.HEALING, SessionState.STOPPING, SessionState.FAILED],
@@ -57,7 +57,7 @@ class Session:
             SessionState.DEGRADED: [SessionState.PLAYING, SessionState.HEALING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.STOPPING: [SessionState.STOPPED, SessionState.FAILED],
             SessionState.STOPPED: [SessionState.STARTING, SessionState.PREPARING, SessionState.FAILED],
-            SessionState.FAILED: [SessionState.PREPARING, SessionState.HEALING],
+            SessionState.FAILED: [SessionState.PREPARING, SessionState.STARTING, SessionState.HEALING],
         }
 
         if new_state not in valid_transitions.get(self.state, []):
