@@ -1,0 +1,113 @@
+"""DataUpdateCoordinator for IKEA SYMFONISK Gateway."""
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import timedelta
+from typing import Any
+
+import aiohttp
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class SymfoniskData:
+    """Class to hold bridge data."""
+
+    def __init__(self) -> None:
+        self.health: dict[str, Any] = {}
+        self.sources: list[dict[str, Any]] = []
+        self.targets: list[dict[str, Any]] = []
+        self.sessions: list[dict[str, Any]] = []
+
+
+class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
+    """Class to manage fetching data from the bridge."""
+
+    def __init__(self, hass: HomeAssistant, host: str, port: int) -> None:
+        """Initialize."""
+        self.host = host
+        self.port = port
+        self.base_url = f"http://{host}:{port}"
+        self.selected_source_id: str | None = None
+        self.selected_target_id: str | None = None
+
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"Symfonisk Gateway ({host})",
+            update_interval=timedelta(seconds=5),
+        )
+
+    async def _async_update_data(self) -> SymfoniskData:
+        """Fetch data from API endpoint."""
+        session = async_get_clientsession(self.hass)
+        data = SymfoniskData()
+
+        try:
+            async with asyncio.timeout(10):
+                # Fetch health
+                async with session.get(f"{self.base_url}/health") as resp:
+                    resp.raise_for_status()
+                    data.health = await resp.json()
+
+                # Fetch sources
+                async with session.get(f"{self.base_url}/v1/sources") as resp:
+                    resp.raise_for_status()
+                    sources_data = await resp.json()
+                    data.sources = sources_data.get("sources", [])
+
+                # Fetch targets
+                async with session.get(f"{self.base_url}/v1/targets") as resp:
+                    resp.raise_for_status()
+                    targets_data = await resp.json()
+                    data.targets = targets_data.get("targets", [])
+
+                # Fetch sessions
+                async with session.get(f"{self.base_url}/v1/sessions") as resp:
+                    resp.raise_for_status()
+                    sessions_data = await resp.json()
+                    data.sessions = sessions_data.get("sessions", [])
+
+                return data
+
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise UpdateFailed(f"Error communicating with API: {err}") from err
+
+    async def start_session(self, source_id: str, target_id: str) -> str:
+        """Start a new session."""
+        session = async_get_clientsession(self.hass)
+        payload = {
+            "source_id": source_id,
+            "target_id": target_id,
+            "stream_profile": "mp3_48k_stereo_320",
+        }
+
+        async with session.post(f"{self.base_url}/v1/sessions", json=payload) as resp:
+            if not resp.ok:
+                text = await resp.text()
+                raise Exception(f"Failed to create session: {text}")
+
+            data = await resp.json()
+            session_id = data["session_id"]
+
+        async with session.post(f"{self.base_url}/v1/sessions/{session_id}/start") as resp:
+            if not resp.ok:
+                text = await resp.text()
+                raise Exception(f"Failed to start session: {text}")
+
+        await self.async_refresh()
+        return session_id
+
+    async def stop_session(self, session_id: str) -> None:
+        """Stop a session."""
+        session = async_get_clientsession(self.hass)
+        async with session.post(f"{self.base_url}/v1/sessions/{session_id}/stop") as resp:
+            if not resp.ok:
+                text = await resp.text()
+                raise Exception(f"Failed to stop session: {text}")
+
+        await self.async_refresh()
