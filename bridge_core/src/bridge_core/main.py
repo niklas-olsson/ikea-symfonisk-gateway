@@ -4,6 +4,11 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+try:
+    from ui_web import STATIC_DIR
+except ImportError:
+    STATIC_DIR = None  # type: ignore
+
 from bridge_core.api import (
     events_router,
     health_router,
@@ -25,20 +30,15 @@ app.include_router(sessions_router)
 app.include_router(events_router)
 
 # Try to mount the UI
-try:
-    from ui_web import STATIC_DIR
+if STATIC_DIR is not None and STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
+    # Serve the index.html on the root path
+    @app.get("/")
+    async def root_ui() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
 
-    if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
-        # Serve the index.html on the root path
-        @app.get("/")
-        async def root_ui() -> FileResponse:
-            return FileResponse(STATIC_DIR / "index.html")
-
-        # Mount the rest of the static files
-        app.mount("/", StaticFiles(directory=str(STATIC_DIR)), name="ui")
-    else:
-        raise ImportError("Static directory or index.html not found")
-except ImportError:
+    # Mount the rest of the static files
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR)), name="ui")
+else:
     @app.get("/")
     async def root() -> dict[str, str]:
         return {
