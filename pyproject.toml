@@ -30,6 +30,7 @@ ignore = ["E501", "UP042"]
 [tool.pytest.ini_options]
 testpaths = ["**/tests"]
 pythonpath = ["src"]
+asyncio_mode = "auto"
 
 [tool.mypy]
 python_version = "3.12"
