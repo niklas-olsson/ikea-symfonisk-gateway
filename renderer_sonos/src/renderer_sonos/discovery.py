@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Dict, Any
 
-import soco
+import soco  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class SonosDiscovery:
     def __init__(self) -> None:
         self._devices: Dict[str, SonosDeviceMetadata] = {}
         self._discovered = False
-        self._bg_task: asyncio.Task | None = None
+        self._bg_task: asyncio.Task[Any] | None = None
         self._stop_event = asyncio.Event()
 
     @property

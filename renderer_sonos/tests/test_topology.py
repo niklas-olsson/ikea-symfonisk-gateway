@@ -4,7 +4,7 @@ from renderer_sonos.discovery import SonosDiscovery, SonosDeviceMetadata
 from renderer_sonos.topology import SonosTopology
 
 @pytest.mark.asyncio
-async def test_topology_empty():
+async def test_topology_empty() -> None:
     discovery = MagicMock(spec=SonosDiscovery)
     discovery.devices = {}
     discovery.discovered = True
@@ -19,7 +19,7 @@ async def test_topology_empty():
     }
 
 @pytest.mark.asyncio
-async def test_topology_single_speaker():
+async def test_topology_single_speaker() -> None:
     discovery = MagicMock(spec=SonosDiscovery)
     discovery.discovered = True
 
@@ -51,7 +51,7 @@ async def test_topology_single_speaker():
     assert target["coordinator_id"] == "RINCON_1"
 
 @pytest.mark.asyncio
-async def test_topology_stereo_pair():
+async def test_topology_stereo_pair() -> None:
     discovery = MagicMock(spec=SonosDiscovery)
     discovery.discovered = True
 
@@ -88,7 +88,7 @@ async def test_topology_stereo_pair():
     assert target["coordinator_id"] == "RINCON_COORD"
 
 @pytest.mark.asyncio
-async def test_topology_group():
+async def test_topology_group() -> None:
     discovery = MagicMock(spec=SonosDiscovery)
     discovery.discovered = True
 

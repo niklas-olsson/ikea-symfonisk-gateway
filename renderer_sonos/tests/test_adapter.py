@@ -1,9 +1,10 @@
 import pytest
 from unittest.mock import MagicMock, patch
+from typing import Any
 from renderer_sonos import SonosRendererAdapter
 
 @pytest.mark.asyncio
-async def test_sonos_renderer_adapter():
+async def test_sonos_renderer_adapter() -> None:
     adapter = SonosRendererAdapter()
 
     assert adapter.id() == "sonos-renderer-v1"
@@ -25,7 +26,7 @@ async def test_sonos_renderer_adapter():
         loop = asyncio.get_event_loop()
         original_run_in_executor = loop.run_in_executor
 
-        async def mock_run_in_executor(executor, func, *args):
+        async def mock_run_in_executor(executor: Any, func: Any, *args: Any) -> Any:
             return func(*args)
 
         with patch.object(loop, 'run_in_executor', new=mock_run_in_executor):

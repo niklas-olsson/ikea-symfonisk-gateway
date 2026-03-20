@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 from renderer_sonos.discovery import SonosDiscovery
 
 @pytest.mark.asyncio
-async def test_discover_no_devices():
+async def test_discover_no_devices() -> None:
     discovery = SonosDiscovery()
 
     with patch('soco.discover', return_value=None):
@@ -14,7 +14,7 @@ async def test_discover_no_devices():
     assert discovery.discovered is True
 
 @pytest.mark.asyncio
-async def test_discover_devices():
+async def test_discover_devices() -> None:
     discovery = SonosDiscovery()
 
     device1 = MagicMock()
