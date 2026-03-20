@@ -131,13 +131,13 @@ class SessionManager:
 
         self._event_bus.emit(EventType.SESSION_STARTING, session_id=session_id)
 
-        if session.pipeline is None:
+        if session.pipeline is None and self._stream_publisher:
             session.pipeline = StreamPipeline(session.session_id, session.stream_profile)
-            if self._stream_publisher:
-                self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
-                session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
+            self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
+            session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
 
-        await session.pipeline.start()
+        if session.pipeline is not None:
+            await session.pipeline.start()
 
         session.transition_to(SessionState.PLAYING)
         self._event_bus.emit(EventType.SESSION_STARTED, session_id=session_id)
@@ -167,19 +167,17 @@ class SessionManager:
 
     def start(self, session_id: str) -> None:
         """Start a session (synchronous shim)."""
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
+        if asyncio.get_event_loop().is_running():
             asyncio.create_task(self.start_session(session_id))
         else:
-            loop.run_until_complete(self.start_session(session_id))
+            asyncio.run(self.start_session(session_id))
 
     def stop(self, session_id: str) -> None:
         """Stop a session (synchronous shim)."""
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
+        if asyncio.get_event_loop().is_running():
             asyncio.create_task(self.stop_session(session_id))
         else:
-            loop.run_until_complete(self.stop_session(session_id))
+            asyncio.run(self.stop_session(session_id))
 
     def recover(self, session_id: str) -> None:
         """Attempt to recover a failed or degraded session."""

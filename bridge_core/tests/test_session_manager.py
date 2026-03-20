@@ -33,12 +33,12 @@ async def test_session_lifecycle(session_manager: SessionManager, event_bus: Eve
     assert session.state == SessionState.READY  # type: ignore[comparison-overlap]
 
     # 3. Start
-    session_manager.start(session.session_id)
+    await session_manager.start_session(session.session_id)
     assert session.state == SessionState.PLAYING
     assert session.started_at is not None
 
     # 4. Stop
-    session_manager.stop(session.session_id)
+    await session_manager.stop_session(session.session_id)
     assert session.state == SessionState.STOPPED
     assert session.stopped_at is not None
 
@@ -68,7 +68,7 @@ async def test_session_recovery(session_manager: SessionManager) -> None:
     session = session_manager.create(source_id="src_1", target_id="tgt_1")
     session.transition_to(SessionState.PREPARING)
     session.transition_to(SessionState.READY)
-    session_manager.start(session.session_id)
+    await session_manager.start_session(session.session_id)
 
     # Simulate failure
     session.transition_to(SessionState.FAILED)
@@ -97,7 +97,7 @@ async def test_event_emission(session_manager: SessionManager, event_bus: EventB
     # Note: start() does transitions STARTING -> PLAYING
     session.transition_to(SessionState.PREPARING)
     session.transition_to(SessionState.READY)
-    session_manager.start(session.session_id)
+    await session_manager.start_session(session.session_id)
 
     # Check STARTING event
     event = await asyncio.wait_for(queue.get(), timeout=1.0)
@@ -114,10 +114,10 @@ async def test_terminate_playing_session(session_manager: SessionManager) -> Non
     session = session_manager.create(source_id="src_1", target_id="tgt_1")
     session.transition_to(SessionState.PREPARING)
     session.transition_to(SessionState.READY)
-    session_manager.start(session.session_id)
+    await session_manager.start_session(session.session_id)
 
     session_id = session.session_id
-    session_manager.terminate(session_id)
+    await session_manager.delete(session_id)
 
     assert session_manager.get(session_id) is None
     # session object itself should be STOPPED before being removed from manager
