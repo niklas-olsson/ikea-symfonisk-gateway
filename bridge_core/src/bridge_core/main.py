@@ -5,8 +5,13 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from adapter_synthetic import SyntheticAdapter
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from bridge_core.api import (
     events_router,
@@ -86,14 +91,30 @@ app.include_router(targets_router)
 app.include_router(sessions_router)
 app.include_router(events_router)
 
+# Resolve the path to the web UI
+# We expect the ui_web package to be installed or available in the path
+try:
+    import ui_web
+
+    UI_DIR = Path(ui_web.__file__).parent
+except ImportError:
+    # Fallback for development if not installed as a package
+    UI_DIR = Path(__file__).parent.parent.parent.parent / "ui_web" / "src" / "ui_web"
+
 
 @app.get("/")
-async def root() -> dict[str, str]:
-    return {
-        "service": "ikea-symfonisk-gateway",
-        "version": "0.1.0",
-        "status": "running",
-    }
+async def root() -> FileResponse:
+    """Serve the web UI dashboard."""
+    index_path = UI_DIR / "index.html"
+    if not index_path.exists():
+        # Last resort fallback if UI_DIR is wrong
+        return FileResponse(Path("ui_web/src/ui_web/index.html"))
+    return FileResponse(index_path)
+
+
+# Also mount the directory for any potential static assets (if any were added)
+if (UI_DIR).exists():
+    app.mount("/static", StaticFiles(directory=UI_DIR), name="static")
 
 
 if __name__ == "__main__":

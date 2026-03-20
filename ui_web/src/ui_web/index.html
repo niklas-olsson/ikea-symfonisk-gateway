@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IKEA SYMFONISK Gateway</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: oklch(15% 0.01 240);
+            --surface: oklch(20% 0.01 240);
+            --surface-hover: oklch(25% 0.01 240);
+            --text: oklch(90% 0.01 240);
+            --text-muted: oklch(70% 0.01 240);
+            --accent: oklch(60% 0.15 240);
+            --accent-hover: oklch(65% 0.15 240);
+            --error: oklch(60% 0.15 20);
+            --success: oklch(60% 0.15 140);
+
+            --radius: 8px;
+            --spacing-xs: 4px;
+            --spacing-sm: 8px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+            --spacing-xl: 48px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Instrument Sans', sans-serif;
+            line-height: 1.5;
+            display: flex;
+            justify-content: center;
+            padding: var(--spacing-xl) var(--spacing-md);
+        }
+
+        main {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-lg);
+        }
+
+        h1 {
+            font-size: clamp(1.5rem, 5vw, 2.5rem);
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .card {
+            background-color: var(--surface);
+            padding: var(--spacing-lg);
+            border-radius: var(--radius);
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-md);
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-md);
+        }
+
+        @media (max-width: 600px) {
+            .controls {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-xs);
+        }
+
+        label {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        select, button {
+            font-family: inherit;
+            font-size: 1rem;
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius);
+            border: 1px solid transparent;
+            background-color: var(--bg);
+            color: var(--text);
+            cursor: pointer;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+
+        select:hover {
+            background-color: var(--surface-hover);
+        }
+
+        select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .actions {
+            display: flex;
+            gap: var(--spacing-md);
+            margin-top: var(--spacing-sm);
+        }
+
+        button {
+            flex: 1;
+            font-weight: 600;
+            background-color: var(--accent);
+            color: var(--bg);
+        }
+
+        button:hover {
+            background-color: var(--accent-hover);
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        button.secondary {
+            background-color: var(--bg);
+            color: var(--text);
+            border: 1px solid var(--text-muted);
+        }
+
+        button.secondary:hover {
+            background-color: var(--surface-hover);
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.875rem;
+            padding: var(--spacing-sm) var(--spacing-md);
+            background-color: var(--bg);
+            border-radius: var(--radius);
+        }
+
+        .status-tag {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+        }
+
+        .status-idle { background-color: var(--text-muted); color: var(--bg); }
+        .status-active { background-color: var(--success); color: var(--bg); }
+        .status-error { background-color: var(--error); color: var(--bg); }
+
+        .events-log {
+            font-family: monospace;
+            font-size: 0.8125rem;
+            background-color: var(--bg);
+            padding: var(--spacing-md);
+            border-radius: var(--radius);
+            height: 200px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column-reverse;
+            gap: var(--spacing-xs);
+        }
+
+        .event-item {
+            display: flex;
+            gap: var(--spacing-md);
+            color: var(--text-muted);
+        }
+
+        .event-time { color: var(--accent); min-width: 80px; }
+        .event-type { font-weight: 600; min-width: 120px; }
+    </style>
+</head>
+<body>
+    <main>
+        <header>
+            <h1>Bridge Control</h1>
+            <p style="color: var(--text-muted)">IKEA SYMFONISK Gateway v0.1.0</p>
+        </header>
+
+        <section class="card">
+            <div class="controls">
+                <div class="field">
+                    <label for="source-select">Source</label>
+                    <select id="source-select">
+                        <option value="">Loading sources...</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="target-select">Target</label>
+                    <select id="target-select">
+                        <option value="">Loading targets...</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="actions">
+                <button id="play-btn">Play</button>
+                <button id="stop-btn" class="secondary" disabled>Stop</button>
+            </div>
+
+            <div class="status-bar">
+                <span>Session Status</span>
+                <span id="session-state" class="status-tag status-idle">Disconnected</span>
+            </div>
+        </section>
+
+        <section>
+            <h2 style="font-size: 1rem; margin-bottom: var(--spacing-sm); color: var(--text-muted)">Recent Events</h2>
+            <div id="events-log" class="events-log">
+                <!-- Events will appear here -->
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const sourceSelect = document.getElementById('source-select');
+        const targetSelect = document.getElementById('target-select');
+        const playBtn = document.getElementById('play-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const sessionState = document.getElementById('session-state');
+        const eventsLog = document.getElementById('events-log');
+
+        let currentSessionId = null;
+
+        async function fetchSources() {
+            try {
+                const response = await fetch('/v1/sources');
+                const data = await response.json();
+                sourceSelect.innerHTML = data.sources.map(s =>
+                    `<option value="${s.source_id}">${s.display_name} (${s.platform})</option>`
+                ).join('') || '<option value="">No sources available</option>';
+            } catch (err) {
+                console.error('Failed to fetch sources', err);
+            }
+        }
+
+        async function fetchTargets() {
+            try {
+                const response = await fetch('/v1/targets');
+                const data = await response.json();
+                targetSelect.innerHTML = data.targets.map(t =>
+                    `<option value="${t.target_id}">${t.display_name} (${t.renderer})</option>`
+                ).join('') || '<option value="">No targets available</option>';
+            } catch (err) {
+                console.error('Failed to fetch targets', err);
+            }
+        }
+
+        async function createAndStartSession() {
+            const source_id = sourceSelect.value;
+            const target_id = targetSelect.value;
+
+            if (!source_id || !target_id) return;
+
+            playBtn.disabled = true;
+            addLog('SYSTEM', 'Creating session...');
+
+            try {
+                // 1. Create session
+                const createRes = await fetch('/v1/sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source_id, target_id })
+                });
+                const { session_id } = await createRes.json();
+                currentSessionId = session_id;
+
+                // 2. Start session
+                addLog('SYSTEM', `Starting session ${session_id}...`);
+                await fetch(`/v1/sessions/${session_id}/start`, { method: 'POST' });
+
+                stopBtn.disabled = false;
+                updateSessionUI('ACTIVE', 'Playing');
+            } catch (err) {
+                console.error('Failed to start session', err);
+                addLog('ERROR', 'Failed to start session');
+                playBtn.disabled = false;
+                updateSessionUI('ERROR', 'Failed');
+            }
+        }
+
+        async function stopCurrentSession() {
+            if (!currentSessionId) return;
+
+            stopBtn.disabled = true;
+            addLog('SYSTEM', 'Stopping session...');
+
+            try {
+                await fetch(`/v1/sessions/${currentSessionId}/stop`, { method: 'POST' });
+                currentSessionId = null;
+                playBtn.disabled = false;
+                updateSessionUI('IDLE', 'Stopped');
+            } catch (err) {
+                console.error('Failed to stop session', err);
+                addLog('ERROR', 'Failed to stop session');
+                stopBtn.disabled = false;
+            }
+        }
+
+        function updateSessionUI(state, label) {
+            sessionState.textContent = label;
+            sessionState.className = `status-tag status-${state.toLowerCase()}`;
+        }
+
+        function addLog(type, data) {
+            const item = document.createElement('div');
+            item.className = 'event-item';
+            const time = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            let message = typeof data === 'string' ? data : JSON.stringify(data);
+
+            item.innerHTML = `
+                <span class="event-time">${time}</span>
+                <span class="event-type">${type}</span>
+                <span class="event-message">${message}</span>
+            `;
+
+            eventsLog.prepend(item);
+
+            // Limit to 20 events in the UI for performance/clutter
+            while (eventsLog.children.length > 20) {
+                eventsLog.removeChild(eventsLog.lastChild);
+            }
+        }
+
+        function setupSSE() {
+            const evtSource = new EventSource("/events");
+            evtSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                addLog(event.type || 'EVENT', data.payload || data);
+
+                // Auto-update session state from events if it's our session
+                if (data.session_id === currentSessionId) {
+                    if (data.type === 'SESSION_STARTED') updateSessionUI('ACTIVE', 'Playing');
+                    if (data.type === 'SESSION_STOPPED') {
+                        updateSessionUI('IDLE', 'Stopped');
+                        currentSessionId = null;
+                        playBtn.disabled = false;
+                        stopBtn.disabled = true;
+                    }
+                    if (data.type === 'SESSION_FAILED') updateSessionUI('ERROR', 'Failed');
+                }
+            };
+
+            evtSource.onerror = (err) => {
+                console.error("SSE connection failed", err);
+                addLog('SYSTEM', 'Lost connection to bridge');
+            };
+        }
+
+        // Initialize
+        fetchSources();
+        fetchTargets();
+        setupSSE();
+
+        playBtn.onclick = createAndStartSession;
+        stopBtn.onclick = stopCurrentSession;
+    </script>
+</body>
+</html>
