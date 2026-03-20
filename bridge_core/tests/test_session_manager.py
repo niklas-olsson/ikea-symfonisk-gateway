@@ -26,6 +26,13 @@ def source_registry(event_bus: EventBus) -> MagicMock:
 
 
 @pytest.fixture
+def stream_publisher() -> MagicMock:
+    publisher = MagicMock()
+    publisher.get_stream_url.return_value = "http://localhost:8080/streams/sess_1/live.mp3"
+    return publisher
+
+
+@pytest.fixture
 def target_registry(event_bus: EventBus) -> MagicMock:
     registry = MagicMock(spec=TargetRegistry)
     registry.prepare_target = AsyncMock(return_value={"success": True})
@@ -40,11 +47,13 @@ def session_manager(
     event_bus: EventBus,
     source_registry: MagicMock,
     target_registry: MagicMock,
+    stream_publisher: MagicMock,
 ) -> SessionManager:
     manager = SessionManager(
         event_bus=event_bus,
         source_registry=source_registry,
         target_registry=target_registry,
+        stream_publisher=stream_publisher,
     )
 
     # Mock the pipeline start to avoid FFmpeg dependency in tests
@@ -146,10 +155,41 @@ async def test_event_emission(session_manager: SessionManager, event_bus: EventB
     # Check STARTING event
     event = await asyncio.wait_for(queue.get(), timeout=1.0)
     assert event.type == EventType.SESSION_STARTING
+    assert "source_id" in event.payload
+
+    # Check PUBLISHER_ACTIVE event
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event.type == EventType.PUBLISHER_ACTIVE
+    assert "stream_url" in event.payload
+
+    # Check SOURCE_STARTED event (emitted by SessionManager)
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event.type == EventType.SOURCE_STARTED
+    assert "adapter_session_id" in event.payload
+
+    # Check RENDERER_PLAYBACK_STARTED event
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event.type == EventType.RENDERER_PLAYBACK_STARTED
+    assert "target_id" in event.payload
+    assert "stream_url" in event.payload
 
     # Check STARTED event
     event = await asyncio.wait_for(queue.get(), timeout=1.0)
     assert event.type == EventType.SESSION_STARTED
+    assert "session_id" in event.payload
+
+    # Stop session
+    await session_manager.stop_session(session.session_id)
+
+    # Check STOPPING event
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event.type == EventType.SESSION_STOPPING
+    assert "session_id" in event.payload
+
+    # Check STOPPED event
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event.type == EventType.SESSION_STOPPED
+    assert "session_id" in event.payload
 
 
 @pytest.mark.asyncio
