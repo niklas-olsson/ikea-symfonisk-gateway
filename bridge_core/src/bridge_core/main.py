@@ -1,6 +1,9 @@
 """FastAPI application entry point."""
 
+import logging
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from bridge_core.api import (
     events_router,
@@ -10,10 +13,27 @@ from bridge_core.api import (
     targets_router,
 )
 
+# Configure basic logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
 app = FastAPI(
     title="IKEA SYMFONISK Bridge",
     description="Local bridge platform for IKEA SYMFONISK speakers",
     version="0.1.0",
+)
+
+# Setup CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(health_router)
