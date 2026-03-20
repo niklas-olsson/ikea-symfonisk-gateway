@@ -1,10 +1,10 @@
 from unittest.mock import MagicMock
 
-import pytest
+import pytest  # type: ignore
 from renderer_sonos.playback import PlaybackController
 
 
-def test_playback_controller_add_get_device():
+def test_playback_controller_add_get_device() -> None:
     controller = PlaybackController()
     mock_device = MagicMock()
 
@@ -15,7 +15,7 @@ def test_playback_controller_add_get_device():
     assert controller.get_device("target_2") is None
 
 
-def test_playback_controller_play_stream():
+def test_playback_controller_play_stream() -> None:
     controller = PlaybackController()
     mock_device = MagicMock()
     mock_coordinator = MagicMock()
@@ -33,7 +33,7 @@ def test_playback_controller_play_stream():
     mock_coordinator.play_uri.assert_called_once_with("http://stream.url", meta="some_meta")
 
 
-def test_playback_controller_play_stream_no_metadata():
+def test_playback_controller_play_stream_no_metadata() -> None:
     controller = PlaybackController()
     mock_device = MagicMock()
     mock_device.group = None  # Standalone
@@ -45,7 +45,7 @@ def test_playback_controller_play_stream_no_metadata():
     mock_device.play_uri.assert_called_once_with("http://stream.url", meta="")
 
 
-def test_playback_controller_stop():
+def test_playback_controller_stop() -> None:
     controller = PlaybackController()
     mock_device = MagicMock()
     mock_coordinator = MagicMock()
@@ -61,7 +61,7 @@ def test_playback_controller_stop():
     mock_coordinator.stop.assert_called_once()
 
 
-def test_playback_controller_set_volume():
+def test_playback_controller_set_volume() -> None:
     controller = PlaybackController()
     mock_device = MagicMock()
     mock_device.ip_address = "192.168.1.10"
@@ -73,7 +73,7 @@ def test_playback_controller_set_volume():
     assert mock_device.volume == 75
 
 
-def test_playback_controller_set_volume_invalid():
+def test_playback_controller_set_volume_invalid() -> None:
     controller = PlaybackController()
     mock_device = MagicMock()
 

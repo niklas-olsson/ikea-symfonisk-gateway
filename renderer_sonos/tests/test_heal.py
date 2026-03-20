@@ -1,16 +1,16 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
+import pytest  # type: ignore
 from renderer_sonos.heal import HealController
 
 
-@pytest.fixture
-def heal_controller():
+@pytest.fixture  # type: ignore
+def heal_controller() -> HealController:
     return HealController(max_retries=2, base_backoff=0.01)
 
 
-@pytest.mark.asyncio
-async def test_heal_group_membership_standalone_correct(heal_controller):
+@pytest.mark.asyncio  # type: ignore
+async def test_heal_group_membership_standalone_correct(heal_controller: HealController) -> None:
     # Device should be standalone, and is already standalone
     heal_controller.set_expected_topology({"uid_1": "uid_1"})
 
@@ -28,8 +28,8 @@ async def test_heal_group_membership_standalone_correct(heal_controller):
     mock_device.join.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_heal_group_membership_standalone_grouped(heal_controller):
+@pytest.mark.asyncio  # type: ignore
+async def test_heal_group_membership_standalone_grouped(heal_controller: HealController) -> None:
     # Device should be standalone, but is currently grouped with another
     heal_controller.set_expected_topology({"uid_1": "uid_1"})
 
@@ -50,8 +50,8 @@ async def test_heal_group_membership_standalone_grouped(heal_controller):
     mock_device.join.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_heal_group_membership_grouped_correct(heal_controller):
+@pytest.mark.asyncio  # type: ignore
+async def test_heal_group_membership_grouped_correct(heal_controller: HealController) -> None:
     # Device should be grouped with uid_2, and is grouped with uid_2
     heal_controller.set_expected_topology({"uid_1": "uid_2", "uid_2": "uid_2"})
 
@@ -72,8 +72,8 @@ async def test_heal_group_membership_grouped_correct(heal_controller):
     mock_device.join.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_heal_group_membership_grouped_standalone(heal_controller):
+@pytest.mark.asyncio  # type: ignore
+async def test_heal_group_membership_grouped_standalone(heal_controller: HealController) -> None:
     # Device should be grouped with uid_2, but is standalone
     heal_controller.set_expected_topology({"uid_1": "uid_2", "uid_2": "uid_2"})
 
@@ -94,8 +94,8 @@ async def test_heal_group_membership_grouped_standalone(heal_controller):
     mock_device.join.assert_called_once_with(mock_coordinator)
 
 
-@pytest.mark.asyncio
-async def test_heal_group_membership_retry(heal_controller):
+@pytest.mark.asyncio  # type: ignore
+async def test_heal_group_membership_retry(heal_controller: HealController) -> None:
     # Device should be grouped with uid_2, but join fails on first attempt
     heal_controller.set_expected_topology({"uid_1": "uid_2", "uid_2": "uid_2"})
 
