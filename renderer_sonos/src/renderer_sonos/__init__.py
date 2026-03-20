@@ -1,8 +1,12 @@
 """Sonos renderer adapter."""
 
 from collections.abc import Sequence
+import asyncio
 
 from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
+
+from .discovery import SonosDiscovery
+from .topology import SonosTopology
 
 
 class SonosTargetDescriptor(TargetDescriptor):
@@ -51,21 +55,41 @@ class SonosRendererAdapter(RendererAdapter):
     """Renderer adapter for Sonos/SYMFONISK speakers."""
 
     def __init__(self) -> None:
-        self._discovered: bool = False
-        self._targets: list[SonosTargetDescriptor] = []
+        self._discovery = SonosDiscovery()
+        self._topology = SonosTopology(self._discovery)
+        self._bg_started = False
 
     def id(self) -> str:
         return "sonos-renderer-v1"
 
-    async def list_targets(self) -> Sequence[TargetDescriptor]:
-        return self._targets
+    async def _ensure_discovery_started(self) -> None:
+        """Start background discovery if not already running."""
+        if not self._bg_started:
+            self._discovery.start_background_discovery(interval=30)
+            self._bg_started = True
 
-    async def get_topology(self) -> dict[str, str | list[str] | bool]:
-        return {
-            "renderer": "sonos",
-            "targets": [t.target_id for t in self._targets],
-            "discovered": self._discovered,
-        }
+    async def list_targets(self) -> Sequence[TargetDescriptor]:
+        await self._ensure_discovery_started()
+
+        topology_data = await self._topology.build()
+        targets = []
+
+        for t in topology_data.get("targets", []):
+            descriptor = SonosTargetDescriptor(
+                target_id=t["target_id"],
+                target_type=t["target_type"],
+                display_name=t["display_name"],
+                members=t["members"],
+                coordinator_id=t["coordinator_id"],
+            )
+            targets.append(descriptor)
+
+        return targets
+
+    from typing import Any
+    async def get_topology(self) -> dict[str, Any]:
+        await self._ensure_discovery_started()
+        return await self._topology.build()
 
     async def prepare_target(self, target_id: str) -> dict[str, str]:
         return {"success": "true", "target_id": target_id}
