@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+from adapter_synthetic import SyntheticAdapter
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -17,7 +18,6 @@ from bridge_core.api import (
 from bridge_core.core import EventBus, SessionManager, SourceRegistry, TargetRegistry
 from bridge_core.stream.publisher import StreamPublisher
 from renderer_sonos import SonosRendererAdapter
-from adapter_synthetic import SyntheticAdapter
 
 
 @asynccontextmanager
@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         platform=synthetic_adapter.platform(),
         version="0.1.0",
         capabilities=synthetic_adapter.capabilities(),
-        sources=synthetic_adapter.list_sources()
+        sources=synthetic_adapter.list_sources(),
     )
 
     # Start stream publisher in the background

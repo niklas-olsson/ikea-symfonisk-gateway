@@ -1,8 +1,5 @@
 """Target registry - tracks renderer adapters and available playback targets."""
 
-from collections.abc import Sequence
-from typing import Any
-
 from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
 from bridge_core.core.event_bus import EventBus, EventType
 
@@ -38,10 +35,7 @@ class TargetRegistry:
         if adapter_id in self._adapters:
             self._adapters.pop(adapter_id)
             # Cleanup targets
-            targets_to_remove = [
-                t_id for t_id, a_id in self._target_to_adapter.items()
-                if a_id == adapter_id
-            ]
+            targets_to_remove = [t_id for t_id, a_id in self._target_to_adapter.items() if a_id == adapter_id]
             for t_id in targets_to_remove:
                 self._targets.pop(t_id, None)
                 self._target_to_adapter.pop(t_id, None)

@@ -24,14 +24,16 @@ async def list_targets(request: Request) -> TargetListResponse:
     registry: TargetRegistry = request.app.state.target_registry
     targets = []
     for t in registry.list_targets():
-        targets.append({
-            "target_id": t.target_id,
-            "renderer": t.renderer,
-            "type": t.target_type,
-            "display_name": t.display_name,
-            "members": t.members,
-            "coordinator_id": t.coordinator_id,
-        })
+        targets.append(
+            {
+                "target_id": t.target_id,
+                "renderer": t.renderer,
+                "type": t.target_type,
+                "display_name": t.display_name,
+                "members": t.members,
+                "coordinator_id": t.coordinator_id,
+            }
+        )
     return TargetListResponse(targets=targets)
 
 

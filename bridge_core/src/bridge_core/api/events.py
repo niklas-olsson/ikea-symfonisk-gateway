@@ -29,9 +29,9 @@ async def event_generator(request: Request) -> AsyncGenerator[dict[str, str], No
                 yield {
                     "id": event.event_id,
                     "event": event.type,
-                    "data": json.dumps(event.to_dict())  # SSE data must be a string
+                    "data": json.dumps(event.to_dict()),  # SSE data must be a string
                 }
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Send keep-alive comment
                 yield {"comment": "keep-alive"}
 
