@@ -87,6 +87,9 @@ config/
 configs/
 settings/
 
+# Project exports
+.exports/
+
 # Misc
 *.bak
 *.tmp

@@ -1,0 +1,12 @@
+title = "ikea-symfonisk-gateway"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlisted files and patterns"
+files = [
+  ".env.example",
+  ".venv/.*",
+  "__pycache__/.*",
+]
