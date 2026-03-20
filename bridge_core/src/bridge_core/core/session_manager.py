@@ -48,16 +48,16 @@ class Session:
     def transition_to(self, new_state: SessionState) -> None:
         """Transitions the session to a new state if valid."""
         valid_transitions = {
-            SessionState.CREATED: [SessionState.PREPARING],
-            SessionState.PREPARING: [SessionState.READY, SessionState.FAILED],
+            SessionState.CREATED: [SessionState.PREPARING, SessionState.STARTING, SessionState.FAILED],
+            SessionState.PREPARING: [SessionState.READY, SessionState.STOPPING, SessionState.FAILED],
             SessionState.READY: [SessionState.STARTING, SessionState.STOPPING, SessionState.FAILED],
-            SessionState.STARTING: [SessionState.PLAYING, SessionState.FAILED],
+            SessionState.STARTING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.PLAYING: [SessionState.HEALING, SessionState.STOPPING, SessionState.FAILED],
-            SessionState.HEALING: [SessionState.PLAYING, SessionState.DEGRADED, SessionState.FAILED],
-            SessionState.DEGRADED: [SessionState.PLAYING, SessionState.STOPPING, SessionState.FAILED],
+            SessionState.HEALING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.DEGRADED, SessionState.FAILED],
+            SessionState.DEGRADED: [SessionState.PLAYING, SessionState.HEALING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.STOPPING: [SessionState.STOPPED, SessionState.FAILED],
             SessionState.STOPPED: [SessionState.STARTING, SessionState.PREPARING, SessionState.FAILED],
-            SessionState.FAILED: [SessionState.PREPARING, SessionState.HEALING],
+            SessionState.FAILED: [SessionState.PREPARING, SessionState.STARTING, SessionState.HEALING],
         }
 
         if new_state not in valid_transitions.get(self.state, []):
@@ -124,6 +124,9 @@ class SessionManager:
         if not session:
             return False
 
+        if session.state == SessionState.PLAYING:
+            return True
+
         try:
             session.transition_to(SessionState.STARTING)
         except ValueError:
@@ -148,6 +151,9 @@ class SessionManager:
         session = self.get(session_id)
         if not session:
             return False
+
+        if session.state == SessionState.STOPPED:
+            return True
 
         try:
             session.transition_to(SessionState.STOPPING)
