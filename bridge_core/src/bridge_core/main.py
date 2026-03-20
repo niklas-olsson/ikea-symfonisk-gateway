@@ -3,11 +3,9 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-
-from adapter_synthetic import SyntheticAdapter
-import os
 from pathlib import Path
 
+from adapter_synthetic import SyntheticAdapter
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
