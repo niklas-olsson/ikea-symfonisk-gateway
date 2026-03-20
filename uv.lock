@@ -17,6 +17,7 @@ members = [
 
 [manifest.dependency-groups]
 dev = [
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "mypy", specifier = ">=1.19.1" },
     { name = "ruff", specifier = ">=0.15.7" },
 ]

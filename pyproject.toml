@@ -37,6 +37,7 @@ strict = true
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "mypy>=1.19.1",
     "ruff>=0.15.7",
 ]
