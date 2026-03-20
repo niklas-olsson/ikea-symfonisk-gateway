@@ -4,8 +4,6 @@ Generates sine waves, pink noise, and silence for testing.
 """
 
 import asyncio
-import math
-import struct
 from uuid import uuid4
 
 import numpy as np
@@ -37,8 +35,14 @@ class SyntheticAdapter(IngressAdapter):
         self._task: asyncio.Task[None] | None = None
         self._frame_sink: FrameSink | None = None
         self._mode: SyntheticMode = SyntheticMode.SINE_WAVE
-        self._phase = 0.0
+        self._sample_index = 0
         self._source_id = f"synthetic:{uuid4().hex[:8]}"
+
+        # Pink noise state (Voss-McCartney algorithm)
+        # Using 16 rows for a good 1/f approximation
+        self._pink_rows = np.random.randn(16)
+        self._pink_running_sum = np.sum(self._pink_rows)
+        self._pink_key = 0
 
     def id(self) -> str:
         return f"synthetic-{uuid4().hex[:8]}"
@@ -77,6 +81,7 @@ class SyntheticAdapter(IngressAdapter):
         self._session_id = f"sess_{uuid4().hex[:12]}"
         self._frame_sink = frame_sink
         self._running = True
+        self._sample_index = 0
         self._task = asyncio.create_task(self._generate_loop())
         return StartResult(success=True, session_id=self._session_id)
 
@@ -98,37 +103,71 @@ class SyntheticAdapter(IngressAdapter):
         )
 
     async def _generate_loop(self) -> None:
+        start_time = asyncio.get_event_loop().time()
+        frames_sent = 0
+
         while self._running:
-            frame = self._generate_frame()
-            pts_ns = int(self._phase * 1_000_000_000 / SAMPLE_RATE)
+            pts_ns = int(self._sample_index * 1_000_000_000 / SAMPLE_RATE)
             duration_ns = int(SAMPLES_PER_FRAME * 1_000_000_000 / SAMPLE_RATE)
+
+            frame = self._generate_frame()
 
             if self._frame_sink:
                 self._frame_sink.on_frame(frame, pts_ns, duration_ns)
 
-            await asyncio.sleep(SAMPLES_PER_FRAME / SAMPLE_RATE)
+            frames_sent += 1
+            # Calculate when the next frame should be sent relative to the start
+            next_frame_time = start_time + (frames_sent * SAMPLES_PER_FRAME / SAMPLE_RATE)
+            sleep_time = next_frame_time - asyncio.get_event_loop().time()
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+            else:
+                # We are behind, don't sleep but yield
+                await asyncio.sleep(0)
 
     def _generate_frame(self) -> bytes:
         if self._mode == SyntheticMode.SILENCE:
+            self._sample_index += SAMPLES_PER_FRAME
             return b"\x00" * FRAME_SIZE
 
-        samples = []
-        for i in range(SAMPLES_PER_FRAME):
-            t = (self._phase + i) / SAMPLE_RATE
-            if self._mode == SyntheticMode.SINE_WAVE:
-                sample = 0.5 * math.sin(2 * math.pi * 440 * t)
-            elif self._mode == SyntheticMode.PINK_NOISE:
-                sample = np.random.randn() * 0.3
-            else:
-                sample = 0.0
+        if self._mode == SyntheticMode.SINE_WAVE:
+            # Generate 440Hz sine wave
+            t = (self._sample_index + np.arange(SAMPLES_PER_FRAME)) / SAMPLE_RATE
+            samples = 0.5 * np.sin(2 * np.pi * 440 * t)
+        elif self._mode == SyntheticMode.PINK_NOISE:
+            samples = np.zeros(SAMPLES_PER_FRAME)
+            for j in range(SAMPLES_PER_FRAME):
+                self._pink_key = (self._pink_key + 1) & 0xFFFF
+                if self._pink_key == 0:
+                    self._pink_key = 1
 
-            sample_int = int(sample * 32767)
-            sample_int = max(-32768, min(32767, sample_int))
-            samples.extend([sample_int, sample_int])
+                # Determine which row to update using the index of the lowest set bit
+                i = (self._pink_key & -self._pink_key).bit_length() - 1
+                # Ensure i is within bounds of our 16 rows
+                i = min(i, 15)
 
-        self._phase += SAMPLES_PER_FRAME
-        num_samples = FRAME_SIZE // BYTES_PER_SAMPLE
-        return struct.pack("<" + "h" * num_samples, *samples)
+                old_val = self._pink_rows[i]
+                self._pink_rows[i] = np.random.randn()
+                self._pink_running_sum += self._pink_rows[i] - old_val
+                samples[j] = self._pink_running_sum / 16.0
+
+            # Scale to avoid excessive clipping (Voss algorithm std dev is ~0.25)
+            samples = samples * 0.5
+        else:
+            samples = np.zeros(SAMPLES_PER_FRAME)
+
+        self._sample_index += SAMPLES_PER_FRAME
+
+        # Convert to 16-bit PCM (little-endian)
+        samples_int16 = (samples * 32767).clip(-32768, 32767).astype("<i2")
+
+        # Create stereo by duplicating mono to both channels [L, R, L, R, ...]
+        stereo_samples = np.empty(SAMPLES_PER_FRAME * 2, dtype="<i2")
+        stereo_samples[0::2] = samples_int16
+        stereo_samples[1::2] = samples_int16
+
+        return stereo_samples.tobytes()
 
     def set_mode(self, mode: SyntheticMode) -> None:
+        """Set the synthetic generation mode."""
         self._mode = mode
