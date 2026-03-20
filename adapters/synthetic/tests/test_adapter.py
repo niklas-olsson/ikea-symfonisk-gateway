@@ -7,10 +7,10 @@ from ingress_sdk.types import SourceType, SyntheticMode
 
 
 class MockFrameSink:
-    def __init__(self):
-        self.frames = []
-        self.pts = []
-        self.durations = []
+    def __init__(self) -> None:
+        self.frames: list[bytes] = []
+        self.pts: list[int] = []
+        self.durations: list[int] = []
 
     def on_frame(self, data: bytes, pts_ns: int, duration_ns: int) -> None:
         self.frames.append(data)
@@ -18,13 +18,13 @@ class MockFrameSink:
         self.durations.append(duration_ns)
 
 
-def test_adapter_instantiation():
+def test_adapter_instantiation() -> None:
     adapter = SyntheticAdapter()
     assert adapter.platform() == "any"
     assert "synthetic-" in adapter.id()
 
 
-def test_list_sources():
+def test_list_sources() -> None:
     adapter = SyntheticAdapter()
     sources = adapter.list_sources()
     assert len(sources) == 1
@@ -33,17 +33,17 @@ def test_list_sources():
 
 
 @pytest.mark.asyncio
-async def test_sine_wave_generation():
+async def test_sine_wave_generation() -> None:
     adapter = SyntheticAdapter()
-    sink = MockFrameSink()
+    sink: MockFrameSink = MockFrameSink()
     adapter.set_mode(SyntheticMode.SINE_WAVE)
 
     sources = adapter.list_sources()
-    adapter.start(sources[0].source_id, sink)
+    result = adapter.start(sources[0].source_id, sink)
 
     # Wait for a few frames
     await asyncio.sleep(0.1)
-    adapter.stop(None)
+    adapter.stop(result.session_id)
 
     assert len(sink.frames) >= 5
     for frame in sink.frames:
@@ -58,16 +58,16 @@ async def test_sine_wave_generation():
 
 
 @pytest.mark.asyncio
-async def test_silence_generation():
+async def test_silence_generation() -> None:
     adapter = SyntheticAdapter()
-    sink = MockFrameSink()
+    sink: MockFrameSink = MockFrameSink()
     adapter.set_mode(SyntheticMode.SILENCE)
 
     sources = adapter.list_sources()
-    adapter.start(sources[0].source_id, sink)
+    result = adapter.start(sources[0].source_id, sink)
 
     await asyncio.sleep(0.1)
-    adapter.stop(None)
+    adapter.stop(result.session_id)
 
     assert len(sink.frames) >= 5
     for frame in sink.frames:
@@ -76,16 +76,16 @@ async def test_silence_generation():
 
 
 @pytest.mark.asyncio
-async def test_pink_noise_generation():
+async def test_pink_noise_generation() -> None:
     adapter = SyntheticAdapter()
-    sink = MockFrameSink()
+    sink: MockFrameSink = MockFrameSink()
     adapter.set_mode(SyntheticMode.PINK_NOISE)
 
     sources = adapter.list_sources()
-    adapter.start(sources[0].source_id, sink)
+    result = adapter.start(sources[0].source_id, sink)
 
     await asyncio.sleep(0.1)
-    adapter.stop(None)
+    adapter.stop(result.session_id)
 
     assert len(sink.frames) >= 5
     for frame in sink.frames:
@@ -93,7 +93,7 @@ async def test_pink_noise_generation():
         assert frame != b"\x00" * FRAME_SIZE
 
 
-def test_format_verification():
+def test_format_verification() -> None:
     adapter = SyntheticAdapter()
     adapter.set_mode(SyntheticMode.SINE_WAVE)
     frame_data = adapter._generate_frame()

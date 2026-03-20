@@ -6,7 +6,7 @@ from renderer_sonos import SonosRendererAdapter
 
 
 @pytest.mark.asyncio
-async def test_list_targets_single_speaker():
+async def test_list_targets_single_speaker() -> None:
     # Mock SoCo discovery
     mock_soco1 = MagicMock()
     mock_soco1.player_name = "Living Room"
@@ -32,7 +32,7 @@ async def test_list_targets_single_speaker():
 
 
 @pytest.mark.asyncio
-async def test_list_targets_multiple_groups():
+async def test_list_targets_multiple_groups() -> None:
     # Mock SoCo discovery with two separate groups
     mock_soco1 = MagicMock()
     mock_soco1.player_name = "Living Room"
@@ -64,7 +64,7 @@ async def test_list_targets_multiple_groups():
 
 
 @pytest.mark.asyncio
-async def test_list_targets_stereo_pair():
+async def test_list_targets_stereo_pair() -> None:
     # A stereo pair is one group with two members
     mock_soco_left = MagicMock()
     mock_soco_left.player_name = "Bedroom"
@@ -95,7 +95,7 @@ async def test_list_targets_stereo_pair():
 
 
 @pytest.mark.asyncio
-async def test_list_targets_grouped_speakers():
+async def test_list_targets_grouped_speakers() -> None:
     # Two speakers grouped together
     mock_soco1 = MagicMock()
     mock_soco1.player_name = "Living Room"
@@ -126,7 +126,7 @@ async def test_list_targets_grouped_speakers():
 
 
 @pytest.mark.asyncio
-async def test_get_topology():
+async def test_get_topology() -> None:
     mock_soco1 = MagicMock()
     mock_soco1.player_name = "Living Room"
     mock_soco1.uid = "RINCON_1"

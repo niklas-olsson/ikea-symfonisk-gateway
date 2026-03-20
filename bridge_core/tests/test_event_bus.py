@@ -8,7 +8,7 @@ from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
 
 
 @pytest.mark.anyio
-async def test_event_bus_queue_subscription():
+async def test_event_bus_queue_subscription() -> None:
     """Test that events are correctly delivered to a subscriber queue."""
     bus = EventBus()
     queue = bus.subscribe(EventType.SESSION_CREATED)
@@ -22,7 +22,7 @@ async def test_event_bus_queue_subscription():
 
 
 @pytest.mark.anyio
-async def test_event_bus_handler_subscription():
+async def test_event_bus_handler_subscription() -> None:
     """Test that events are correctly delivered to a callback handler."""
     bus = EventBus()
     handler = AsyncMock()
@@ -37,7 +37,7 @@ async def test_event_bus_handler_subscription():
 
 
 @pytest.mark.anyio
-async def test_event_bus_filtering():
+async def test_event_bus_filtering() -> None:
     """Test that events are filtered correctly based on subscription type."""
     bus = EventBus()
     queue = bus.subscribe(EventType.SESSION_CREATED)
@@ -54,7 +54,7 @@ async def test_event_bus_filtering():
 
 
 @pytest.mark.anyio
-async def test_event_bus_unsubscribe():
+async def test_event_bus_unsubscribe() -> None:
     """Test that unsubscribed consumers do not receive events."""
     bus = EventBus()
     queue = bus.subscribe()
@@ -65,7 +65,7 @@ async def test_event_bus_unsubscribe():
 
 
 @pytest.mark.anyio
-async def test_event_bus_unsubscribe_handler():
+async def test_event_bus_unsubscribe_handler() -> None:
     """Test that unsubscribed handlers do not receive events."""
     bus = EventBus()
     handler = AsyncMock()
