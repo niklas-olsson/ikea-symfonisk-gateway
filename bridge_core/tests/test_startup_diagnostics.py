@@ -172,6 +172,19 @@ async def test_windows_system_output_silent_startup_proceeds(session_manager, mo
         mock_pipeline.stop = AsyncMock()
         mock_pipeline.jitter_buffer = MagicMock()
         mock_pipeline.jitter_buffer.size_ms = 0.0
+        mock_pipeline.get_diagnostics_snapshot.return_value = {
+            "real_frames_written": 0,
+            "silence_frames_written": 0,
+            "runtime_mode": "healthy_but_idle",
+            "last_real_frame_age_ms": None,
+            "keepalive_to_first_real_frame_ms": None,
+            "transport_alive": True,
+            "encoded_bytes_emitted_total": 0,
+            "encoded_bytes_emitted_last_window": 0,
+            "last_stdout_read_monotonic": 1.0,
+            "last_stdin_write_monotonic": 1.0,
+            "keepalive_active": True,
+        }
 
         success = await session_manager.start_session(session.session_id)
 
@@ -232,6 +245,19 @@ async def test_windows_system_output_viable_silent_startup_proceeds(session_mana
         mock_pipeline.stop = AsyncMock()
         mock_pipeline.jitter_buffer = MagicMock()
         mock_pipeline.jitter_buffer.size_ms = 0.0
+        mock_pipeline.get_diagnostics_snapshot.return_value = {
+            "real_frames_written": 0,
+            "silence_frames_written": 0,
+            "runtime_mode": "idle_pending_signal",
+            "last_real_frame_age_ms": None,
+            "keepalive_to_first_real_frame_ms": None,
+            "transport_alive": True,
+            "encoded_bytes_emitted_total": 0,
+            "encoded_bytes_emitted_last_window": 0,
+            "last_stdout_read_monotonic": 1.0,
+            "last_stdin_write_monotonic": 1.0,
+            "keepalive_active": True,
+        }
 
         success = await session_manager.start_session(session.session_id)
 

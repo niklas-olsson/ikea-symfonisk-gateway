@@ -357,6 +357,7 @@ async def test_session_manager_passes_pipeline_runtime_config(
         "audio_keepalive_frame_duration_ms": 17,
         "audio_source_outage_grace_ms": 4567,
         "audio_live_jitter_target_ms": 61,
+        "audio_transport_heartbeat_window_ms": 345,
         "audio_debug_capture_enabled": True,
         "audio_debug_capture_pre_encoder_path": "/tmp/pre.wav",
         "audio_debug_capture_post_encoder_path": "/tmp/post.mp3",
@@ -393,6 +394,7 @@ async def test_session_manager_passes_pipeline_runtime_config(
     assert kwargs["keepalive_frame_duration_ms"] == 17
     assert kwargs["source_outage_grace_ms"] == 4567
     assert kwargs["live_jitter_target_ms"] == 61
+    assert kwargs["transport_heartbeat_window_ms"] == 345
     assert kwargs["debug_capture_enabled"] is True
     assert kwargs["debug_capture_pre_encoder_path"] == "/tmp/pre.wav"
     assert kwargs["debug_capture_post_encoder_path"] == "/tmp/post.mp3"
@@ -463,9 +465,15 @@ async def test_windows_silent_source_viability_allows_startup(
         mock_pipeline.jitter_buffer.size_ms = 0.0
         mock_pipeline.get_diagnostics_snapshot.return_value = {
             "real_frames_written": 0,
+            "silence_frames_written": 0,
             "runtime_mode": "idle_pending_signal",
             "last_real_frame_age_ms": None,
             "keepalive_to_first_real_frame_ms": None,
+            "transport_alive": False,
+            "encoded_bytes_emitted_total": 0,
+            "encoded_bytes_emitted_last_window": 0,
+            "last_stdout_read_monotonic": None,
+            "last_stdin_write_monotonic": None,
         }
 
         success = await manager.start_session(session.session_id)
@@ -522,6 +530,7 @@ async def test_pipeline_runtime_config_only_uses_live_defaults_for_windows_syste
     assert kwargs["keepalive_idle_threshold_ms"] == 200
     assert kwargs["keepalive_frame_duration_ms"] == 20
     assert kwargs["live_jitter_target_ms"] == 250
+    assert kwargs["transport_heartbeat_window_ms"] == 500
 
 
 @pytest.mark.asyncio
@@ -582,9 +591,15 @@ async def test_silent_viability_startup_degrades_if_never_active(
         mock_pipeline.jitter_buffer.size_ms = 0.0
         mock_pipeline.get_diagnostics_snapshot.return_value = {
             "real_frames_written": 0,
+            "silence_frames_written": 0,
             "runtime_mode": "idle_pending_signal",
             "last_real_frame_age_ms": None,
             "keepalive_to_first_real_frame_ms": None,
+            "transport_alive": False,
+            "encoded_bytes_emitted_total": 0,
+            "encoded_bytes_emitted_last_window": 0,
+            "last_stdout_read_monotonic": None,
+            "last_stdin_write_monotonic": None,
         }
 
         success = await manager.start_session(session.session_id)
@@ -592,6 +607,175 @@ async def test_silent_viability_startup_degrades_if_never_active(
         await asyncio.sleep(1.2)
 
     assert session.state == SessionState.DEGRADED
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_transport_heartbeat_loss_degrades_session(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=True,
+        source_state="active",
+        last_error=None,
+        details={
+            "startup_substate": "active",
+            "callback_count": 5,
+            "frames_emitted": 5,
+            "start_viability": {"stream_opened": True, "stream_started": True, "callback_registered": True},
+        },
+    )
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_transport_heartbeat_window_ms": 100,
+    }.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+
+    heartbeat_ok = {
+        "real_frames_written": 3,
+        "silence_frames_written": 0,
+        "runtime_mode": "active",
+        "last_real_frame_age_ms": 5.0,
+        "keepalive_to_first_real_frame_ms": None,
+        "transport_alive": True,
+        "encoded_bytes_emitted_total": 1024,
+        "encoded_bytes_emitted_last_window": 512,
+        "last_stdout_read_monotonic": 123.0,
+        "last_stdin_write_monotonic": 123.0,
+        "keepalive_active": False,
+    }
+    heartbeat_dead = {
+        **heartbeat_ok,
+        "transport_alive": False,
+        "encoded_bytes_emitted_last_window": 0,
+        "last_stdout_read_monotonic": None,
+    }
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        mock_pipeline.get_diagnostics_snapshot.side_effect = [heartbeat_ok, heartbeat_dead, heartbeat_dead, heartbeat_dead]
+
+        success = await manager.start_session(session.session_id)
+        assert success is True
+        await asyncio.sleep(0.6)
+
+    assert session.state == SessionState.DEGRADED
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_transport_heartbeat_recovery_restores_playing(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=True,
+        source_state="active",
+        last_error=None,
+        details={
+            "startup_substate": "active",
+            "callback_count": 5,
+            "frames_emitted": 5,
+            "start_viability": {"stream_opened": True, "stream_started": True, "callback_registered": True},
+        },
+    )
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_transport_heartbeat_window_ms": 100,
+    }.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+
+    heartbeat_dead = {
+        "real_frames_written": 3,
+        "silence_frames_written": 0,
+        "runtime_mode": "active",
+        "last_real_frame_age_ms": 5.0,
+        "keepalive_to_first_real_frame_ms": None,
+        "first_real_encoded_output_after_session_start_ms": 25.0,
+        "transport_alive": False,
+        "encoded_bytes_emitted_total": 1024,
+        "encoded_bytes_emitted_last_window": 0,
+        "last_stdout_read_monotonic": None,
+        "last_stdin_write_monotonic": 123.0,
+        "keepalive_active": False,
+    }
+    heartbeat_restored = {
+        **heartbeat_dead,
+        "transport_alive": True,
+        "encoded_bytes_emitted_last_window": 256,
+        "last_stdout_read_monotonic": 124.0,
+    }
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        mock_pipeline.get_diagnostics_snapshot.side_effect = [heartbeat_dead, heartbeat_dead, heartbeat_restored, heartbeat_restored]
+
+        success = await manager.start_session(session.session_id)
+        assert success is True
+        await asyncio.sleep(0.8)
+
+    assert session.state == SessionState.PLAYING
     await manager.stop_session(session.session_id)
 
 

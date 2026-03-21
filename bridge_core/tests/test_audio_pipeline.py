@@ -82,6 +82,7 @@ async def test_stream_pipeline_lifecycle() -> None:
         diagnostics = pipeline.get_diagnostics_snapshot()
         assert diagnostics["live_jitter_target_ms"] == 250
         assert diagnostics["ffmpeg_input_format"]["frame_duration_ms"] == 20
+        assert diagnostics["transport_heartbeat_window_ms"] == 500
 
 
 @pytest.mark.asyncio
@@ -186,6 +187,53 @@ async def test_pipeline_continues_keepalive_without_source_failure_policy() -> N
     diagnostics = pipeline.get_diagnostics_snapshot()
     assert diagnostics["silence_frames_written"] > 0
     assert diagnostics["source_outage_active"] is False
+
+
+@pytest.mark.asyncio
+async def test_pipeline_tracks_transport_heartbeat_from_stdout() -> None:
+    pipeline = StreamPipeline(
+        "test_sess",
+        "mp3_48k_stereo_320",
+        keepalive_idle_threshold_ms=10,
+        keepalive_frame_duration_ms=10,
+        transport_heartbeat_window_ms=50,
+    )
+    mock_process = FakeProcess(stdout_chunks=[b"encoded-data"])
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+        await pipeline.start()
+        await asyncio.sleep(0.01)
+        diagnostics = pipeline.get_diagnostics_snapshot()
+        assert diagnostics["encoded_bytes_emitted_total"] == len(b"encoded-data")
+        assert diagnostics["encoded_bytes_emitted_last_window"] == len(b"encoded-data")
+        assert diagnostics["transport_alive"] is True
+        assert diagnostics["last_stdout_read_monotonic"] is not None
+        await asyncio.sleep(0.06)
+        await pipeline.stop()
+
+    final_diagnostics = pipeline.get_diagnostics_snapshot()
+    assert final_diagnostics["transport_alive"] is False
+
+
+@pytest.mark.asyncio
+async def test_pipeline_tracks_client_fanout_timestamp() -> None:
+    pipeline = StreamPipeline(
+        "test_sess",
+        "mp3_48k_stereo_320",
+        keepalive_idle_threshold_ms=10,
+        keepalive_frame_duration_ms=10,
+    )
+    mock_process = FakeProcess(stdout_chunks=[b"encoded-data"])
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+        await pipeline.start()
+        subscriber = pipeline.subscribe()
+        first_chunk = await asyncio.wait_for(anext(subscriber), timeout=1.0)
+        assert first_chunk == b"encoded-data"
+        diagnostics = pipeline.get_diagnostics_snapshot()
+        assert diagnostics["last_client_fanout_monotonic"] is not None
+        await subscriber.aclose()
+        await pipeline.stop()
 
 
 @pytest.mark.asyncio

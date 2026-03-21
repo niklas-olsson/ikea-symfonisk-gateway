@@ -36,6 +36,7 @@ AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT = 5000
 AUDIO_LIVE_JITTER_TARGET_MS_DEFAULT = 60
 AUDIO_LIVE_STARTUP_ALLOW_SILENT_SOURCE_DEFAULT = True
 AUDIO_LIVE_STARTUP_VIABILITY_TIMEOUT_MS_DEFAULT = 1000
+AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT = 500
 AUDIO_DEBUG_CAPTURE_ENABLED_DEFAULT = False
 AUDIO_DEBUG_PACING_LOGS_ENABLED_DEFAULT = False
 COMPAT_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 200
@@ -281,6 +282,10 @@ class SessionManager:
             "live_jitter_target_ms": self._get_int_config(
                 "audio_live_jitter_target_ms",
                 AUDIO_LIVE_JITTER_TARGET_MS_DEFAULT if is_windows_live_source else COMPAT_JITTER_TARGET_MS_DEFAULT,
+            ),
+            "transport_heartbeat_window_ms": self._get_int_config(
+                "audio_transport_heartbeat_window_ms",
+                AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT if is_windows_live_source else AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT,
             ),
             "debug_capture_enabled": self._get_bool_config(
                 "audio_debug_capture_enabled",
@@ -562,6 +567,9 @@ class SessionManager:
             health_details = health.details if health else {}
             last_health_details = health_details
 
+            if health is not None and not health.healthy and not self._is_windows_source_viable(health):
+                break
+
             verification_result, verification_reason = self._classify_windows_verification_state(health)
             if verification_result == "active":
                 logger.info(
@@ -719,13 +727,18 @@ class SessionManager:
     async def _monitor_windows_live_session(self, session_id: str, startup_result: str) -> None:
         activation_watchdog_ms = WINDOWS_SOURCE_ACTIVITY_WATCHDOG_MS_DEFAULT
         source_outage_grace_ms = self._get_int_config("audio_source_outage_grace_ms", AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT)
+        transport_heartbeat_window_ms = self._get_int_config(
+            "audio_transport_heartbeat_window_ms",
+            AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT,
+        )
         started_at = time.monotonic()
         activation_seen = startup_result == "active"
-        degraded_emitted = False
+        activation_degraded_emitted = False
+        transport_degraded_emitted = False
 
         try:
             while True:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.25)
                 session = self.get(session_id)
                 if not session or session.state in {SessionState.STOPPED, SessionState.STOPPING, SessionState.FAILED}:
                     return
@@ -739,10 +752,17 @@ class SessionManager:
                 signal_present = bool(health.signal_present) if health else False
                 real_frames_written = int(diagnostics.get("real_frames_written") or 0)
                 runtime_mode = diagnostics.get("runtime_mode")
+                transport_alive = bool(diagnostics.get("transport_alive"))
+                encoded_bytes_emitted_total = int(diagnostics.get("encoded_bytes_emitted_total") or 0)
+                encoded_bytes_emitted_last_window = int(diagnostics.get("encoded_bytes_emitted_last_window") or 0)
+                last_stdout_read_monotonic = diagnostics.get("last_stdout_read_monotonic")
+                last_stdin_write_monotonic = diagnostics.get("last_stdin_write_monotonic")
+                silence_frames_written = int(diagnostics.get("silence_frames_written") or 0)
+                keepalive_active = bool(diagnostics.get("keepalive_active"))
                 activation_seen = activation_seen or callback_count > 0 or frames_emitted > 0 or signal_present or real_frames_written > 0
 
                 elapsed_ms = (time.monotonic() - started_at) * 1000
-                if startup_result == "idle_pending_signal" and not activation_seen and elapsed_ms >= activation_watchdog_ms and not degraded_emitted:
+                if startup_result == "idle_pending_signal" and not activation_seen and elapsed_ms >= activation_watchdog_ms and not activation_degraded_emitted:
                     if session.state == SessionState.PLAYING:
                         session.transition_to(SessionState.DEGRADED)
                     details = {
@@ -752,6 +772,9 @@ class SessionManager:
                         "frames_emitted": frames_emitted,
                         "real_frames_written": real_frames_written,
                         "runtime_mode": runtime_mode,
+                        "transport_alive": transport_alive,
+                        "encoded_bytes_emitted_total": encoded_bytes_emitted_total,
+                        "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
                         "health": health.details if health else None,
                     }
                     logger.warning(
@@ -766,23 +789,79 @@ class SessionManager:
                         session_id=session_id,
                         payload={"state": "degraded_no_source_activity_yet", "details": details},
                     )
-                    degraded_emitted = True
+                    activation_degraded_emitted = True
 
-                if degraded_emitted and activation_seen and session.state == SessionState.DEGRADED:
+                stdout_silence_age_ms: float | None = None
+                if last_stdout_read_monotonic is not None:
+                    stdout_silence_age_ms = (time.monotonic() - last_stdout_read_monotonic) * 1000
+                elif elapsed_ms >= transport_heartbeat_window_ms:
+                    stdout_silence_age_ms = elapsed_ms
+
+                transport_should_degrade = (
+                    session.state == SessionState.PLAYING
+                    and stdout_silence_age_ms is not None
+                    and stdout_silence_age_ms >= transport_heartbeat_window_ms
+                    and not transport_alive
+                )
+                if transport_should_degrade and not transport_degraded_emitted:
+                    session.transition_to(SessionState.DEGRADED)
+                    details = {
+                        "reason": "transport_heartbeat_lost",
+                        "transport_alive": transport_alive,
+                        "transport_heartbeat_window_ms": transport_heartbeat_window_ms,
+                        "last_stdout_read_monotonic": last_stdout_read_monotonic,
+                        "last_stdin_write_monotonic": last_stdin_write_monotonic,
+                        "encoded_bytes_emitted_total": encoded_bytes_emitted_total,
+                        "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
+                        "real_frames_written": real_frames_written,
+                        "silence_frames_written": silence_frames_written,
+                        "runtime_mode": runtime_mode,
+                        "health": health.details if health else None,
+                    }
+                    logger.warning(
+                        "audio_transport_heartbeat_degraded session_id=%s source_id=%s details=%s",
+                        session_id,
+                        session.source_id,
+                        details,
+                    )
+                    self._event_bus.emit(
+                        EventType.SOURCE_STATE_CHANGED,
+                        session_id=session_id,
+                        payload={"state": "playing_degraded", "details": details},
+                    )
+                    transport_degraded_emitted = True
+
+                if session.state == SessionState.DEGRADED and transport_alive and (real_frames_written > 0 or keepalive_active):
                     session.transition_to(SessionState.PLAYING)
+                    restored_state = "active" if real_frames_written > 0 else "idle"
+                    details = {
+                        "transport_alive": transport_alive,
+                        "encoded_bytes_emitted_total": encoded_bytes_emitted_total,
+                        "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
+                        "callback_count": callback_count,
+                        "frames_emitted": frames_emitted,
+                        "real_frames_written": real_frames_written,
+                        "silence_frames_written": silence_frames_written,
+                        "keepalive_to_first_real_frame_ms": diagnostics.get("keepalive_to_first_real_frame_ms"),
+                        "first_real_encoded_output_after_session_start_ms": diagnostics.get(
+                            "first_real_encoded_output_after_session_start_ms"
+                        ),
+                    }
+                    logger.info(
+                        "audio_transport_heartbeat_restored session_id=%s source_id=%s details=%s",
+                        session_id,
+                        session.source_id,
+                        details,
+                    )
                     self._event_bus.emit(
                         EventType.SOURCE_STATE_CHANGED,
                         session_id=session_id,
                         payload={
-                            "state": "active",
-                            "details": {
-                                "callback_count": callback_count,
-                                "frames_emitted": frames_emitted,
-                                "real_frames_written": real_frames_written,
-                                "keepalive_to_first_real_frame_ms": diagnostics.get("keepalive_to_first_real_frame_ms"),
-                            },
+                            "state": restored_state,
+                            "details": details,
                         },
                     )
+                    transport_degraded_emitted = False
 
                 last_real_frame_age_ms = diagnostics.get("last_real_frame_age_ms")
                 if (
@@ -828,6 +907,9 @@ class SessionManager:
         frames_emitted = int(details.get("frames_emitted") or 0)
         callback_count = int(details.get("callback_count") or 0)
 
+        if not health.healthy and not self._is_windows_source_viable(health):
+            return ("stall", "unhealthy_backend")
+
         if health.healthy and health.source_state == "active":
             return ("active", "backend_active_state")
         if health.healthy and frames_emitted > 0:
@@ -847,9 +929,6 @@ class SessionManager:
             "samples_received_no_frames_emitted",
         }:
             return ("stall", health.source_state)
-
-        if not health.healthy:
-            return ("stall", "unhealthy_backend")
 
         return ("stall", health.source_state or "unknown")
 

@@ -6,6 +6,7 @@ import json
 import logging
 import time
 import wave
+from collections import deque
 from collections.abc import AsyncGenerator
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -21,6 +22,7 @@ DEFAULT_KEEPALIVE_IDLE_THRESHOLD_MS = 200
 DEFAULT_KEEPALIVE_FRAME_DURATION_MS = 20
 DEFAULT_SOURCE_OUTAGE_GRACE_MS = 5000
 DEFAULT_JITTER_TARGET_MS = 250
+DEFAULT_TRANSPORT_HEARTBEAT_WINDOW_MS = 500
 PACING_LOG_INTERVAL_SECONDS = 2.0
 
 
@@ -119,6 +121,7 @@ class StreamPipeline:
         source_outage_grace_ms: int = DEFAULT_SOURCE_OUTAGE_GRACE_MS,
         keepalive_frame_duration_ms: int = DEFAULT_KEEPALIVE_FRAME_DURATION_MS,
         live_jitter_target_ms: int = DEFAULT_JITTER_TARGET_MS,
+        transport_heartbeat_window_ms: int = DEFAULT_TRANSPORT_HEARTBEAT_WINDOW_MS,
         debug_capture_enabled: bool = False,
         debug_capture_pre_encoder_path: str | None = None,
         debug_capture_post_encoder_path: str | None = None,
@@ -144,6 +147,7 @@ class StreamPipeline:
         self._source_outage_grace_ms = source_outage_grace_ms
         self._frame_duration_ms = self._ffmpeg_input_format.frame_duration_ms
         self._live_jitter_target_ms = live_jitter_target_ms
+        self._transport_heartbeat_window_ms = transport_heartbeat_window_ms
         self._debug_capture_enabled = debug_capture_enabled
         self._debug_capture_pre_encoder_path = debug_capture_pre_encoder_path
         self._debug_capture_post_encoder_path = debug_capture_post_encoder_path
@@ -162,6 +166,9 @@ class StreamPipeline:
         self._encoder_write_count = 0
         self._last_encoder_write_monotonic: float | None = None
         self._last_encoder_write_was_silence = False
+        self._last_stdin_write_monotonic: float | None = None
+        self._last_stdout_read_monotonic: float | None = None
+        self._last_client_fanout_monotonic: float | None = None
         self._ffmpeg_stdin_write_errors = 0
         self._jitter_buffer_underrun_count = 0
         self._last_pacing_log_monotonic: float | None = None
@@ -169,6 +176,11 @@ class StreamPipeline:
         self._silence_bytes = b"\x00" * self._ffmpeg_input_format.bytes_per_frame
         self._keepalive_started_monotonic: float | None = None
         self._keepalive_to_first_real_frame_ms: float | None = None
+        self._encoded_bytes_emitted_total = 0
+        self._stdout_window_samples: deque[tuple[float, int]] = deque()
+        self._first_encoded_output_monotonic: float | None = None
+        self._first_real_encoded_output_monotonic: float | None = None
+        self._awaiting_real_encoded_output = False
 
         self._pre_encoder_debug_writer: Any | None = None
         self._pre_encoder_debug_mode: str | None = None
@@ -317,8 +329,21 @@ class StreamPipeline:
                             raise RuntimeError(f"FFmpeg stdout closed unexpectedly for session {self.session_id}")
                         break
 
+                    now = time.monotonic()
+                    self._last_stdout_read_monotonic = now
+                    self._encoded_bytes_emitted_total += len(data)
+                    self._stdout_window_samples.append((now, len(data)))
+                    self._evict_old_stdout_window_samples(now)
+                    if self._first_encoded_output_monotonic is None:
+                        self._first_encoded_output_monotonic = now
+                    if self._awaiting_real_encoded_output and self._first_real_encoded_output_monotonic is None:
+                        self._first_real_encoded_output_monotonic = now
+                        self._awaiting_real_encoded_output = False
+
                     self._write_post_encoder_debug(data)
                     async with self._lock:
+                        if self._clients:
+                            self._last_client_fanout_monotonic = now
                         for client_queue in self._clients:
                             try:
                                 client_queue.put_nowait(data)
@@ -348,6 +373,8 @@ class StreamPipeline:
 
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return a diagnostic snapshot for logging and tests."""
+        now = time.monotonic()
+        encoded_bytes_emitted_last_window = self._encoded_bytes_emitted_last_window(now)
         return {
             "keepalive_active": self._keepalive_active,
             "source_outage_active": self._source_outage_active,
@@ -364,6 +391,15 @@ class StreamPipeline:
             "runtime_mode": self._runtime_mode,
             "keepalive_to_first_real_frame_ms": self._keepalive_to_first_real_frame_ms,
             "live_jitter_target_ms": self._live_jitter_target_ms,
+            "transport_heartbeat_window_ms": self._transport_heartbeat_window_ms,
+            "last_stdin_write_monotonic": self._last_stdin_write_monotonic,
+            "last_stdout_read_monotonic": self._last_stdout_read_monotonic,
+            "last_client_fanout_monotonic": self._last_client_fanout_monotonic,
+            "encoded_bytes_emitted_total": self._encoded_bytes_emitted_total,
+            "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
+            "transport_alive": self._is_transport_alive(now, encoded_bytes_emitted_last_window),
+            "first_encoded_output_after_session_start_ms": self._elapsed_since_start_ms(self._first_encoded_output_monotonic),
+            "first_real_encoded_output_after_session_start_ms": self._elapsed_since_start_ms(self._first_real_encoded_output_monotonic),
             "ffmpeg_input_format": {
                 **asdict(self._ffmpeg_input_format),
                 "samples_per_channel_per_frame": self._ffmpeg_input_format.samples_per_channel_per_frame,
@@ -451,11 +487,13 @@ class StreamPipeline:
 
         self._encoder_write_count += 1
         self._last_encoder_write_monotonic = now
+        self._last_stdin_write_monotonic = now
         self._last_encoder_write_was_silence = is_silence
         if is_silence:
             self._silence_frames_written += 1
         else:
             self._real_frames_written += 1
+            self._awaiting_real_encoded_output = True
         self._write_pre_encoder_debug(data)
 
     def _maybe_log_pacing_snapshot(self, now: float) -> None:
@@ -473,7 +511,7 @@ class StreamPipeline:
 
     def _log_format_audit(self) -> None:
         logger.info(
-            "audio_format_audit session_id=%s sample_format=%s sample_rate=%s channels=%s bytes_per_sample=%s frame_duration_ms=%s bytes_per_frame=%s live_jitter_target_ms=%s",
+            "audio_format_audit session_id=%s sample_format=%s sample_rate=%s channels=%s bytes_per_sample=%s frame_duration_ms=%s bytes_per_frame=%s live_jitter_target_ms=%s transport_heartbeat_window_ms=%s",
             self.session_id,
             self._ffmpeg_input_format.sample_format,
             self._ffmpeg_input_format.sample_rate,
@@ -482,7 +520,32 @@ class StreamPipeline:
             self._ffmpeg_input_format.frame_duration_ms,
             self._ffmpeg_input_format.bytes_per_frame,
             self._live_jitter_target_ms,
+            self._transport_heartbeat_window_ms,
         )
+
+    def _evict_old_stdout_window_samples(self, now: float) -> None:
+        window_seconds = self._transport_heartbeat_window_ms / 1000
+        while self._stdout_window_samples and (now - self._stdout_window_samples[0][0]) > window_seconds:
+            self._stdout_window_samples.popleft()
+
+    def _encoded_bytes_emitted_last_window(self, now: float) -> int:
+        self._evict_old_stdout_window_samples(now)
+        return sum(size for _, size in self._stdout_window_samples)
+
+    def _is_transport_alive(self, now: float, encoded_bytes_emitted_last_window: int | None = None) -> bool:
+        if not self._active:
+            return False
+        if encoded_bytes_emitted_last_window is None:
+            encoded_bytes_emitted_last_window = self._encoded_bytes_emitted_last_window(now)
+        if self._last_stdout_read_monotonic is None:
+            return False
+        heartbeat_window_seconds = self._transport_heartbeat_window_ms / 1000
+        return (now - self._last_stdout_read_monotonic) <= heartbeat_window_seconds and encoded_bytes_emitted_last_window > 0
+
+    def _elapsed_since_start_ms(self, marker: float | None) -> float | None:
+        if marker is None or self._pipeline_started_monotonic is None:
+            return None
+        return (marker - self._pipeline_started_monotonic) * 1000
 
     def _open_debug_captures(self) -> None:
         if not self._debug_capture_enabled:
