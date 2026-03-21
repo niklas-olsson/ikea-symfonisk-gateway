@@ -92,6 +92,10 @@ class StreamPublisher:
         """Register a pipeline for publishing."""
         self._pipelines[session_id] = pipeline
 
+    def swap_pipeline(self, session_id: str, pipeline: StreamPipeline) -> None:
+        """Atomically replace the pipeline for an existing published route."""
+        self._pipelines[session_id] = pipeline
+
     def unregister_pipeline(self, session_id: str) -> None:
         """Unregister a pipeline."""
         self._pipelines.pop(session_id, None)

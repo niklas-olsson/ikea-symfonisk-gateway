@@ -110,16 +110,19 @@ def test_session_lifecycle(client):
     assert create_res.status_code == 200
     session_id = create_res.json()["session_id"]
     assert create_res.json()["state"] == "created"
+    assert "media_status" in create_res.json()
 
     # 3. Get session
     get_res = client.get(f"/v1/sessions/{session_id}")
     assert get_res.status_code == 200
     assert get_res.json()["session_id"] == session_id
+    assert "media_status" in get_res.json()
 
     # 4. List sessions
     list_res = client.get("/v1/sessions")
     assert list_res.status_code == 200
     assert any(s["session_id"] == session_id for s in list_res.json()["sessions"])
+    assert all("media_status" in s for s in list_res.json()["sessions"])
 
     # 5. Stop session (even if not started)
     # Note: Transition from CREATED to STOPPING is not valid in session_manager.py

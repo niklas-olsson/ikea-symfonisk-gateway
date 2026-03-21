@@ -77,3 +77,19 @@ async def test_publisher_head_request(publisher: StreamPublisher) -> None:
 
         # Verify pipeline.subscribe WAS called for GET
         pipeline.subscribe.assert_called_once()
+
+
+def test_swap_pipeline_keeps_route_stable() -> None:
+    publisher = StreamPublisher(bind_address="127.0.0.1", port=18080, advertised_host="127.0.0.1")
+    old_pipeline = MagicMock()
+    old_pipeline.profile_id = "mp3_48k_stereo_320"
+    new_pipeline = MagicMock()
+    new_pipeline.profile_id = "mp3_48k_stereo_320"
+
+    publisher.register_pipeline("test_session", old_pipeline)
+    first_resolved, _, _ = publisher._resolve_stream("test_session", "mp3")
+    assert first_resolved is old_pipeline
+
+    publisher.swap_pipeline("test_session", new_pipeline)
+    second_resolved, _, _ = publisher._resolve_stream("test_session", "mp3")
+    assert second_resolved is new_pipeline

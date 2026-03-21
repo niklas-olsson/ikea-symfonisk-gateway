@@ -81,6 +81,13 @@ class Session:
         self.stopped_at: float | None = None
         self.pipeline: StreamPipeline | None = None
         self.last_error: SessionError | None = None
+        self.media_state: str = "playing_degraded"
+        self.media_reason: str | None = None
+        self.media_heal_attempts = 0
+        self.media_heal_in_progress = False
+        self.media_epoch = 0
+        self.last_media_heal_at: float | None = None
+        self.last_media_healthy_at: float | None = None
 
     def transition_to(self, new_state: SessionState) -> None:
         """Transitions the session to a new state if valid."""
@@ -107,6 +114,16 @@ class Session:
             self.stopped_at = time.time()
 
     def to_dict(self) -> dict[str, Any]:
+        diagnostics: dict[str, Any] = {}
+        if self.pipeline and hasattr(self.pipeline, "get_diagnostics_snapshot"):
+            try:
+                diagnostics = self.pipeline.get_diagnostics_snapshot()
+            except Exception:
+                diagnostics = {}
+
+        now = time.monotonic()
+        last_stdout_read_monotonic = diagnostics.get("last_stdout_read_monotonic")
+        last_client_fanout_monotonic = diagnostics.get("last_client_fanout_monotonic")
         return {
             "session_id": self.session_id,
             "source_id": self.source_id,
@@ -120,6 +137,22 @@ class Session:
             "started_at": self.started_at,
             "stopped_at": self.stopped_at,
             "last_error": self.last_error.model_dump() if self.last_error else None,
+            "media_status": {
+                "state": self.media_state,
+                "reason": self.media_reason,
+                "encoder_alive": bool(diagnostics.get("encoder_alive", diagnostics.get("transport_alive", False))),
+                "delivery_alive": bool(diagnostics.get("delivery_alive", False)),
+                "transport_alive": bool(diagnostics.get("transport_alive", False)),
+                "active_client_count": int(diagnostics.get("active_client_count") or 0),
+                "encoded_bytes_emitted_last_window": int(diagnostics.get("encoded_bytes_emitted_last_window") or 0),
+                "last_stdout_read_age_ms": (now - last_stdout_read_monotonic) * 1000
+                if isinstance(last_stdout_read_monotonic, (int, float))
+                else None,
+                "last_client_fanout_age_ms": (now - last_client_fanout_monotonic) * 1000
+                if isinstance(last_client_fanout_monotonic, (int, float))
+                else None,
+                "keepalive_active": bool(diagnostics.get("keepalive_active", False)),
+            },
         }
 
 
@@ -133,6 +166,7 @@ class SessionFrameSink:
         self._task: asyncio.Task[None] | None = None
         self._active = False
         self._next_sequence = 0
+        self._media_epoch = 0
 
     def start(self) -> None:
         """Start the ingestion task."""
@@ -160,7 +194,8 @@ class SessionFrameSink:
         while self._active:
             try:
                 frame = await self._queue.get()
-                await self.pipeline.push_frame(frame)
+                pipeline = self.pipeline
+                await pipeline.push_frame(frame)
                 self._queue.task_done()
             except asyncio.CancelledError:
                 break
@@ -196,6 +231,11 @@ class SessionFrameSink:
         if self.on_error_callback:
             self.on_error_callback(error)
 
+    def set_pipeline(self, pipeline: StreamPipeline, media_epoch: int) -> None:
+        """Swap the downstream pipeline without resetting frame sequencing."""
+        self.pipeline = pipeline
+        self._media_epoch = media_epoch
+
 
 class SessionManager:
     """Manages session lifecycle."""
@@ -216,6 +256,7 @@ class SessionManager:
         self._config_store = config_store
         self._frame_sinks: dict[str, SessionFrameSink] = {}
         self._session_monitors: dict[str, asyncio.Task[None]] = {}
+        self._session_heals: dict[str, asyncio.Task[None]] = {}
 
     def _handle_session_error(self, session_id: str, error: Exception) -> None:
         """Central error handler for session-related task failures."""
@@ -299,6 +340,200 @@ class SessionManager:
             ),
         }
 
+    def _build_pipeline(self, session: Session) -> StreamPipeline:
+        try:
+            ffmpeg_path = resolve_ffmpeg_path(self._config_store)
+        except RuntimeError as e:
+            session.last_error = create_session_error(MEDIA_ENGINE_NOT_FOUND, str(e))
+            raise
+
+        return StreamPipeline(
+            session.session_id,
+            session.stream_profile,
+            ffmpeg_path=ffmpeg_path,
+            on_error=lambda e: self._handle_session_error(session.session_id, e),
+            **self._build_pipeline_kwargs(session.source_id),
+        )
+
+    def _register_pipeline(self, session: Session, pipeline: StreamPipeline, *, swap: bool = False) -> None:
+        if not self._stream_publisher:
+            return
+
+        if swap and hasattr(self._stream_publisher, "swap_pipeline"):
+            self._stream_publisher.swap_pipeline(session.session_id, pipeline)
+        else:
+            self._stream_publisher.register_pipeline(session.session_id, pipeline)
+
+        if not session.stream_url:
+            session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
+            self._event_bus.emit(
+                EventType.PUBLISHER_ACTIVE,
+                session_id=session.session_id,
+                payload={"stream_url": session.stream_url},
+            )
+
+    def _set_media_state(self, session: Session, state: str, reason: str | None = None) -> None:
+        session.media_state = state
+        session.media_reason = reason
+
+    async def _start_renderer_playback(self, session: Session) -> None:
+        prep_target_res = await self._target_registry.prepare_target(session.target_id)
+        if not prep_target_res.get("success"):
+            session.last_error = create_session_error(
+                RENDERER_PLAYBACK_FAILED, f"Failed to prepare target: {prep_target_res.get('error')}"
+            )
+            raise RuntimeError(session.last_error.message)
+
+        if session.stream_url:
+            play_res = await self._target_registry.play_stream(session.target_id, session.stream_url)
+            if not play_res.get("success"):
+                session.last_error = create_session_error(
+                    RENDERER_PLAYBACK_FAILED, f"Failed to start renderer playback: {play_res.get('error')}"
+                )
+                raise RuntimeError(session.last_error.message)
+
+            self._event_bus.emit(
+                EventType.RENDERER_PLAYBACK_STARTED,
+                session_id=session.session_id,
+                payload={
+                    "target_id": session.target_id,
+                    "stream_url": session.stream_url,
+                },
+            )
+
+    def _derive_encoder_alive(self, diagnostics: dict[str, Any]) -> bool:
+        return bool(diagnostics.get("transport_alive"))
+
+    def _derive_delivery_alive(self, diagnostics: dict[str, Any], heartbeat_window_ms: int) -> bool:
+        now = time.monotonic()
+        last_client_fanout_monotonic = diagnostics.get("last_client_fanout_monotonic")
+        recent_fanout = isinstance(last_client_fanout_monotonic, (int, float)) and (
+            (now - last_client_fanout_monotonic) * 1000 <= heartbeat_window_ms
+        )
+        if recent_fanout:
+            return True
+
+        active_client_count = int(diagnostics.get("active_client_count") or 0)
+        last_client_attach_monotonic = diagnostics.get("last_client_attach_monotonic")
+        last_client_detach_monotonic = diagnostics.get("last_client_detach_monotonic")
+        detach_evidence = isinstance(last_client_detach_monotonic, (int, float)) and (
+            (not isinstance(last_client_attach_monotonic, (int, float)) or last_client_detach_monotonic >= last_client_attach_monotonic)
+            and (
+                not isinstance(last_client_fanout_monotonic, (int, float))
+                or last_client_detach_monotonic >= last_client_fanout_monotonic
+            )
+        )
+        has_delivery_history = any(
+            isinstance(value, (int, float))
+            for value in (last_client_fanout_monotonic, last_client_attach_monotonic, last_client_detach_monotonic)
+        )
+        if not has_delivery_history:
+            return True
+        return not ((active_client_count == 0 or detach_evidence) and not recent_fanout)
+
+    def _current_media_state(self, diagnostics: dict[str, Any]) -> str:
+        if int(diagnostics.get("real_frames_written") or 0) > 0:
+            return "playing_active"
+        if bool(diagnostics.get("keepalive_active")):
+            return "playing_idle"
+        return "playing_degraded"
+
+    def _schedule_media_plane_heal(self, session_id: str, mode: str, reason: str) -> None:
+        session = self.get(session_id)
+        if not session or session.media_heal_in_progress:
+            return
+        if session.media_heal_attempts >= 3:
+            return
+
+        delay_seconds = [0.0, 0.5, 1.5][session.media_heal_attempts]
+        session.media_heal_attempts += 1
+        session.media_heal_in_progress = True
+        session.last_media_heal_at = time.time()
+        self._set_media_state(session, "healing_media_plane", "media_plane_heal_in_progress")
+        self._event_bus.emit(
+            EventType.SOURCE_STATE_CHANGED,
+            session_id=session_id,
+            payload={"state": "media_plane_heal_started", "details": {"mode": mode, "reason": reason, "attempt": session.media_heal_attempts}},
+        )
+        self._session_heals[session_id] = asyncio.create_task(self._heal_media_plane(session_id, mode, reason, delay_seconds))
+
+    async def _heal_media_plane(self, session_id: str, mode: str, reason: str, delay_seconds: float) -> None:
+        if delay_seconds > 0:
+            await asyncio.sleep(delay_seconds)
+
+        session = self.get(session_id)
+        if not session:
+            return
+
+        try:
+            health = self._source_registry.probe_source_health(session.source_id)
+            if health is not None and not health.healthy and not self._is_windows_source_viable(health):
+                self._set_media_state(session, "playing_degraded", "media_plane_heal_failed")
+                return
+
+            if mode == "replay":
+                await self._start_renderer_playback(session)
+            else:
+                old_pipeline = session.pipeline
+                new_pipeline = self._build_pipeline(session)
+                await new_pipeline.start()
+                session.media_epoch += 1
+                if self._stream_publisher:
+                    self._register_pipeline(session, new_pipeline, swap=True)
+                frame_sink = self._frame_sinks.get(session_id)
+                if frame_sink:
+                    frame_sink.set_pipeline(new_pipeline, session.media_epoch)
+                session.pipeline = new_pipeline
+                if old_pipeline:
+                    await old_pipeline.stop()
+                await self._start_renderer_playback(session)
+
+            heartbeat_window_ms = self._get_int_config(
+                "audio_transport_heartbeat_window_ms",
+                AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT,
+            )
+            recovery_started_at: float | None = None
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                await asyncio.sleep(0.1)
+                session = self.get(session_id)
+                if not session or not session.pipeline:
+                    return
+                diagnostics = session.pipeline.get_diagnostics_snapshot()
+                encoder_alive = self._derive_encoder_alive(diagnostics)
+                delivery_alive = self._derive_delivery_alive(diagnostics, heartbeat_window_ms)
+                if encoder_alive and delivery_alive:
+                    if recovery_started_at is None:
+                        recovery_started_at = time.monotonic()
+                    if (time.monotonic() - recovery_started_at) * 1000 >= heartbeat_window_ms:
+                        try:
+                            session.transition_to(SessionState.PLAYING)
+                        except ValueError:
+                            if session.state != SessionState.PLAYING:
+                                raise
+                        self._set_media_state(session, self._current_media_state(diagnostics), None)
+                        session.last_media_healthy_at = time.time()
+                        self._event_bus.emit(
+                            EventType.SOURCE_STATE_CHANGED,
+                            session_id=session_id,
+                            payload={"state": "media_plane_heal_succeeded", "details": {"mode": mode, "reason": reason}},
+                        )
+                        return
+                else:
+                    recovery_started_at = None
+
+            self._set_media_state(session, "playing_degraded", "media_plane_heal_failed")
+            self._event_bus.emit(
+                EventType.SOURCE_STATE_CHANGED,
+                session_id=session_id,
+                payload={"state": "media_plane_heal_failed", "details": {"mode": mode, "reason": reason}},
+            )
+        finally:
+            session = self.get(session_id)
+            if session:
+                session.media_heal_in_progress = False
+            self._session_heals.pop(session_id, None)
+
     def create(
         self,
         source_id: str,
@@ -372,28 +607,10 @@ class SessionManager:
             phase_started_at = time.monotonic()
             try:
                 if session.pipeline is None:
-                    try:
-                        ffmpeg_path = resolve_ffmpeg_path(self._config_store)
-                    except RuntimeError as e:
-                        session.last_error = create_session_error(MEDIA_ENGINE_NOT_FOUND, str(e))
-                        raise
-
-                    session.pipeline = StreamPipeline(
-                        session.session_id,
-                        session.stream_profile,
-                        ffmpeg_path=ffmpeg_path,
-                        on_error=lambda e: self._handle_session_error(session_id, e),
-                        **self._build_pipeline_kwargs(session.source_id),
-                    )
+                    session.pipeline = self._build_pipeline(session)
 
                 if self._stream_publisher:
-                    self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
-                    session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
-                    self._event_bus.emit(
-                        EventType.PUBLISHER_ACTIVE,
-                        session_id=session_id,
-                        payload={"stream_url": session.stream_url},
-                    )
+                    self._register_pipeline(session, session.pipeline)
             except Exception as e:
                 if not session.last_error:
                     session.last_error = create_session_error(PIPELINE_START_FAILED, str(e))
@@ -463,6 +680,7 @@ class SessionManager:
             phase_started_at = time.monotonic()
             source_binding = self._source_registry.resolve_source(session.source_id)
             source_desc = source_binding.source if source_binding else None
+            verification_result = "active"
             if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT:
                 verification_result = await self._verify_windows_source_startup(session_id, session)
                 logger.info(
@@ -480,29 +698,7 @@ class SessionManager:
             # 6. Prepare and start renderer
             phase_started_at = time.monotonic()
             try:
-                prep_target_res = await self._target_registry.prepare_target(session.target_id)
-                if not prep_target_res.get("success"):
-                    session.last_error = create_session_error(
-                        RENDERER_PLAYBACK_FAILED, f"Failed to prepare target: {prep_target_res.get('error')}"
-                    )
-                    raise RuntimeError(session.last_error.message)
-
-                if session.stream_url:
-                    play_res = await self._target_registry.play_stream(session.target_id, session.stream_url)
-                    if not play_res.get("success"):
-                        session.last_error = create_session_error(
-                            RENDERER_PLAYBACK_FAILED, f"Failed to start renderer playback: {play_res.get('error')}"
-                        )
-                        raise RuntimeError(session.last_error.message)
-
-                    self._event_bus.emit(
-                        EventType.RENDERER_PLAYBACK_STARTED,
-                        session_id=session_id,
-                        payload={
-                            "target_id": session.target_id,
-                            "stream_url": session.stream_url,
-                        },
-                    )
+                await self._start_renderer_playback(session)
             except Exception as e:
                 if not session.last_error:
                     session.last_error = create_session_error(RENDERER_PLAYBACK_FAILED, str(e))
@@ -519,6 +715,9 @@ class SessionManager:
             logger.info("Session %s: renderer prepare/play completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
 
             session.transition_to(SessionState.PLAYING)
+            initial_media_state = "playing_active" if verification_result == "active" else "playing_idle"
+            self._set_media_state(session, initial_media_state, None)
+            session.last_media_healthy_at = time.time()
             self._event_bus.emit(
                 EventType.SESSION_STARTED,
                 session_id=session_id,
@@ -736,7 +935,9 @@ class SessionManager:
         activation_seen = startup_result == "active"
         activation_degraded_emitted = False
         transport_degraded_emitted = False
+        delivery_degraded_emitted = False
         transport_miss_started_at: float | None = None
+        delivery_miss_started_at: float | None = None
         transport_recovery_started_at: float | None = None
 
         try:
@@ -755,6 +956,10 @@ class SessionManager:
                 signal_present = bool(health.signal_present) if health else False
                 real_frames_written = int(diagnostics.get("real_frames_written") or 0)
                 runtime_mode = diagnostics.get("runtime_mode")
+                encoder_alive = self._derive_encoder_alive(diagnostics)
+                delivery_alive = self._derive_delivery_alive(diagnostics, transport_heartbeat_window_ms)
+                diagnostics["encoder_alive"] = encoder_alive
+                diagnostics["delivery_alive"] = delivery_alive
                 transport_alive = bool(diagnostics.get("transport_alive"))
                 encoded_bytes_emitted_total = int(diagnostics.get("encoded_bytes_emitted_total") or 0)
                 encoded_bytes_emitted_last_window = int(diagnostics.get("encoded_bytes_emitted_last_window") or 0)
@@ -772,6 +977,7 @@ class SessionManager:
                 if startup_result == "idle_pending_signal" and not activation_seen and elapsed_ms >= activation_watchdog_ms and not activation_degraded_emitted:
                     if session.state == SessionState.PLAYING:
                         session.transition_to(SessionState.DEGRADED)
+                    self._set_media_state(session, "playing_degraded", "degraded_no_source_activity_yet")
                     details = {
                         "watchdog_ms": activation_watchdog_ms,
                         "startup_result": startup_result,
@@ -780,6 +986,8 @@ class SessionManager:
                         "real_frames_written": real_frames_written,
                         "runtime_mode": runtime_mode,
                         "transport_alive": transport_alive,
+                        "encoder_alive": encoder_alive,
+                        "delivery_alive": delivery_alive,
                         "encoded_bytes_emitted_total": encoded_bytes_emitted_total,
                         "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
                         "active_client_count": active_client_count,
@@ -806,24 +1014,41 @@ class SessionManager:
                 elif elapsed_ms >= transport_heartbeat_window_ms:
                     stdout_silence_age_ms = elapsed_ms
 
-                if not transport_alive and stdout_silence_age_ms is not None and stdout_silence_age_ms >= transport_heartbeat_window_ms:
+                if not encoder_alive and stdout_silence_age_ms is not None and stdout_silence_age_ms >= transport_heartbeat_window_ms:
                     if transport_miss_started_at is None:
                         transport_miss_started_at = now
                     transport_recovery_started_at = None
                 else:
                     transport_miss_started_at = None
 
+                last_client_fanout_monotonic = diagnostics.get("last_client_fanout_monotonic")
+                recent_fanout = isinstance(last_client_fanout_monotonic, (int, float)) and (
+                    (now - last_client_fanout_monotonic) * 1000 <= transport_heartbeat_window_ms
+                )
+                if (
+                    encoder_alive
+                    and not delivery_alive
+                    and not recent_fanout
+                ):
+                    if delivery_miss_started_at is None:
+                        delivery_miss_started_at = now
+                else:
+                    delivery_miss_started_at = None
+
                 transport_should_degrade = (
                     session.state == SessionState.PLAYING
                     and transport_miss_started_at is not None
                     and (now - transport_miss_started_at) * 1000 >= transport_heartbeat_window_ms
-                    and not transport_alive
+                    and not encoder_alive
                 )
                 if transport_should_degrade and not transport_degraded_emitted:
                     session.transition_to(SessionState.DEGRADED)
+                    self._set_media_state(session, "playing_degraded", "transport_heartbeat_lost")
                     details = {
                         "reason": "transport_heartbeat_lost",
                         "transport_alive": transport_alive,
+                        "encoder_alive": encoder_alive,
+                        "delivery_alive": delivery_alive,
                         "transport_heartbeat_window_ms": transport_heartbeat_window_ms,
                         "last_stdout_read_monotonic": last_stdout_read_monotonic,
                         "last_stdin_write_monotonic": last_stdin_write_monotonic,
@@ -850,8 +1075,51 @@ class SessionManager:
                         payload={"state": "playing_degraded", "details": details},
                     )
                     transport_degraded_emitted = True
+                    delivery_degraded_emitted = False
+                    if session.auto_heal:
+                        self._schedule_media_plane_heal(session_id, "swap", "transport_heartbeat_lost")
 
-                if session.state == SessionState.DEGRADED and transport_alive:
+                delivery_should_degrade = (
+                    session.state == SessionState.PLAYING
+                    and encoder_alive
+                    and delivery_miss_started_at is not None
+                    and (now - delivery_miss_started_at) * 1000 >= transport_heartbeat_window_ms
+                    and not delivery_alive
+                )
+                if delivery_should_degrade and not delivery_degraded_emitted:
+                    session.transition_to(SessionState.DEGRADED)
+                    self._set_media_state(session, "playing_degraded", "client_detached_while_session_open")
+                    details = {
+                        "reason": "client_detached_while_session_open",
+                        "transport_alive": transport_alive,
+                        "encoder_alive": encoder_alive,
+                        "delivery_alive": delivery_alive,
+                        "transport_heartbeat_window_ms": transport_heartbeat_window_ms,
+                        "active_client_count": active_client_count,
+                        "last_client_fanout_monotonic": diagnostics.get("last_client_fanout_monotonic"),
+                        "last_client_attach_monotonic": diagnostics.get("last_client_attach_monotonic"),
+                        "last_client_detach_monotonic": diagnostics.get("last_client_detach_monotonic"),
+                        "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
+                        "keepalive_active": keepalive_active,
+                        "health": health.details if health else None,
+                    }
+                    logger.warning(
+                        "audio_delivery_heartbeat_degraded session_id=%s source_id=%s details=%s",
+                        session_id,
+                        session.source_id,
+                        details,
+                    )
+                    self._event_bus.emit(
+                        EventType.SOURCE_STATE_CHANGED,
+                        session_id=session_id,
+                        payload={"state": "playing_degraded", "details": details},
+                    )
+                    delivery_degraded_emitted = True
+                    transport_degraded_emitted = False
+                    if session.auto_heal:
+                        self._schedule_media_plane_heal(session_id, "replay", "client_detached_while_session_open")
+
+                if session.state == SessionState.DEGRADED and encoder_alive and delivery_alive and not session.media_heal_in_progress:
                     if transport_recovery_started_at is None:
                         transport_recovery_started_at = now
                 else:
@@ -859,15 +1127,20 @@ class SessionManager:
 
                 if (
                     session.state == SessionState.DEGRADED
-                    and transport_alive
+                    and encoder_alive
+                    and delivery_alive
                     and transport_recovery_started_at is not None
                     and (now - transport_recovery_started_at) * 1000 >= transport_heartbeat_window_ms
                     and (real_frames_written > 0 or keepalive_active)
                 ):
                     session.transition_to(SessionState.PLAYING)
                     restored_state = "active" if real_frames_written > 0 else "idle"
+                    self._set_media_state(session, "playing_active" if restored_state == "active" else "playing_idle", None)
+                    session.last_media_healthy_at = time.time()
                     details = {
                         "transport_alive": transport_alive,
+                        "encoder_alive": encoder_alive,
+                        "delivery_alive": delivery_alive,
                         "encoded_bytes_emitted_total": encoded_bytes_emitted_total,
                         "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
                         "callback_count": callback_count,
@@ -896,7 +1169,11 @@ class SessionManager:
                         },
                     )
                     transport_degraded_emitted = False
+                    delivery_degraded_emitted = False
                     transport_miss_started_at = None
+                    delivery_miss_started_at = None
+                    if session.last_media_healthy_at and (time.time() - session.last_media_healthy_at) >= 5:
+                        session.media_heal_attempts = 0
 
                 last_real_frame_age_ms = diagnostics.get("last_real_frame_age_ms")
                 if (
@@ -1024,6 +1301,9 @@ class SessionManager:
         monitor_task = self._session_monitors.pop(session_id, None)
         if monitor_task:
             monitor_task.cancel()
+        heal_task = self._session_heals.pop(session_id, None)
+        if heal_task:
+            heal_task.cancel()
 
         # 1. Stop renderer
         try:
@@ -1081,6 +1361,16 @@ class SessionManager:
         session = self.get(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found")
+
+        if session.state == SessionState.DEGRADED and session.media_reason in {
+            "transport_heartbeat_lost",
+            "client_detached_while_session_open",
+            "media_plane_heal_failed",
+        }:
+            mode = "replay" if session.media_reason == "client_detached_while_session_open" else "swap"
+            self._schedule_media_plane_heal(session_id, mode, session.media_reason)
+            self._event_bus.emit(EventType.HEAL_ATTEMPTED, session_id=session_id)
+            return
 
         session.transition_to(SessionState.HEALING)
         self._event_bus.emit(EventType.HEAL_ATTEMPTED, session_id=session_id)

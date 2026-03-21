@@ -32,6 +32,7 @@ class SessionResponse(BaseModel):
     started_at: float | None = None
     stopped_at: float | None = None
     last_error: SessionError | None = None
+    media_status: dict[str, Any] | None = None
 
 
 class SessionListResponse(BaseModel):
