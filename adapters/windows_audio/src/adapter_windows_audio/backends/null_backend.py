@@ -82,4 +82,28 @@ class NullWindowsBackend:
             source_state="degraded",
             signal_present=False,
             last_error=self._probe_result.message,
+            details=self.get_diagnostics_snapshot(),
         )
+
+    def get_diagnostics_snapshot(self) -> dict[str, object]:
+        diagnostics: dict[str, object] = {
+            "startup_substate": "degraded",
+            "callback_count": 0,
+            "non_empty_buffer_count": 0,
+            "samples_received": 0,
+            "frames_emitted": 0,
+            "first_callback_at": None,
+            "selected_host_api": None,
+            "default_render_device": None,
+            "loopback_device": None,
+            "start_viability": {
+                "stream_opened": False,
+                "stream_started": False,
+                "callback_registered": False,
+            },
+        }
+        if self._probe_result.code:
+            diagnostics["error_code"] = self._probe_result.code
+        if self._probe_result.message:
+            diagnostics["error_message"] = self._probe_result.message
+        return diagnostics

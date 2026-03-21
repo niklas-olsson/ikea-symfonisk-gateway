@@ -10,6 +10,7 @@ class SessionError(BaseModel):
     message: str
     subsystem: str
     action: str
+    details: dict[str, object] | None = None
 
 
 # Error categories
@@ -104,9 +105,9 @@ ERROR_DETAILS = {
 }
 
 
-def create_session_error(code: str, custom_message: str | None = None) -> SessionError:
+def create_session_error(code: str, custom_message: str | None = None, details: dict[str, object] | None = None) -> SessionError:
     """Create a SessionError instance from a code."""
-    details = ERROR_DETAILS.get(
+    error_details = ERROR_DETAILS.get(
         code,
         {
             "message": custom_message or "An unknown error occurred.",
@@ -116,7 +117,8 @@ def create_session_error(code: str, custom_message: str | None = None) -> Sessio
     )
     return SessionError(
         code=code,
-        message=custom_message or details["message"],
-        subsystem=details["subsystem"],
-        action=details["action"],
+        message=custom_message or error_details["message"],
+        subsystem=error_details["subsystem"],
+        action=error_details["action"],
+        details=details,
     )

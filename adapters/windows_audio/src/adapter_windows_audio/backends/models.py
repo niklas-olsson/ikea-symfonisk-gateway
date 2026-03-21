@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class BackendProbeResult(BaseModel):
@@ -39,8 +39,10 @@ class BackendStartupDiagnostics(BaseModel):
     last_status_flags: str | None = None
     last_callback_error: str | None = None
     startup_substate: str = "idle"
-    start_viability: dict[str, bool] = {
-        "loopback_device_resolved": False,
-        "stream_parameters_accepted": False,
-        "callback_registered": False,
-    }
+    start_viability: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "stream_opened": False,
+            "stream_started": False,
+            "callback_registered": False,
+        }
+    )

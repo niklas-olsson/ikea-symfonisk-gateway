@@ -63,6 +63,6 @@ def test_zero_length_callback_is_not_treated_as_idle_signal() -> None:
     backend._audio_callback(b"", 0, None, 0)
 
     diagnostics = backend.get_diagnostics_snapshot()
-    assert diagnostics.callback_count == 1
-    assert diagnostics.non_empty_buffer_count == 0
-    assert diagnostics.startup_substate == "callbacks_active_no_samples"
+    assert diagnostics["callback_count"] == 1
+    assert diagnostics["non_empty_buffer_count"] == 0
+    assert diagnostics["startup_substate"] == "callbacks_active_no_samples"

@@ -145,8 +145,6 @@ class PyAudioWPatchBackend:
                 code="windows_loopback_device_not_found",
                 backend=self.name(),
             )
-        self._diagnostics.start_viability["loopback_device_resolved"] = True
-
         self._frame_sink = frame_sink
         self._session_id = f"win_sess_{int(time.time())}"
         self._samples_captured = 0
@@ -168,9 +166,10 @@ class PyAudioWPatchBackend:
             self._diagnostics.frames_per_buffer,
         )
         logger.info(
-            "Windows loopback viability: backend=%s loopback_device_resolved=%s callback_registered=%s stream_parameters_accepted=%s",
+            "Windows loopback viability: backend=%s stream_opened=%s stream_started=%s callback_registered=%s",
             self.name(),
-            self._diagnostics.start_viability["loopback_device_resolved"],
+            self._diagnostics.start_viability["stream_opened"],
+            self._diagnostics.start_viability["stream_started"],
             True,
             False,
         )
@@ -187,20 +186,21 @@ class PyAudioWPatchBackend:
                 stream_callback=self._audio_callback,
             )
             self._diagnostics.stream_opened = True
+            self._diagnostics.start_viability["stream_opened"] = True
             self._diagnostics.start_viability["callback_registered"] = True
             if hasattr(self._stream, "start_stream"):
                 self._stream.start_stream()
             elif hasattr(self._stream, "start"):
                 self._stream.start()
             self._diagnostics.stream_started = True
-            self._diagnostics.start_viability["stream_parameters_accepted"] = True
+            self._diagnostics.start_viability["stream_started"] = True
             self._diagnostics.startup_substate = "stream_started_no_callbacks"
             logger.info(
-                "Windows loopback viability: backend=%s loopback_device_resolved=%s callback_registered=%s stream_parameters_accepted=%s",
+                "Windows loopback viability: backend=%s stream_opened=%s stream_started=%s callback_registered=%s",
                 self.name(),
-                self._diagnostics.start_viability["loopback_device_resolved"],
+                self._diagnostics.start_viability["stream_opened"],
+                self._diagnostics.start_viability["stream_started"],
                 self._diagnostics.start_viability["callback_registered"],
-                self._diagnostics.start_viability["stream_parameters_accepted"],
             )
         except Exception as exc:
             self._last_error = str(exc)
@@ -230,13 +230,14 @@ class PyAudioWPatchBackend:
         del local_source_id
         signal_present = self._running and self._non_silent_signal_detected
         self._last_samples_captured = self._samples_captured
-        source_state = self._diagnostics.startup_substate if self._running else "idle"
+        source_state = self._public_source_state()
         return HealthResult(
             healthy=self._running and self._last_error is None,
             source_state=source_state,
             signal_present=signal_present,
             dropped_frames=self._dropped_frames,
             last_error=self._last_error or self._diagnostics.last_callback_error,
+            details=self.get_diagnostics_snapshot(),
         )
 
     def _probe_backend(self) -> BackendProbeResult:
@@ -386,14 +387,25 @@ class PyAudioWPatchBackend:
                 logger.exception("Error terminating PyAudioWPatch")
             self._pa = None
 
-    def get_diagnostics_snapshot(self) -> BackendStartupDiagnostics:
-        return self._diagnostics.model_copy(deep=True)
+    def get_diagnostics_snapshot(self) -> dict[str, object]:
+        return self._diagnostics.model_dump()
 
     def get_start_viability_snapshot(self) -> dict[str, bool]:
         return dict(self._diagnostics.start_viability)
 
     def _reset_diagnostics(self) -> None:
         self._diagnostics = BackendStartupDiagnostics()
+
+    def _public_source_state(self) -> str:
+        if not self._running:
+            return "idle"
+        if self._diagnostics.frames_emitted > 0:
+            return "active" if self._non_silent_signal_detected else "healthy_but_idle"
+        if self._diagnostics.samples_received > 0:
+            return "samples_received_no_frames_emitted"
+        if self._diagnostics.callback_count > 0:
+            return "callbacks_active_no_samples"
+        return "stream_started_no_callbacks"
 
 
 def resolve_default_loopback_triplet(

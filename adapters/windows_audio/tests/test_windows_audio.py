@@ -137,9 +137,9 @@ def test_pyaudiowpatch_callback_emits_canonical_frame() -> None:
     assert args[1] == 0
     assert args[2] == 10_000_000
     diagnostics = backend.get_diagnostics_snapshot()
-    assert diagnostics.frames_emitted == 1
-    assert diagnostics.non_empty_buffer_count == 1
-    assert diagnostics.startup_substate == "healthy_but_idle"
+    assert diagnostics["frames_emitted"] == 1
+    assert diagnostics["non_empty_buffer_count"] == 1
+    assert diagnostics["startup_substate"] == "healthy_but_idle"
     assert callback_result == (None, 0)
 
 

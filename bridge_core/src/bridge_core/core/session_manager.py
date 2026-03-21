@@ -12,7 +12,6 @@ from ingress_sdk.types import SourceType
 
 from bridge_core.core.config_store import ConfigStore
 from bridge_core.core.errors import (
-    FRAME_INGEST_FAILED,
     MEDIA_ENGINE_NOT_FOUND,
     PIPELINE_START_FAILED,
     RENDERER_PLAYBACK_FAILED,
@@ -273,6 +272,7 @@ class SessionManager:
         )
 
         try:
+            phase_started_at = time.monotonic()
             # 1. Prepare and start source
             try:
                 prepare_res = self._source_registry.prepare_source(session.source_id)
@@ -292,8 +292,10 @@ class SessionManager:
                 if not session.last_error:
                     session.last_error = create_session_error(SOURCE_START_FAILED, str(e))
                 raise
+            logger.info("Session %s: source prepare completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
 
             # 2. Setup pipeline and publisher
+            phase_started_at = time.monotonic()
             try:
                 if session.pipeline is None:
                     try:
@@ -321,8 +323,10 @@ class SessionManager:
                 if not session.last_error:
                     session.last_error = create_session_error(PIPELINE_START_FAILED, str(e))
                 raise
+            logger.info("Session %s: pipeline setup completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
 
             # 3. Start source with frame sink
+            phase_started_at = time.monotonic()
             try:
                 frame_sink = SessionFrameSink(
                     session.pipeline,
@@ -369,15 +373,37 @@ class SessionManager:
                 if not session.last_error:
                     session.last_error = create_session_error(SOURCE_START_FAILED, str(e))
                 raise
+            logger.info("Session %s: source start completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
 
             # 4. Start pipeline
+            phase_started_at = time.monotonic()
             try:
                 await session.pipeline.start()
             except Exception as e:
                 session.last_error = create_session_error(PIPELINE_START_FAILED, str(e))
                 raise
+            logger.info("Session %s: pipeline start completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
 
-            # 5. Prepare and start renderer
+            # 5. Verify Windows source activity before touching the renderer
+            phase_started_at = time.monotonic()
+            source_binding = self._source_registry.resolve_source(session.source_id)
+            source_desc = source_binding.source if source_binding else None
+            if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT:
+                verification_result = await self._verify_windows_source_startup(session_id, session)
+                logger.info(
+                    "Session %s: windows verification gate resolved result=%s in %.1fms",
+                    session_id,
+                    verification_result,
+                    (time.monotonic() - phase_started_at) * 1000,
+                )
+            logger.info(
+                "Session %s: windows source verification completed in %.1fms",
+                session_id,
+                (time.monotonic() - phase_started_at) * 1000,
+            )
+
+            # 6. Prepare and start renderer
+            phase_started_at = time.monotonic()
             try:
                 prep_target_res = await self._target_registry.prepare_target(session.target_id)
                 if not prep_target_res.get("success"):
@@ -415,54 +441,7 @@ class SessionManager:
                     },
                 )
                 raise
-
-            # 6. Verify frame ingestion
-            frames_ingested = False
-            for _ in range(WINDOWS_STARTUP_GRACE_POLLS):
-                if session.pipeline and session.pipeline.jitter_buffer.size_ms > 0:
-                    frames_ingested = True
-                    break
-                await asyncio.sleep(WINDOWS_STARTUP_GRACE_INTERVAL_SECONDS)
-
-            if not frames_ingested:
-                # Check if it's a Windows loopback source that is just silent
-                health = self._source_registry.probe_source_health(session.source_id)
-                source_binding = self._source_registry.resolve_source(session.source_id)
-                source_desc = source_binding.source if source_binding else None
-                adapter_info = source_binding.adapter_info if source_binding else None
-                adapter_name = adapter_info.adapter.__class__.__name__ if adapter_info and adapter_info.adapter else "Unknown"
-
-                if (
-                    health
-                    and health.healthy
-                    and not health.signal_present
-                    and health.source_state == "healthy_but_idle"
-                    and source_desc
-                    and source_desc.platform == "windows"
-                    and source_desc.source_type == SourceType.SYSTEM_OUTPUT
-                ):
-                    logger.warning(
-                        "Session %s: Windows source is healthy but idle. Proceeding anyway. (adapter=%s state=%s)",
-                        session_id,
-                        adapter_name,
-                        health.source_state,
-                    )
-                    session.last_error = create_session_error(WINDOWS_OUTPUT_DEVICE_SILENT)
-                else:
-                    logger.error(
-                        "Session %s: Failed to ingest frames from source %s using adapter %s (health_state=%s healthy=%s signal_present=%s)",
-                        session_id,
-                        session.source_id,
-                        adapter_name,
-                        health.source_state if health else "unknown",
-                        health.healthy if health else None,
-                        health.signal_present if health else None,
-                    )
-                    if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT:
-                        session.last_error = create_session_error(WINDOWS_LOOPBACK_CAPTURE_STALLED)
-                    else:
-                        session.last_error = create_session_error(FRAME_INGEST_FAILED)
-                    raise RuntimeError(session.last_error.message)
+            logger.info("Session %s: renderer prepare/play completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
 
             session.transition_to(SessionState.PLAYING)
             self._event_bus.emit(
@@ -486,6 +465,94 @@ class SessionManager:
             # Try to cleanup what was started
             await self.stop_session(session_id)
             return False
+
+    async def _verify_windows_source_startup(self, session_id: str, session: Session) -> str:
+        verification_started_at = time.monotonic()
+        frames_ingested = False
+        for _ in range(WINDOWS_STARTUP_GRACE_POLLS):
+            if session.pipeline and session.pipeline.jitter_buffer.size_ms > 0:
+                frames_ingested = True
+                break
+            await asyncio.sleep(WINDOWS_STARTUP_GRACE_INTERVAL_SECONDS)
+        health = self._source_registry.probe_source_health(session.source_id)
+        source_binding = self._source_registry.resolve_source(session.source_id)
+        source_desc = source_binding.source if source_binding else None
+        adapter_info = source_binding.adapter_info if source_binding else None
+        adapter_name = adapter_info.adapter.__class__.__name__ if adapter_info and adapter_info.adapter else "Unknown"
+        health_details = health.details if health else {}
+
+        if frames_ingested:
+            self._log_windows_verification_result(
+                session_id,
+                "active",
+                verification_started_at,
+                health.source_state if health else "active",
+                health_details,
+            )
+            return "active"
+
+        if (
+            health
+            and health.healthy
+            and not health.signal_present
+            and health.source_state == "healthy_but_idle"
+            and source_desc
+            and source_desc.platform == "windows"
+            and source_desc.source_type == SourceType.SYSTEM_OUTPUT
+        ):
+            logger.warning(
+                "Session %s: Windows source is healthy but idle. Proceeding anyway. adapter=%s details=%s",
+                session_id,
+                adapter_name,
+                health_details,
+            )
+            self._log_windows_verification_result(
+                session_id,
+                "healthy_but_idle",
+                verification_started_at,
+                health.source_state,
+                health_details,
+            )
+            session.last_error = create_session_error(WINDOWS_OUTPUT_DEVICE_SILENT, details=health_details)
+            return "healthy_but_idle"
+
+        logger.error(
+            "Session %s: Windows source verification failed. adapter=%s state=%s healthy=%s signal_present=%s details=%s",
+            session_id,
+            adapter_name,
+            health.source_state if health else "unknown",
+            health.healthy if health else None,
+            health.signal_present if health else None,
+            health_details,
+        )
+        self._log_windows_verification_result(
+            session_id,
+            "stall",
+            verification_started_at,
+            health.source_state if health else "unknown",
+            health_details,
+        )
+        session.last_error = create_session_error(WINDOWS_LOOPBACK_CAPTURE_STALLED, details=health_details)
+        raise RuntimeError(session.last_error.message)
+
+    def _log_windows_verification_result(
+        self,
+        session_id: str,
+        verification_result: str,
+        verification_started_at: float,
+        startup_substate: str,
+        details: dict[str, Any],
+    ) -> None:
+        logger.info(
+            "Windows verification result: session_id=%s verification_result=%s elapsed_ms=%.1f startup_substate=%s callback_count=%s samples_received=%s frames_emitted=%s",
+            session_id,
+            verification_result,
+            (time.monotonic() - verification_started_at) * 1000,
+            startup_substate,
+            details.get("callback_count"),
+            details.get("samples_received"),
+            details.get("frames_emitted"),
+        )
 
     async def stop_session(self, session_id: str) -> bool:
         """Stop a session and its pipeline."""
