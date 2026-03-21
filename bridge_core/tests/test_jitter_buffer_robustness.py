@@ -1,7 +1,7 @@
 import pytest
-import asyncio
 from bridge_core.stream.pipeline import JitterBuffer
 from ingress_sdk.protocol import AudioFrame
+
 
 @pytest.mark.asyncio
 async def test_jitter_buffer_duplicate_sequence() -> None:
@@ -19,29 +19,31 @@ async def test_jitter_buffer_duplicate_sequence() -> None:
     res1 = await jb.pop()
     assert res1 is not None
     assert res1.sequence == 1
-    assert res1.audio_data == b"data1" # FIFO for same sequence because of counter
+    assert res1.audio_data == b"data1"  # FIFO for same sequence because of counter
 
     res2 = await jb.pop()
     assert res2 is not None
     assert res2.sequence == 1
     assert res2.audio_data == b"data2"
 
+
 @pytest.mark.asyncio
 async def test_jitter_buffer_high_rate_repeated() -> None:
-    jb = JitterBuffer(target_ms=0) # Immediate ready
+    jb = JitterBuffer(target_ms=0)  # Immediate ready
 
     num_frames = 100
     for i in range(num_frames):
-        frame = AudioFrame(sequence=10, pts_ns=i*10, duration_ns=1_000_000, format={}, audio_data=f"data{i}".encode())
+        frame = AudioFrame(sequence=10, pts_ns=i * 10, duration_ns=1_000_000, format={}, audio_data=f"data{i}".encode())
         await jb.push(frame)
 
-    assert jb.size_ms == num_frames # 1ms duration per frame
+    assert jb.size_ms == num_frames  # 1ms duration per frame
 
     for i in range(num_frames):
         res = await jb.pop()
         assert res is not None
         assert res.sequence == 10
         assert res.audio_data == f"data{i}".encode()
+
 
 @pytest.mark.asyncio
 async def test_jitter_buffer_out_of_order_duplicates() -> None:
