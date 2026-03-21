@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 BLUEZ_SERVICE = "org.bluez"
 ADAPTER_INTERFACE = "org.bluez.Adapter1"
+DEVICE_INTERFACE = "org.bluez.Device1"
 PROPERTIES_INTERFACE = "org.freedesktop.DBus.Properties"
+OBJECT_MANAGER_INTERFACE = "org.freedesktop.DBus.ObjectManager"
 
 
 class BlueZAdapterController:
@@ -84,6 +86,75 @@ class BlueZAdapterController:
             return introspection is not None
         except Exception:
             return False
+
+    async def get_managed_objects(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Get all managed objects from BlueZ."""
+        try:
+            bus = await self._get_bus()
+            introspection = await bus.introspect(BLUEZ_SERVICE, "/")
+            proxy_object = bus.get_proxy_object(BLUEZ_SERVICE, "/", introspection)
+            obj_manager = proxy_object.get_interface(OBJECT_MANAGER_INTERFACE)
+
+            managed_objects = await obj_manager.call_get_managed_objects()  # type: ignore[attr-defined]
+
+            # Unwrap Variants recursively
+            def unwrap(obj: Any) -> Any:
+                if isinstance(obj, Variant):
+                    return unwrap(obj.value)
+                if isinstance(obj, dict):
+                    return {k: unwrap(v) for k, v in obj.items()}
+                if isinstance(obj, list):
+                    return [unwrap(v) for v in obj]
+                return obj
+
+            return unwrap(managed_objects)
+        except Exception as e:
+            logger.error(f"Failed to get managed objects: {e}")
+            return {}
+
+    async def connect_device(self, device_path: str) -> bool:
+        """Connect to a Bluetooth device."""
+        try:
+            bus = await self._get_bus()
+            introspection = await bus.introspect(BLUEZ_SERVICE, device_path)
+            proxy_object = bus.get_proxy_object(BLUEZ_SERVICE, device_path, introspection)
+            device_iface = proxy_object.get_interface(DEVICE_INTERFACE)
+            await device_iface.call_connect()  # type: ignore[attr-defined]
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to device {device_path}: {e}")
+            return False
+
+    async def disconnect_device(self, device_path: str) -> bool:
+        """Disconnect from a Bluetooth device."""
+        try:
+            bus = await self._get_bus()
+            introspection = await bus.introspect(BLUEZ_SERVICE, device_path)
+            proxy_object = bus.get_proxy_object(BLUEZ_SERVICE, device_path, introspection)
+            device_iface = proxy_object.get_interface(DEVICE_INTERFACE)
+            await device_iface.call_disconnect()  # type: ignore[attr-defined]
+            return True
+        except Exception as e:
+            logger.error(f"Failed to disconnect from device {device_path}: {e}")
+            return False
+
+    async def remove_device(self, device_path: str) -> bool:
+        """Remove (unpair) a Bluetooth device."""
+        try:
+            bus = await self._get_bus()
+            introspection = await bus.introspect(BLUEZ_SERVICE, self.adapter_path)
+            proxy_object = bus.get_proxy_object(BLUEZ_SERVICE, self.adapter_path, introspection)
+            adapter_iface = proxy_object.get_interface(ADAPTER_INTERFACE)
+            await adapter_iface.call_remove_device(device_path)  # type: ignore[attr-defined]
+            return True
+        except Exception as e:
+            logger.error(f"Failed to remove device {device_path}: {e}")
+            return False
+
+    def get_device_path(self, mac: str) -> str:
+        """Resolve a MAC address to a BlueZ device path."""
+        formatted_mac = mac.replace(":", "_").upper()
+        return f"{self.adapter_path}/dev_{formatted_mac}"
 
     async def check_readiness(self) -> list[str]:
         """Check for common adapter issues (rfkill, permissions, missing service)."""

@@ -43,9 +43,9 @@ def test_list_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     # First source is a monitor (system audio)
     assert sources[0].source_id == "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"
     assert "System Audio" in sources[0].display_name
-    assert sources[0].source_type == "system_output"
+    assert sources[0].source_type == "system_audio"
 
     # Second source is a mic/line in
     assert sources[1].source_id == "alsa_input.pci-0000_00_1f.3.analog-stereo"
     assert "Microphone/Line-In" in sources[1].display_name
-    assert sources[1].source_type == "microphone_input"
+    assert sources[1].source_type == "microphone"
