@@ -5,10 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from bridge_core.core.event_bus import EventBus, EventType
-from bridge_core.core.session_manager import SessionManager, SessionState
+from bridge_core.core.session_manager import SessionFrameSink, SessionManager, SessionState
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
 from bridge_core.stream.pipeline import StreamPipeline
+from ingress_sdk.protocol import AudioFrame
 from ingress_sdk.types import PrepareResult, SourceCapabilities, SourceDescriptor, SourceType, StartResult
 
 
@@ -288,3 +289,101 @@ async def test_windows_source_verification_happens_before_renderer_work(
     assert success is False
     target_registry.prepare_target.assert_not_awaited()
     target_registry.play_stream.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_windows_source_verification_succeeds_without_jitter_buffer_activity(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=True,
+        source_state="active",
+        details={"startup_substate": "active", "callback_count": 5, "frames_emitted": 5},
+    )
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+        patch("asyncio.sleep", return_value=None),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+
+        success = await manager.start_session(session.session_id)
+
+    assert success is True
+    target_registry.prepare_target.assert_awaited_once()
+    target_registry.play_stream.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_session_frame_sink_assigns_monotonic_sequences() -> None:
+    pipeline = MagicMock(spec=StreamPipeline)
+    pushed_frames: list[AudioFrame] = []
+
+    async def push_frame(frame: AudioFrame) -> None:
+        pushed_frames.append(frame)
+
+    pipeline.push_frame = AsyncMock(side_effect=push_frame)
+    sink = SessionFrameSink(pipeline)
+    sink.start()
+
+    sink.on_frame(b"frame1", 0, 1_000_000)
+    sink.on_frame(b"frame2", 1_000_000, 1_000_000)
+    sink.on_frame(b"frame3", 2_000_000, 1_000_000)
+    await asyncio.wait_for(sink._queue.join(), timeout=1.0)
+    sink.stop()
+
+    assert [frame.sequence for frame in pushed_frames] == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_session_frame_sink_sequence_resets_per_instance() -> None:
+    pipeline = MagicMock(spec=StreamPipeline)
+    pushed_frames: list[AudioFrame] = []
+
+    async def push_frame(frame: AudioFrame) -> None:
+        pushed_frames.append(frame)
+
+    pipeline.push_frame = AsyncMock(side_effect=push_frame)
+
+    first_sink = SessionFrameSink(pipeline)
+    first_sink.start()
+    first_sink.on_frame(b"frame1", 0, 1_000_000)
+    await asyncio.wait_for(first_sink._queue.join(), timeout=1.0)
+    first_sink.stop()
+
+    second_sink = SessionFrameSink(pipeline)
+    second_sink.start()
+    second_sink.on_frame(b"frame2", 0, 1_000_000)
+    await asyncio.wait_for(second_sink._queue.join(), timeout=1.0)
+    second_sink.stop()
+
+    assert [frame.sequence for frame in pushed_frames] == [0, 0]
