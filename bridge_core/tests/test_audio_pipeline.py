@@ -124,7 +124,7 @@ async def test_session_frame_sink_sequences_do_not_trigger_late_drops(caplog: py
     sink.on_frame(b"frame3", 2_000_000, 1_000_000)
 
     await asyncio.wait_for(sink._queue.join(), timeout=1.0)
-    sink.stop()
+    await sink.stop()
 
     frames = [await pipeline.jitter_buffer.pop(), await pipeline.jitter_buffer.pop(), await pipeline.jitter_buffer.pop()]
     assert [frame.sequence for frame in frames if frame is not None] == [0, 1, 2]

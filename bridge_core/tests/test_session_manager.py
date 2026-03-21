@@ -1076,7 +1076,7 @@ async def test_session_frame_sink_assigns_monotonic_sequences() -> None:
     sink.on_frame(b"frame2", 1_000_000, 1_000_000)
     sink.on_frame(b"frame3", 2_000_000, 1_000_000)
     await asyncio.wait_for(sink._queue.join(), timeout=1.0)
-    sink.stop()
+    await sink.stop()
 
     assert [frame.sequence for frame in pushed_frames] == [0, 1, 2]
 
@@ -1095,13 +1095,13 @@ async def test_session_frame_sink_sequence_resets_per_instance() -> None:
     first_sink.start()
     first_sink.on_frame(b"frame1", 0, 1_000_000)
     await asyncio.wait_for(first_sink._queue.join(), timeout=1.0)
-    first_sink.stop()
+    await first_sink.stop()
 
     second_sink = SessionFrameSink(pipeline)
     second_sink.start()
     second_sink.on_frame(b"frame2", 0, 1_000_000)
     await asyncio.wait_for(second_sink._queue.join(), timeout=1.0)
-    second_sink.stop()
+    await second_sink.stop()
 
     assert [frame.sequence for frame in pushed_frames] == [0, 0]
 
@@ -1125,7 +1125,7 @@ async def test_session_frame_sink_preserves_sequences_across_pipeline_swap() -> 
     sink.set_pipeline(second_pipeline, media_epoch=1)
     sink.on_frame(b"frame2", 1_000_000, 1_000_000)
     await asyncio.wait_for(sink._queue.join(), timeout=1.0)
-    sink.stop()
+    await sink.stop()
 
     assert [frame.sequence for frame in pushed_frames] == [0, 1]
 
