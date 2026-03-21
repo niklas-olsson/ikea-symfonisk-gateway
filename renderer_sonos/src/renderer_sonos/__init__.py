@@ -102,48 +102,107 @@ class SonosRendererAdapter(RendererAdapter):
     async def list_targets(self) -> Sequence[TargetDescriptor]:
         """Discover Sonos devices and build target topology."""
         loop = asyncio.get_running_loop()
-        # soco.discover is a blocking network call
-        players = await loop.run_in_executor(None, soco.discover)
 
-        if not players:
-            self._targets = {}
-            self._players = {}
+        # 1. Try discovery with retries
+        players_set: set[soco.SoCo] = set()
+        for attempt in range(3):
+            discovered = await loop.run_in_executor(None, soco.discover)
+            if discovered:
+                players_set.update(discovered)
+                break
+            if attempt < 2:
+                await asyncio.sleep(1.0 * (attempt + 1))
+
+        # 2. If discovery found nothing, try to verify existing players
+        # This prevents losing all targets during transient network issues
+        if not players_set and self._players:
+            logger.info("Sonos discovery returned no players, verifying existing cache")
+            verified_players = []
+            for uid, player in self._players.items():
+                try:
+
+                    def _check_reachable(p: soco.SoCo) -> bool:
+                        # Simple network check
+                        p.get_current_transport_info()
+                        return True
+
+                    await self._run_with_retry(_check_reachable, player, max_retries=1)
+                    verified_players.append(player)
+                except Exception:
+                    logger.debug("Cached player %s no longer reachable", uid)
+
+            if verified_players:
+                logger.info("Retained %d players from cache after discovery failure", len(verified_players))
+                players_set = set(verified_players)
+
+        if not players_set:
+            if self._targets:
+                self._targets = {}
+                self._players = {}
+                if self._event_bus:
+                    self._event_bus.emit(EventType.RENDERER_DISCOVERY_CHANGED, payload={"count": 0})
             self._discovered = True
             return []
 
         # Update player cache
-        self._players = {p.uid: p for p in players}
+        new_players = {p.uid: p for p in players_set}
 
         # Group players by their coordinator to identify logical targets
         groups: dict[str, SonosTargetDescriptor] = {}
 
-        for player in players:
-            group = player.group
-            if not group or not group.coordinator:
+        for player in players_set:
+            try:
+                # Group access is a blocking network call in soco
+                group = await loop.run_in_executor(None, lambda: player.group)
+                if not group or not group.coordinator:
+                    continue
+
+                coordinator = group.coordinator
+                coord_id = coordinator.uid
+
+                if coord_id not in groups:
+                    # Identify if it's a stereo pair or a larger group
+                    members = [m.uid for m in group.members]
+                    target_type = "speaker"
+                    if len(members) == 2:
+                        target_type = "stereo_pair"
+                    elif len(members) > 2:
+                        target_type = "group"
+
+                    groups[coord_id] = SonosTargetDescriptor(
+                        target_id=coord_id,
+                        target_type=target_type,
+                        display_name=coordinator.player_name,
+                        members=members,
+                        coordinator_id=coord_id,
+                    )
+            except Exception as e:
+                logger.warning("Failed to process player %s during topology build: %s", player.uid, e)
                 continue
 
-            coordinator = group.coordinator
-            coord_id = coordinator.uid
+        # Check for changes to emit event
+        old_ids = set(self._targets.keys())
+        new_ids = set(groups.keys())
 
-            if coord_id not in groups:
-                # Identify if it's a stereo pair or a larger group
-                members = [m.uid for m in group.members]
-                target_type = "speaker"
-                if len(members) == 2:
-                    # In soco, a stereo pair is often represented as a single visible player,
-                    # but it might have 2 members if the hidden member is discovered.
-                    target_type = "stereo_pair"
-                elif len(members) > 2:
-                    target_type = "group"
+        # Also check if members changed for existing targets
+        members_changed = False
+        for tid in old_ids.intersection(new_ids):
+            if set(self._targets[tid].members) != set(groups[tid].members):
+                members_changed = True
+                break
 
-                groups[coord_id] = SonosTargetDescriptor(
-                    target_id=coord_id,
-                    target_type=target_type,
-                    display_name=coordinator.player_name,
-                    members=members,
-                    coordinator_id=coord_id,
+        if old_ids != new_ids or members_changed:
+            if self._event_bus:
+                self._event_bus.emit(
+                    EventType.RENDERER_DISCOVERY_CHANGED,
+                    payload={
+                        "count": len(groups),
+                        "added": list(new_ids - old_ids),
+                        "removed": list(old_ids - new_ids),
+                    },
                 )
 
+        self._players = new_players
         self._targets = groups
         self._discovered = True
         return list(self._targets.values())
@@ -278,25 +337,49 @@ class SonosRendererAdapter(RendererAdapter):
 
     async def heal(self, target_id: str) -> dict[str, Any]:
         """Attempt to heal a target's group/topology."""
-        # Always refresh targets to ensure topology is current
-        await self.list_targets()
-
-        target = self._targets.get(target_id)
-        if not target:
-            return {"success": False, "error": f"Target {target_id} not found in topology after refresh"}
-
         if self._event_bus:
             self._event_bus.emit(
                 EventType.HEAL_ATTEMPTED,
                 payload={"target_id": target_id, "renderer": "sonos"},
             )
 
+        # 1. Force a discovery refresh to ensure IP addresses and topology are current
+        # This handles IP changes and role changes (e.g. coordinator moved)
+        try:
+            await self.list_targets()
+        except Exception as e:
+            logger.error("Discovery failed during heal for %s: %s", target_id, e)
+
+        target = self._targets.get(target_id)
+        if not target:
+            return {"success": False, "error": f"Target {target_id} not found in topology after refresh"}
+
         try:
             coordinator = self._players.get(target.coordinator_id)
             if not coordinator:
                 raise RuntimeError(f"Coordinator {target.coordinator_id} not found")
 
-            # 1. Ensure all members are joined to the coordinator
+            # 2. Verify coordinator is reachable and still a coordinator
+            def _verify_coordinator(p: soco.SoCo) -> None:
+                # This will raise if unreachable
+                p.get_current_transport_info()
+                if not p.is_coordinator:
+                    raise RuntimeError(f"Player {p.uid} is no longer a coordinator")
+
+            try:
+                await self._run_with_retry(_verify_coordinator, coordinator, max_retries=2)
+            except Exception as e:
+                logger.warning("Coordinator %s check failed: %s. Re-discovering...", target.coordinator_id, e)
+                # If coordinator is invalid, we must re-discover and rebuild
+                await self.list_targets()
+                target = self._targets.get(target_id)
+                if not target:
+                    raise RuntimeError(f"Target {target_id} lost after re-discovery during heal")
+                coordinator = self._players.get(target.coordinator_id)
+                if not coordinator:
+                    raise RuntimeError(f"Coordinator {target.coordinator_id} still not found after re-discovery")
+
+            # 3. Ensure all members are joined to the coordinator
             for member_id in target.members:
                 if member_id == target.coordinator_id:
                     continue
@@ -308,12 +391,14 @@ class SonosRendererAdapter(RendererAdapter):
 
                 # Check if already in group
                 def _check_and_join(m: soco.SoCo, c: soco.SoCo) -> None:
+                    # In soco, 'join' is relatively safe to call even if already joined
+                    # but we check to avoid unnecessary network traffic
                     if not m.group or not m.group.coordinator or m.group.coordinator.uid != c.uid:
                         m.join(c)
 
                 await self._run_with_retry(_check_and_join, member, coordinator)
 
-            # 2. Check if we should be playing and restart if needed
+            # 4. Check if we should be playing and restart if needed
             playback_restarted = False
             last_played = self._last_played.get(target_id)
 
