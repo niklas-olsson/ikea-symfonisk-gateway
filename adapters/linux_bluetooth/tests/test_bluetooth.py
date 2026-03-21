@@ -105,9 +105,10 @@ async def test_adapter_status(adapter: LinuxBluetoothAdapter) -> None:
         mock_props.return_value = {"Powered": True, "Discoverable": False}
         mock_ready.return_value = []
 
-        status = await adapter.get_adapter_status()
+        with patch("adapter_linux_bluetooth.shutil.which", return_value="/usr/bin/pactl"):
+            status = await adapter.get_adapter_status()
 
-        assert status["healthy"] is True
+            assert status["healthy"] is True
         assert "properties" in status
         assert "readiness_errors" in status
 

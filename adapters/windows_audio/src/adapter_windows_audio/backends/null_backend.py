@@ -44,6 +44,11 @@ class NullWindowsBackend:
         if self._probe_result.message:
             metadata["error_message"] = self._probe_result.message
 
+        # Add prescriptive action to metadata based on the code
+        from bridge_core.core.errors import ERROR_DETAILS
+        if self._probe_result.code in ERROR_DETAILS:
+            metadata["error_action"] = ERROR_DETAILS[self._probe_result.code]["action"]
+
         return [
             SourceDescriptor(
                 source_id="default",
@@ -59,6 +64,7 @@ class NullWindowsBackend:
         return PrepareResult(
             success=False,
             source_id=local_source_id,
+            message=self._probe_result.message or "Windows loopback backend unavailable",
             error=self._probe_result.message,
             code=self._probe_result.code,
         )

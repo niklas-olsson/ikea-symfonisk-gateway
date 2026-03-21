@@ -20,6 +20,9 @@ RENDERER_PLAYBACK_FAILED = "renderer_playback_failed"
 SOURCE_START_FAILED = "source_start_failed"
 FRAME_INGEST_FAILED = "frame_ingest_failed"
 SOURCE_ADAPTER_PLATFORM_MISMATCH = "source_adapter_platform_mismatch"
+LINUX_AUDIO_BACKEND_MISSING = "linux_audio_backend_missing"
+BLUETOOTH_PACTL_MISSING = "missing_pactl"
+BLUETOOTH_AUDIO_TOOLS_MISSING = "missing_audio_tools"
 
 # Windows-specific errors
 WINDOWS_LOOPBACK_BACKEND_MISSING = "windows_loopback_backend_missing"
@@ -61,6 +64,21 @@ ERROR_DETAILS = {
         "message": "Source platform does not match adapter platform.",
         "subsystem": "source_registry",
         "action": "Check source registration and adapter selection logic.",
+    },
+    LINUX_AUDIO_BACKEND_MISSING: {
+        "message": "Required Linux audio capture tools (parec or arecord) are missing.",
+        "subsystem": "source",
+        "action": "Install PulseAudio (pulseaudio-utils) or ALSA (alsa-utils) on the host system.",
+    },
+    BLUETOOTH_PACTL_MISSING: {
+        "message": "The 'pactl' utility is missing, which is required for Bluetooth audio control.",
+        "subsystem": "source",
+        "action": "Install the 'pulseaudio-utils' package on your Linux system.",
+    },
+    BLUETOOTH_AUDIO_TOOLS_MISSING: {
+        "message": "Required PipeWire or PulseAudio utilities are missing for Bluetooth audio.",
+        "subsystem": "source",
+        "action": "Ensure 'pulseaudio-utils' or 'pipewire' packages are installed.",
     },
     WINDOWS_LOOPBACK_BACKEND_MISSING: {
         "message": "No Windows loopback-capable backend is installed.",

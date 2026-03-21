@@ -161,7 +161,21 @@ class BlueZAdapterController:
             await adapter_iface.call_remove_device(device_path)  # type: ignore[attr-defined]
             return True
         except Exception as e:
-            logger.error(f"Failed to remove device {device_path}: {e}")
+            logger.debug(f"Failed to remove device {device_path} (maybe already gone): {e}")
+            return False
+
+    async def set_device_trusted(self, device_path: str, trusted: bool) -> bool:
+        """Set the Trusted property of a BlueZ device."""
+        try:
+            bus = await self._get_bus()
+            introspection = await bus.introspect(BLUEZ_SERVICE, device_path)
+            proxy_object = bus.get_proxy_object(BLUEZ_SERVICE, device_path, introspection)
+            properties_iface = proxy_object.get_interface(PROPERTIES_INTERFACE)
+
+            await properties_iface.call_set(DEVICE_INTERFACE, "Trusted", Variant("b", trusted))  # type: ignore[attr-defined]
+            return True
+        except Exception as e:
+            logger.debug(f"Failed to set Trusted property for {device_path}: {e}")
             return False
 
     def get_device_path(self, mac: str) -> str:
