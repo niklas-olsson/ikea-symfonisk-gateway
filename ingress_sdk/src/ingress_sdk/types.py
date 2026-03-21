@@ -27,6 +27,7 @@ class SourceDescriptor(BaseModel):
     display_name: str
     platform: str
     capabilities: SourceCapabilities
+    adapter_id: str | None = None
     metadata: dict[str, Any] = {}
 
 

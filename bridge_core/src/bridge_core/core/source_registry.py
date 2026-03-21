@@ -12,6 +12,7 @@ from ingress_sdk.types import (
     StartResult,
 )
 
+from bridge_core.core.errors import SOURCE_ADAPTER_PLATFORM_MISMATCH
 from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
 
 
@@ -78,6 +79,9 @@ class SourceRegistry:
         adapter_instance: IngressAdapter | None = None,
     ) -> None:
         """Register a new adapter and its sources."""
+        for s in sources:
+            s.adapter_id = adapter_id
+
         adapter = AdapterInfo(adapter_id, platform, version, capabilities, adapter_instance)
         adapter.sources = {s.source_id: s for s in sources}
         self._adapters[adapter_id] = adapter
@@ -125,6 +129,10 @@ class SourceRegistry:
         for s_id in removed_source_ids:
             self._sources.pop(s_id, None)
             self._source_health.pop(s_id, None)
+
+        # Set adapter_id for hotplugged sources
+        for s in sources:
+            s.adapter_id = adapter_id
 
         # Update adapter and global map
         adapter.sources = new_source_map
@@ -192,6 +200,24 @@ class SourceRegistry:
                 return adapter_info
         return None
 
+    def _validate_platform(self, source: SourceDescriptor, adapter_info: AdapterInfo) -> tuple[bool, str | None]:
+        """Validate that the source and adapter platforms match."""
+        source_platform = source.platform
+        adapter_platform = adapter_info.platform
+
+        # If either is 'any', it's always valid
+        if source_platform == "any" or adapter_platform == "any":
+            return True, None
+
+        if source_platform != adapter_platform:
+            msg = (
+                f"{source_platform.capitalize()} source ({source.source_id}) "
+                f"was bound to {adapter_platform.capitalize()} audio adapter."
+            )
+            return False, msg
+
+        return True, None
+
     def prepare_source(self, source_id: str) -> PrepareResult:
         """Prepare a source for capture."""
         source = self.get_source(source_id)
@@ -201,6 +227,16 @@ class SourceRegistry:
         adapter_info = self._get_adapter_info_for_source(source_id)
         if not adapter_info:
             return PrepareResult(success=False, source_id=source_id, error="Adapter not found for source")
+
+        # Platform validation
+        is_valid, error_msg = self._validate_platform(source, adapter_info)
+        if not is_valid:
+            return PrepareResult(
+                success=False,
+                source_id=source_id,
+                code=SOURCE_ADAPTER_PLATFORM_MISMATCH,
+                message=error_msg or "Platform mismatch",
+            )
 
         if adapter_info.adapter:
             return adapter_info.adapter.prepare(source_id)
@@ -220,6 +256,15 @@ class SourceRegistry:
         adapter_info = self._get_adapter_info_for_source(source_id)
         if not adapter_info or not adapter_info.adapter:
             return StartResult(success=False, message="Adapter not found or not connected")
+
+        # Platform validation
+        is_valid, error_msg = self._validate_platform(source, adapter_info)
+        if not is_valid:
+            return StartResult(
+                success=False,
+                code=SOURCE_ADAPTER_PLATFORM_MISMATCH,
+                message=error_msg or "Platform mismatch",
+            )
 
         return adapter_info.adapter.start(source_id, frame_sink)
 
