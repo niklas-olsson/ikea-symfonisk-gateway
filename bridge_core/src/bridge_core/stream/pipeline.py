@@ -23,7 +23,7 @@ DEFAULT_KEEPALIVE_IDLE_THRESHOLD_MS = 200
 DEFAULT_KEEPALIVE_FRAME_DURATION_MS = 20
 DEFAULT_SOURCE_OUTAGE_GRACE_MS = 5000
 DEFAULT_JITTER_TARGET_MS = 250
-DEFAULT_TRANSPORT_HEARTBEAT_WINDOW_MS = 500
+DEFAULT_TRANSPORT_HEARTBEAT_WINDOW_MS = 1000
 DEFAULT_DELIVERY_PROFILE = "stable"
 DEFAULT_PRIMARY_CLIENT_QUEUE_BYTES = 262144
 DEFAULT_PRIMARY_CLIENT_OVERFLOW_GRACE_MS = 1500
@@ -172,7 +172,7 @@ class StreamPipeline:
         target_id: str | None = None,
         ffmpeg_path: str = "ffmpeg",
         on_error: Any | None = None,
-        keepalive_enabled: bool = True,
+        keepalive_enabled: bool = False,
         keepalive_idle_threshold_ms: int = DEFAULT_KEEPALIVE_IDLE_THRESHOLD_MS,
         source_outage_grace_ms: int = DEFAULT_SOURCE_OUTAGE_GRACE_MS,
         keepalive_frame_duration_ms: int = DEFAULT_KEEPALIVE_FRAME_DURATION_MS,

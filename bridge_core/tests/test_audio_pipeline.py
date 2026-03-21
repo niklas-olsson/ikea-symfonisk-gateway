@@ -84,7 +84,7 @@ async def test_stream_pipeline_lifecycle() -> None:
         diagnostics = pipeline.get_diagnostics_snapshot()
         assert diagnostics["live_jitter_target_ms"] == 250
         assert diagnostics["ffmpeg_input_format"]["frame_duration_ms"] == 20
-        assert diagnostics["transport_heartbeat_window_ms"] == 500
+        assert diagnostics["transport_heartbeat_window_ms"] == 1000
         assert diagnostics["running_delivery_profile"] == "stable"
 
 
@@ -130,6 +130,7 @@ async def test_pipeline_injects_silence_for_healthy_idle() -> None:
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
+        keepalive_enabled=True,
         keepalive_idle_threshold_ms=10,
         keepalive_frame_duration_ms=10,
         source_outage_grace_ms=100,
@@ -152,6 +153,7 @@ async def test_pipeline_resumes_real_frames_after_keepalive() -> None:
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
+        keepalive_enabled=True,
         keepalive_idle_threshold_ms=10,
         keepalive_frame_duration_ms=10,
         source_outage_grace_ms=100,
@@ -187,6 +189,7 @@ async def test_pipeline_continues_keepalive_without_source_failure_policy() -> N
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
+        keepalive_enabled=True,
         keepalive_idle_threshold_ms=10,
         keepalive_frame_duration_ms=10,
         source_outage_grace_ms=30,
@@ -208,6 +211,7 @@ async def test_pipeline_tracks_transport_heartbeat_from_stdout() -> None:
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
+        keepalive_enabled=True,
         keepalive_idle_threshold_ms=10,
         keepalive_frame_duration_ms=10,
         transport_heartbeat_window_ms=50,
@@ -424,6 +428,7 @@ async def test_pipeline_debug_capture_writes_pre_and_post_encoder_files(tmp_path
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
+        keepalive_enabled=True,
         keepalive_idle_threshold_ms=10,
         keepalive_frame_duration_ms=10,
         source_outage_grace_ms=100,

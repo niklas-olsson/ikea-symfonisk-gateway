@@ -31,7 +31,8 @@ from bridge_core.stream.pipeline import StreamPipeline
 from bridge_core.stream.utils import resolve_ffmpeg_path
 
 logger = logging.getLogger(__name__)
-AUDIO_KEEPALIVE_ENABLED_DEFAULT = True
+AUDIO_STABLE_KEEPALIVE_ENABLED_DEFAULT = False
+AUDIO_EXPERIMENTAL_KEEPALIVE_ENABLED_DEFAULT = True
 AUDIO_STABLE_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 200
 AUDIO_STABLE_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 20
 AUDIO_EXPERIMENTAL_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 100
@@ -44,7 +45,7 @@ AUDIO_LIVE_STARTUP_VIABILITY_TIMEOUT_MS_DEFAULT = 1000
 AUDIO_DELIVERY_PROFILE_DEFAULT = "stable"
 AUDIO_AUTO_HEAL_DELIVERY_ENABLED_DEFAULT = True
 AUDIO_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT = True
-AUDIO_STABLE_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT = 500
+AUDIO_STABLE_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT = 1000
 AUDIO_EXPERIMENTAL_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT = 750
 AUDIO_STABLE_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT = 262144
 AUDIO_STABLE_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 1500
@@ -477,6 +478,25 @@ class SessionManager:
 
         return default
 
+    def _resolve_profile_bool_override(
+        self,
+        profile: DeliveryProfile,
+        per_profile_key_suffix: str,
+        global_key: str,
+        default: bool,
+    ) -> bool:
+        per_profile_key = f"audio_{profile}_{per_profile_key_suffix}"
+        if self._config_store:
+            per_profile_value = self._config_store.get(per_profile_key, None)
+            if isinstance(per_profile_value, bool):
+                return per_profile_value
+
+        global_override = self._config_store.get(global_key, None) if self._config_store else None
+        if isinstance(global_override, bool):
+            return global_override
+
+        return default
+
     def _is_windows_system_output_source(self, source_id: str) -> bool:
         source_binding = self._source_registry.resolve_source(source_id)
         source = source_binding.source if source_binding else None
@@ -486,7 +506,12 @@ class SessionManager:
         profile = profile or self._resolve_delivery_profile_for_source(source_id)
         defaults = self._resolve_delivery_profile_defaults(profile)
         return {
-            "keepalive_enabled": self._get_bool_config("audio_keepalive_enabled", AUDIO_KEEPALIVE_ENABLED_DEFAULT),
+            "keepalive_enabled": self._resolve_profile_bool_override(
+                profile,
+                "keepalive_enabled",
+                "audio_keepalive_enabled",
+                AUDIO_EXPERIMENTAL_KEEPALIVE_ENABLED_DEFAULT if profile == "experimental" else AUDIO_STABLE_KEEPALIVE_ENABLED_DEFAULT,
+            ),
             "keepalive_idle_threshold_ms": self._resolve_profile_int_override(
                 profile,
                 "keepalive_idle_threshold_ms",
@@ -1463,7 +1488,11 @@ class SessionManager:
                         session_id=session_id,
                         payload={"state": "playing_degraded", "details": details},
                     )
-                    if session.auto_heal and self._get_bool_config("audio_auto_heal_delivery_enabled", AUDIO_AUTO_HEAL_DELIVERY_ENABLED_DEFAULT):
+                    if (
+                        session.effective_delivery_profile == "experimental"
+                        and session.auto_heal
+                        and self._get_bool_config("audio_auto_heal_delivery_enabled", AUDIO_AUTO_HEAL_DELIVERY_ENABLED_DEFAULT)
+                    ):
                         self._schedule_media_plane_heal(session_id, "replay", "client_detached_while_session_open")
 
                 if session.state == SessionState.DEGRADED and encoder_alive and not session.media_heal_in_progress:

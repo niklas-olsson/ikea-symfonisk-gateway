@@ -440,10 +440,11 @@ async def test_delivery_profile_defaults_to_stable_for_linux_and_windows_sources
 
     for kwargs in (linux_kwargs, windows_kwargs):
         assert kwargs["delivery_profile"] == "stable"
+        assert kwargs["keepalive_enabled"] is False
         assert kwargs["keepalive_idle_threshold_ms"] == 200
         assert kwargs["keepalive_frame_duration_ms"] == 20
         assert kwargs["live_jitter_target_ms"] == 250
-        assert kwargs["transport_heartbeat_window_ms"] == 500
+        assert kwargs["transport_heartbeat_window_ms"] == 1000
         assert kwargs["primary_client_queue_bytes"] == 262144
         assert kwargs["primary_client_overflow_grace_ms"] == 1500
         assert kwargs["primary_client_max_backlog_ms"] == 1500
@@ -518,7 +519,8 @@ def test_legacy_live_keys_do_not_poison_stable_when_profile_unset(
 
     kwargs = manager._build_pipeline_kwargs("src_1")
     assert kwargs["delivery_profile"] == "stable"
-    assert kwargs["transport_heartbeat_window_ms"] == 500
+    assert kwargs["keepalive_enabled"] is False
+    assert kwargs["transport_heartbeat_window_ms"] == 1000
 
 
 def test_global_advanced_override_applies_without_changing_selected_profile(
@@ -555,6 +557,7 @@ async def test_experimental_profile_applies_shared_defaults_across_platforms(
     for source_id in ("linux-audio:default", "windows-audio-adapter:system:default"):
         kwargs = manager._build_pipeline_kwargs(source_id)
         assert kwargs["delivery_profile"] == "experimental"
+        assert kwargs["keepalive_enabled"] is True
         assert kwargs["keepalive_idle_threshold_ms"] == 100
         assert kwargs["keepalive_frame_duration_ms"] == 10
         assert kwargs["live_jitter_target_ms"] == 60
@@ -694,10 +697,11 @@ async def test_pipeline_runtime_config_only_uses_live_defaults_for_windows_syste
 
     assert success is True
     _, kwargs = mock_pipeline_cls.call_args
+    assert kwargs["keepalive_enabled"] is False
     assert kwargs["keepalive_idle_threshold_ms"] == 200
     assert kwargs["keepalive_frame_duration_ms"] == 20
     assert kwargs["live_jitter_target_ms"] == 250
-    assert kwargs["transport_heartbeat_window_ms"] == 500
+    assert kwargs["transport_heartbeat_window_ms"] == 1000
 
 
 @pytest.mark.asyncio
@@ -1159,7 +1163,8 @@ async def test_client_detach_does_not_degrade_healthy_stream(
     config_store.get.side_effect = lambda key, default=None: {
         "audio_transport_heartbeat_window_ms": 100,
         "audio_primary_attach_grace_ms": 100,
-        "audio_stable_primary_detach_grace_ms": 200,
+        "audio_experimental_primary_detach_grace_ms": 200,
+        "audio_delivery_profile": "experimental",
     }.get(key, default)
 
     manager = SessionManager(
@@ -1286,7 +1291,8 @@ async def test_normal_reconnect_churn_remains_non_fatal(
     config_store.get.side_effect = lambda key, default=None: {
         "audio_transport_heartbeat_window_ms": 100,
         "audio_primary_attach_grace_ms": 100,
-        "audio_stable_primary_detach_grace_ms": 200,
+        "audio_experimental_primary_detach_grace_ms": 200,
+        "audio_delivery_profile": "experimental",
     }.get(key, default)
 
     manager = SessionManager(
@@ -1432,7 +1438,8 @@ async def test_last_effective_delivery_path_loss_degrades_and_replays(
     config_store.get.side_effect = lambda key, default=None: {
         "audio_transport_heartbeat_window_ms": 100,
         "audio_primary_attach_grace_ms": 100,
-        "audio_stable_primary_detach_grace_ms": 200,
+        "audio_experimental_primary_detach_grace_ms": 200,
+        "audio_delivery_profile": "experimental",
     }.get(key, default)
 
     manager = SessionManager(
@@ -1543,12 +1550,14 @@ async def test_last_effective_delivery_path_loss_degrades_and_replays(
 
         mock_pipeline.get_diagnostics_snapshot.side_effect = next_snapshot
 
-        success = await manager.start_session(session.session_id)
-        assert success is True
-        await asyncio.sleep(1.2)
+        with patch.object(manager, "_schedule_media_plane_heal") as heal_mock:
+            success = await manager.start_session(session.session_id)
+            assert success is True
+            await asyncio.sleep(1.2)
+        heal_mock.assert_called_with(session.session_id, "replay", "client_detached_while_session_open")
 
-    assert session.state == SessionState.PLAYING
-    assert target_registry.play_stream.await_count >= 2
+        assert session.state == SessionState.DEGRADED
+        assert session.media_reason == "client_detached_while_session_open"
     await manager.stop_session(session.session_id)
 
 
