@@ -234,6 +234,37 @@ async def test_pipeline_tracks_transport_heartbeat_from_stdout() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stable_pipeline_feeds_real_frames_without_fixed_slot_pacing() -> None:
+    pipeline = StreamPipeline("test_sess", "mp3_48k_stereo_320", delivery_profile="stable")
+    frames = [
+        AudioFrame(sequence=index, pts_ns=index * 10_000_000, duration_ns=10_000_000, format={}, audio_data=b"x" * 4)
+        for index in range(3)
+    ]
+    write_times: list[float] = []
+
+    async def fake_pop() -> AudioFrame | None:
+        if frames:
+            return frames.pop(0)
+        pipeline._active = False
+        return None
+
+    async def fake_write(_: bytes, *, is_silence: bool, now: float) -> None:
+        assert is_silence is False
+        write_times.append(time.monotonic())
+
+    pipeline.jitter_buffer.pop = AsyncMock(side_effect=fake_pop)  # type: ignore[method-assign]
+    pipeline._write_encoder_input = AsyncMock(side_effect=fake_write)  # type: ignore[method-assign]
+    pipeline._active = True
+
+    started = time.monotonic()
+    await pipeline._feed_ffmpeg()
+    elapsed = time.monotonic() - started
+
+    assert len(write_times) == 3
+    assert elapsed < 0.02
+
+
+@pytest.mark.asyncio
 async def test_pipeline_tracks_client_fanout_timestamp() -> None:
     class DelayedStdout:
         async def read(self, _: int) -> bytes:

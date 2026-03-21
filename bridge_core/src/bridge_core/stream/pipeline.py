@@ -458,6 +458,38 @@ class StreamPipeline:
 
     async def _feed_ffmpeg(self) -> None:
         """Continuously feed audio data from jitter buffer to FFmpeg's stdin."""
+        if self._is_stable_profile():
+            await self._feed_ffmpeg_stable()
+            return
+
+        await self._feed_ffmpeg_experimental()
+
+    async def _feed_ffmpeg_stable(self) -> None:
+        """Legacy conservative feed loop: write frames as they arrive."""
+        while self._active:
+            try:
+                frame = await self.jitter_buffer.pop()
+                now = time.monotonic()
+                if frame is not None:
+                    await self._write_encoder_input(frame.audio_data, is_silence=False, now=now)
+                    self._set_runtime_mode(None, now)
+                    continue
+
+                keepalive_payload, keepalive_mode = self._resolve_keepalive_payload(now)
+                if keepalive_payload is not None:
+                    await self._write_encoder_input(keepalive_payload, is_silence=True, now=now)
+                    self._set_runtime_mode(keepalive_mode, now)
+                    await asyncio.sleep(self._frame_duration_ms / 1000)
+                else:
+                    await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Error feeding FFmpeg for session %s", self.session_id)
+                raise
+
+    async def _feed_ffmpeg_experimental(self) -> None:
+        """Paced low-latency feed loop used for the experimental profile."""
         slot_seconds = self._frame_duration_ms / 1000
         next_slot_at = time.monotonic()
 
