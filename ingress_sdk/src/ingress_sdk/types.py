@@ -47,6 +47,7 @@ class PrepareResult(BaseModel):
     success: bool
     message: str = ""
     error: str | None = None
+    code: str | None = None
     source_id: str
 
 
@@ -54,6 +55,7 @@ class StartResult(BaseModel):
     success: bool
     session_id: str = ""
     message: str = ""
+    code: str | None = None
 
 
 class PairingResult(BaseModel):
