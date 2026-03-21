@@ -23,6 +23,8 @@ DEFAULT_KEEPALIVE_FRAME_DURATION_MS = 20
 DEFAULT_SOURCE_OUTAGE_GRACE_MS = 5000
 DEFAULT_JITTER_TARGET_MS = 250
 DEFAULT_TRANSPORT_HEARTBEAT_WINDOW_MS = 500
+DEFAULT_CLIENT_QUEUE_BYTES = 131072
+DEFAULT_CLIENT_OVERFLOW_GRACE_MS = 750
 PACING_LOG_INTERVAL_SECONDS = 2.0
 
 
@@ -107,6 +109,21 @@ class JitterBuffer:
         return self._buffer_size_ms
 
 
+@dataclass
+class PipelineSubscriber:
+    """Tracks per-subscriber delivery and backlog state."""
+
+    queue: asyncio.Queue[bytes]
+    wake_event: asyncio.Event
+    attached_monotonic: float
+    last_successful_enqueue_monotonic: float | None
+    overflow_started_monotonic: float | None
+    overflow_events: int
+    queued_bytes: int
+    closed: bool = False
+    delivery_path_id: str | None = None
+
+
 class StreamPipeline:
     """Active audio pipeline for a session using FFmpeg for encoding."""
 
@@ -122,6 +139,9 @@ class StreamPipeline:
         keepalive_frame_duration_ms: int = DEFAULT_KEEPALIVE_FRAME_DURATION_MS,
         live_jitter_target_ms: int = DEFAULT_JITTER_TARGET_MS,
         transport_heartbeat_window_ms: int = DEFAULT_TRANSPORT_HEARTBEAT_WINDOW_MS,
+        client_queue_bytes: int = DEFAULT_CLIENT_QUEUE_BYTES,
+        client_overflow_grace_ms: int = DEFAULT_CLIENT_OVERFLOW_GRACE_MS,
+        client_max_backlog_ms: int | None = None,
         debug_capture_enabled: bool = False,
         debug_capture_pre_encoder_path: str | None = None,
         debug_capture_post_encoder_path: str | None = None,
@@ -136,7 +156,7 @@ class StreamPipeline:
         self._ffmpeg_input_format = input_format or self._build_default_input_format(keepalive_frame_duration_ms)
         self.jitter_buffer = JitterBuffer(target_ms=live_jitter_target_ms, sample_rate=self._ffmpeg_input_format.sample_rate)
         self._process: asyncio.subprocess.Process | None = None
-        self._clients: list[asyncio.Queue[bytes]] = []
+        self._clients: list[PipelineSubscriber] = []
         self._active = False
         self._lock = asyncio.Lock()
         self._feed_task: asyncio.Task[None] | None = None
@@ -148,6 +168,9 @@ class StreamPipeline:
         self._frame_duration_ms = self._ffmpeg_input_format.frame_duration_ms
         self._live_jitter_target_ms = live_jitter_target_ms
         self._transport_heartbeat_window_ms = transport_heartbeat_window_ms
+        self._client_queue_bytes = client_queue_bytes
+        self._client_overflow_grace_ms = client_overflow_grace_ms
+        self._client_max_backlog_ms = client_max_backlog_ms
         self._debug_capture_enabled = debug_capture_enabled
         self._debug_capture_pre_encoder_path = debug_capture_pre_encoder_path
         self._debug_capture_post_encoder_path = debug_capture_post_encoder_path
@@ -171,6 +194,8 @@ class StreamPipeline:
         self._last_client_fanout_monotonic: float | None = None
         self._last_client_attach_monotonic: float | None = None
         self._last_client_detach_monotonic: float | None = None
+        self._last_client_overflow_monotonic: float | None = None
+        self._last_client_stall_disconnect_monotonic: float | None = None
         self._ffmpeg_stdin_write_errors = 0
         self._jitter_buffer_underrun_count = 0
         self._last_pacing_log_monotonic: float | None = None
@@ -185,6 +210,9 @@ class StreamPipeline:
         self._first_keepalive_encoded_output_monotonic: float | None = None
         self._awaiting_real_encoded_output = False
         self._awaiting_keepalive_encoded_output = False
+        self._backpressure_events_total = 0
+        self._client_queue_overflow_events_total = 0
+        self._client_stall_disconnects_total = 0
 
         self._pre_encoder_debug_writer: Any | None = None
         self._pre_encoder_debug_mode: str | None = None
@@ -348,14 +376,7 @@ class StreamPipeline:
                         self._awaiting_keepalive_encoded_output = False
 
                     self._write_post_encoder_debug(data)
-                    async with self._lock:
-                        if self._clients:
-                            self._last_client_fanout_monotonic = now
-                        for client_queue in self._clients:
-                            try:
-                                client_queue.put_nowait(data)
-                            except asyncio.QueueFull:
-                                pass
+                    await self._fan_out_encoded_chunk(data, now)
                 else:
                     await asyncio.sleep(0.01)
             except asyncio.CancelledError:
@@ -366,24 +387,48 @@ class StreamPipeline:
 
     async def subscribe(self) -> AsyncGenerator[bytes, None]:
         """Subscribe to encoded audio data. Yields chunks of encoded data."""
-        queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)
+        subscriber = PipelineSubscriber(
+            queue=asyncio.Queue(),
+            wake_event=asyncio.Event(),
+            attached_monotonic=time.monotonic(),
+            last_successful_enqueue_monotonic=None,
+            overflow_started_monotonic=None,
+            overflow_events=0,
+            queued_bytes=0,
+        )
         async with self._lock:
-            self._clients.append(queue)
-            self._last_client_attach_monotonic = time.monotonic()
+            self._clients.append(subscriber)
+            self._last_client_attach_monotonic = subscriber.attached_monotonic
 
         try:
             while True:
-                data = await queue.get()
+                if subscriber.closed and subscriber.queue.empty():
+                    break
+                queue_get = asyncio.create_task(subscriber.queue.get())
+                wake_wait = asyncio.create_task(subscriber.wake_event.wait())
+                done, pending = await asyncio.wait({queue_get, wake_wait}, return_when=asyncio.FIRST_COMPLETED)
+                for pending_task in pending:
+                    pending_task.cancel()
+                if wake_wait in done:
+                    subscriber.wake_event.clear()
+                    if subscriber.closed and subscriber.queue.empty():
+                        if not queue_get.done():
+                            queue_get.cancel()
+                        break
+                if queue_get not in done:
+                    continue
+                data = queue_get.result()
+                async with self._lock:
+                    subscriber.queued_bytes = max(0, subscriber.queued_bytes - len(data))
                 yield data
         finally:
-            async with self._lock:
-                self._clients.remove(queue)
-                self._last_client_detach_monotonic = time.monotonic()
+            await self._remove_subscriber(subscriber, reason="subscriber_closed")
 
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return a diagnostic snapshot for logging and tests."""
         now = time.monotonic()
         encoded_bytes_emitted_last_window = self._encoded_bytes_emitted_last_window(now)
+        effective_client_count = self._effective_client_count(now)
         return {
             "keepalive_active": self._keepalive_active,
             "source_outage_active": self._source_outage_active,
@@ -406,9 +451,15 @@ class StreamPipeline:
             "last_client_fanout_monotonic": self._last_client_fanout_monotonic,
             "last_client_attach_monotonic": self._last_client_attach_monotonic,
             "last_client_detach_monotonic": self._last_client_detach_monotonic,
+            "last_client_overflow_monotonic": self._last_client_overflow_monotonic,
+            "last_client_stall_disconnect_monotonic": self._last_client_stall_disconnect_monotonic,
             "active_client_count": len(self._clients),
+            "effective_client_count": effective_client_count,
             "encoded_bytes_emitted_total": self._encoded_bytes_emitted_total,
             "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
+            "backpressure_events_total": self._backpressure_events_total,
+            "client_queue_overflow_events_total": self._client_queue_overflow_events_total,
+            "client_stall_disconnects_total": self._client_stall_disconnects_total,
             "transport_alive": self._is_transport_alive(now, encoded_bytes_emitted_last_window),
             "first_encoded_output_after_session_start_ms": self._elapsed_since_start_ms(self._first_encoded_output_monotonic),
             "first_real_encoded_output_after_session_start_ms": self._elapsed_since_start_ms(self._first_real_encoded_output_monotonic),
@@ -422,6 +473,98 @@ class StreamPipeline:
                 "duration_ns": self._ffmpeg_input_format.duration_ns,
             },
         }
+
+    async def _fan_out_encoded_chunk(self, data: bytes, now: float) -> None:
+        delivered = False
+        to_evict: list[PipelineSubscriber] = []
+        async with self._lock:
+            for subscriber in list(self._clients):
+                if subscriber.closed:
+                    continue
+                if self._subscriber_is_overflowing(subscriber, len(data), now):
+                    self._backpressure_events_total += 1
+                    self._client_queue_overflow_events_total += 1
+                    self._last_client_overflow_monotonic = now
+                    subscriber.overflow_events += 1
+                    if subscriber.overflow_started_monotonic is None:
+                        subscriber.overflow_started_monotonic = now
+                    overflow_age_ms = (now - subscriber.overflow_started_monotonic) * 1000
+                    if overflow_age_ms >= self._client_overflow_grace_ms:
+                        to_evict.append(subscriber)
+                        continue
+                else:
+                    subscriber.overflow_started_monotonic = None
+
+                subscriber.queue.put_nowait(data)
+                subscriber.queued_bytes += len(data)
+                subscriber.last_successful_enqueue_monotonic = now
+                subscriber.wake_event.set()
+                delivered = True
+
+            if delivered:
+                self._last_client_fanout_monotonic = now
+
+        for subscriber in to_evict:
+            await self._evict_subscriber(subscriber, now)
+
+    def _subscriber_is_overflowing(self, subscriber: PipelineSubscriber, incoming_bytes: int, now: float) -> bool:
+        next_queued_bytes = subscriber.queued_bytes + incoming_bytes
+        if next_queued_bytes > self._client_queue_bytes:
+            return True
+        if self._client_max_backlog_ms is None:
+            return False
+        backlog_ms = self._estimate_backlog_ms(next_queued_bytes, now)
+        return backlog_ms is not None and backlog_ms > self._client_max_backlog_ms
+
+    def _estimate_backlog_ms(self, queued_bytes: int, now: float) -> float | None:
+        encoded_bytes_emitted_last_window = self._encoded_bytes_emitted_last_window(now)
+        if encoded_bytes_emitted_last_window <= 0:
+            return None
+        bytes_per_ms = encoded_bytes_emitted_last_window / max(self._transport_heartbeat_window_ms, 1)
+        if bytes_per_ms <= 0:
+            return None
+        return queued_bytes / bytes_per_ms
+
+    def _effective_client_count(self, now: float) -> int:
+        heartbeat_window_seconds = self._transport_heartbeat_window_ms / 1000
+        count = 0
+        for subscriber in self._clients:
+            if subscriber.closed:
+                continue
+            if subscriber.last_successful_enqueue_monotonic is None:
+                continue
+            if (now - subscriber.last_successful_enqueue_monotonic) <= heartbeat_window_seconds:
+                count += 1
+        return count
+
+    async def _evict_subscriber(self, subscriber: PipelineSubscriber, now: float) -> None:
+        async with self._lock:
+            if subscriber.closed:
+                return
+            subscriber.closed = True
+            while not subscriber.queue.empty():
+                try:
+                    subscriber.queue.get_nowait()
+                    subscriber.queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+            subscriber.queued_bytes = 0
+            self._client_stall_disconnects_total += 1
+            self._last_client_stall_disconnect_monotonic = now
+            if subscriber in self._clients:
+                self._clients.remove(subscriber)
+            self._last_client_detach_monotonic = now
+            subscriber.wake_event.set()
+
+    async def _remove_subscriber(self, subscriber: PipelineSubscriber, *, reason: str) -> None:
+        del reason
+        async with self._lock:
+            already_removed = subscriber not in self._clients
+            subscriber.closed = True
+            subscriber.wake_event.set()
+            if not already_removed:
+                self._clients.remove(subscriber)
+                self._last_client_detach_monotonic = time.monotonic()
 
     def _resolve_keepalive_payload(self, now: float) -> tuple[bytes | None, str | None]:
         if not self._keepalive_enabled:

@@ -1167,6 +1167,204 @@ async def test_normal_reconnect_churn_remains_non_fatal(
 
 
 @pytest.mark.asyncio
+async def test_last_effective_delivery_path_loss_degrades_and_replays(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=True,
+        source_state="active",
+        last_error=None,
+        details={
+            "startup_substate": "active",
+            "callback_count": 5,
+            "frames_emitted": 5,
+            "start_viability": {"stream_opened": True, "stream_started": True, "callback_registered": True},
+        },
+    )
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {"audio_transport_heartbeat_window_ms": 100}.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+
+    healthy = {
+        "real_frames_written": 3,
+        "silence_frames_written": 0,
+        "runtime_mode": "active",
+        "last_real_frame_age_ms": 5.0,
+        "keepalive_to_first_real_frame_ms": None,
+        "first_keepalive_encoded_output_after_session_start_ms": 15.0,
+        "first_real_encoded_output_after_session_start_ms": 20.0,
+        "transport_alive": True,
+        "encoded_bytes_emitted_total": 1024,
+        "encoded_bytes_emitted_last_window": 512,
+        "last_stdout_read_monotonic": time.monotonic(),
+        "last_stdin_write_monotonic": time.monotonic(),
+        "keepalive_active": False,
+        "active_client_count": 1,
+        "effective_client_count": 1,
+        "last_client_fanout_monotonic": time.monotonic(),
+        "last_client_attach_monotonic": time.monotonic() - 1,
+        "last_client_detach_monotonic": None,
+        "client_stall_disconnects_total": 0,
+        "last_client_stall_disconnect_monotonic": None,
+    }
+    def detached() -> dict[str, float | int | bool | None | str]:
+        return {
+            **healthy,
+            "active_client_count": 0,
+            "effective_client_count": 0,
+            "last_client_fanout_monotonic": time.monotonic() - 1,
+            "last_client_detach_monotonic": time.monotonic() - 0.01,
+            "client_stall_disconnects_total": 1,
+            "last_client_stall_disconnect_monotonic": time.monotonic() - 0.01,
+        }
+
+    def replayed() -> dict[str, float | int | bool | None | str]:
+        return {
+            **healthy,
+            "last_client_attach_monotonic": time.monotonic(),
+            "last_client_fanout_monotonic": time.monotonic(),
+        }
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        sequence = [healthy, detached, detached, detached, detached, replayed, replayed, replayed, replayed, replayed]
+
+        def next_snapshot() -> dict[str, float | int | bool | None | str]:
+            if sequence:
+                entry = sequence.pop(0)
+            else:
+                entry = replayed
+            return entry() if callable(entry) else entry
+
+        mock_pipeline.get_diagnostics_snapshot.side_effect = next_snapshot
+
+        success = await manager.start_session(session.session_id)
+        assert success is True
+        await asyncio.sleep(1.0)
+
+    assert session.state == SessionState.PLAYING
+    assert target_registry.play_stream.await_count >= 2
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_stalled_subscriber_eviction_does_not_degrade_when_effective_path_remains(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=True,
+        source_state="active",
+        last_error=None,
+        details={
+            "startup_substate": "active",
+            "callback_count": 5,
+            "frames_emitted": 5,
+            "start_viability": {"stream_opened": True, "stream_started": True, "callback_registered": True},
+        },
+    )
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {"audio_transport_heartbeat_window_ms": 100}.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+
+    healthy = {
+        "real_frames_written": 3,
+        "silence_frames_written": 0,
+        "runtime_mode": "active",
+        "last_real_frame_age_ms": 5.0,
+        "keepalive_to_first_real_frame_ms": None,
+        "first_keepalive_encoded_output_after_session_start_ms": 15.0,
+        "first_real_encoded_output_after_session_start_ms": 20.0,
+        "transport_alive": True,
+        "encoded_bytes_emitted_total": 1024,
+        "encoded_bytes_emitted_last_window": 512,
+        "last_stdout_read_monotonic": time.monotonic(),
+        "last_stdin_write_monotonic": time.monotonic(),
+        "keepalive_active": False,
+        "active_client_count": 2,
+        "effective_client_count": 1,
+        "last_client_fanout_monotonic": time.monotonic(),
+        "last_client_attach_monotonic": time.monotonic() - 1,
+        "last_client_detach_monotonic": time.monotonic() - 0.05,
+        "client_stall_disconnects_total": 1,
+        "last_client_stall_disconnect_monotonic": time.monotonic() - 0.05,
+    }
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        mock_pipeline.get_diagnostics_snapshot.return_value = healthy
+
+        success = await manager.start_session(session.session_id)
+        assert success is True
+        await asyncio.sleep(0.6)
+
+    assert session.state == SessionState.PLAYING
+    assert target_registry.play_stream.await_count == 1
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
 async def test_encoder_loss_triggers_pipeline_swap_without_restarting_source(
     event_bus: EventBus,
     stream_publisher: MagicMock,

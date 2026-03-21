@@ -37,6 +37,9 @@ AUDIO_LIVE_JITTER_TARGET_MS_DEFAULT = 60
 AUDIO_LIVE_STARTUP_ALLOW_SILENT_SOURCE_DEFAULT = True
 AUDIO_LIVE_STARTUP_VIABILITY_TIMEOUT_MS_DEFAULT = 1000
 AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT = 500
+AUDIO_CLIENT_QUEUE_BYTES_DEFAULT = 131072
+AUDIO_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 750
+AUDIO_CLIENT_MAX_BACKLOG_MS_DEFAULT = 1500
 AUDIO_DEBUG_CAPTURE_ENABLED_DEFAULT = False
 AUDIO_DEBUG_PACING_LOGS_ENABLED_DEFAULT = False
 COMPAT_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 200
@@ -124,6 +127,8 @@ class Session:
         now = time.monotonic()
         last_stdout_read_monotonic = diagnostics.get("last_stdout_read_monotonic")
         last_client_fanout_monotonic = diagnostics.get("last_client_fanout_monotonic")
+        last_client_overflow_monotonic = diagnostics.get("last_client_overflow_monotonic")
+        last_client_stall_disconnect_monotonic = diagnostics.get("last_client_stall_disconnect_monotonic")
         return {
             "session_id": self.session_id,
             "source_id": self.source_id,
@@ -144,12 +149,22 @@ class Session:
                 "delivery_alive": bool(diagnostics.get("delivery_alive", False)),
                 "transport_alive": bool(diagnostics.get("transport_alive", False)),
                 "active_client_count": int(diagnostics.get("active_client_count") or 0),
+                "effective_client_count": int(diagnostics.get("effective_client_count") or 0),
                 "encoded_bytes_emitted_last_window": int(diagnostics.get("encoded_bytes_emitted_last_window") or 0),
+                "backpressure_events_total": int(diagnostics.get("backpressure_events_total") or 0),
+                "client_queue_overflow_events_total": int(diagnostics.get("client_queue_overflow_events_total") or 0),
+                "client_stall_disconnects_total": int(diagnostics.get("client_stall_disconnects_total") or 0),
                 "last_stdout_read_age_ms": (now - last_stdout_read_monotonic) * 1000
                 if isinstance(last_stdout_read_monotonic, (int, float))
                 else None,
                 "last_client_fanout_age_ms": (now - last_client_fanout_monotonic) * 1000
                 if isinstance(last_client_fanout_monotonic, (int, float))
+                else None,
+                "last_client_overflow_age_ms": (now - last_client_overflow_monotonic) * 1000
+                if isinstance(last_client_overflow_monotonic, (int, float))
+                else None,
+                "last_client_stall_disconnect_age_ms": (now - last_client_stall_disconnect_monotonic) * 1000
+                if isinstance(last_client_stall_disconnect_monotonic, (int, float))
                 else None,
                 "keepalive_active": bool(diagnostics.get("keepalive_active", False)),
             },
@@ -328,6 +343,18 @@ class SessionManager:
                 "audio_transport_heartbeat_window_ms",
                 AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT if is_windows_live_source else AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT,
             ),
+            "client_queue_bytes": self._get_int_config(
+                "audio_client_queue_bytes",
+                AUDIO_CLIENT_QUEUE_BYTES_DEFAULT,
+            ),
+            "client_overflow_grace_ms": self._get_int_config(
+                "audio_client_overflow_grace_ms",
+                AUDIO_CLIENT_OVERFLOW_GRACE_MS_DEFAULT,
+            ),
+            "client_max_backlog_ms": self._get_int_config(
+                "audio_client_max_backlog_ms",
+                AUDIO_CLIENT_MAX_BACKLOG_MS_DEFAULT,
+            ),
             "debug_capture_enabled": self._get_bool_config(
                 "audio_debug_capture_enabled",
                 AUDIO_DEBUG_CAPTURE_ENABLED_DEFAULT,
@@ -406,14 +433,17 @@ class SessionManager:
 
     def _derive_delivery_alive(self, diagnostics: dict[str, Any], heartbeat_window_ms: int) -> bool:
         now = time.monotonic()
+        effective_client_count = int(diagnostics.get("effective_client_count") or 0)
+        if effective_client_count > 0:
+            return True
         last_client_fanout_monotonic = diagnostics.get("last_client_fanout_monotonic")
         recent_fanout = isinstance(last_client_fanout_monotonic, (int, float)) and (
             (now - last_client_fanout_monotonic) * 1000 <= heartbeat_window_ms
         )
-        if recent_fanout:
+        active_client_count = int(diagnostics.get("active_client_count") or 0)
+        if recent_fanout and active_client_count > 0:
             return True
 
-        active_client_count = int(diagnostics.get("active_client_count") or 0)
         last_client_attach_monotonic = diagnostics.get("last_client_attach_monotonic")
         last_client_detach_monotonic = diagnostics.get("last_client_detach_monotonic")
         detach_evidence = isinstance(last_client_detach_monotonic, (int, float)) and (
@@ -471,19 +501,22 @@ class SessionManager:
                 self._set_media_state(session, "playing_degraded", "media_plane_heal_failed")
                 return
 
-            old_pipeline = session.pipeline
-            new_pipeline = self._build_pipeline(session)
-            await new_pipeline.start()
-            session.media_epoch += 1
-            if self._stream_publisher:
-                self._register_pipeline(session, new_pipeline, swap=True)
-            frame_sink = self._frame_sinks.get(session_id)
-            if frame_sink:
-                frame_sink.set_pipeline(new_pipeline, session.media_epoch)
-            session.pipeline = new_pipeline
-            if old_pipeline:
-                await old_pipeline.stop()
-            await self._start_renderer_playback(session)
+            if mode == "replay":
+                await self._start_renderer_playback(session)
+            else:
+                old_pipeline = session.pipeline
+                new_pipeline = self._build_pipeline(session)
+                await new_pipeline.start()
+                session.media_epoch += 1
+                if self._stream_publisher:
+                    self._register_pipeline(session, new_pipeline, swap=True)
+                frame_sink = self._frame_sinks.get(session_id)
+                if frame_sink:
+                    frame_sink.set_pipeline(new_pipeline, session.media_epoch)
+                session.pipeline = new_pipeline
+                if old_pipeline:
+                    await old_pipeline.stop()
+                await self._start_renderer_playback(session)
 
             heartbeat_window_ms = self._get_int_config(
                 "audio_transport_heartbeat_window_ms",
@@ -498,7 +531,8 @@ class SessionManager:
                     return
                 diagnostics = session.pipeline.get_diagnostics_snapshot()
                 encoder_alive = self._derive_encoder_alive(diagnostics)
-                if encoder_alive:
+                delivery_alive = self._derive_delivery_alive(diagnostics, heartbeat_window_ms)
+                if encoder_alive and (mode != "replay" or delivery_alive):
                     if recovery_started_at is None:
                         recovery_started_at = time.monotonic()
                     if (time.monotonic() - recovery_started_at) * 1000 >= heartbeat_window_ms:
@@ -955,6 +989,7 @@ class SessionManager:
                 diagnostics["encoder_alive"] = encoder_alive
                 diagnostics["delivery_alive"] = delivery_alive
                 transport_alive = bool(diagnostics.get("transport_alive"))
+                effective_client_count = int(diagnostics.get("effective_client_count") or 0)
                 encoded_bytes_emitted_total = int(diagnostics.get("encoded_bytes_emitted_total") or 0)
                 encoded_bytes_emitted_last_window = int(diagnostics.get("encoded_bytes_emitted_last_window") or 0)
                 last_stdout_read_monotonic = diagnostics.get("last_stdout_read_monotonic")
@@ -962,6 +997,7 @@ class SessionManager:
                 silence_frames_written = int(diagnostics.get("silence_frames_written") or 0)
                 keepalive_active = bool(diagnostics.get("keepalive_active"))
                 active_client_count = int(diagnostics.get("active_client_count") or 0)
+                last_client_stall_disconnect_monotonic = diagnostics.get("last_client_stall_disconnect_monotonic")
                 first_keepalive_encoded_output_after_session_start_ms = diagnostics.get(
                     "first_keepalive_encoded_output_after_session_start_ms"
                 )
@@ -985,6 +1021,7 @@ class SessionManager:
                         "encoded_bytes_emitted_total": encoded_bytes_emitted_total,
                         "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
                         "active_client_count": active_client_count,
+                        "effective_client_count": effective_client_count,
                         "health": health.details if health else None,
                     }
                     logger.warning(
@@ -1037,6 +1074,8 @@ class SessionManager:
                             "last_client_detach_monotonic": diagnostics.get("last_client_detach_monotonic"),
                             "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
                             "transport_alive": transport_alive,
+                            "effective_client_count": effective_client_count,
+                            "client_stall_disconnects_total": diagnostics.get("client_stall_disconnects_total"),
                         },
                     )
 
@@ -1083,6 +1122,49 @@ class SessionManager:
                     if session.auto_heal:
                         self._schedule_media_plane_heal(session_id, "swap", "transport_heartbeat_lost")
 
+                recent_stall_disconnect = isinstance(last_client_stall_disconnect_monotonic, (int, float)) and (
+                    (now - last_client_stall_disconnect_monotonic) * 1000 <= transport_heartbeat_window_ms
+                )
+                delivery_should_degrade = (
+                    session.state == SessionState.PLAYING
+                    and encoder_alive
+                    and not delivery_alive
+                    and effective_client_count == 0
+                    and recent_stall_disconnect
+                    and not recent_fanout
+                )
+                if delivery_should_degrade:
+                    session.transition_to(SessionState.DEGRADED)
+                    self._set_media_state(session, "playing_degraded", "client_detached_while_session_open")
+                    details = {
+                        "reason": "client_detached_while_session_open",
+                        "transport_alive": transport_alive,
+                        "encoder_alive": encoder_alive,
+                        "delivery_alive": delivery_alive,
+                        "active_client_count": active_client_count,
+                        "effective_client_count": effective_client_count,
+                        "last_client_fanout_monotonic": last_client_fanout_monotonic,
+                        "last_client_attach_monotonic": last_client_attach_monotonic,
+                        "last_client_detach_monotonic": last_client_detach_monotonic,
+                        "last_client_stall_disconnect_monotonic": last_client_stall_disconnect_monotonic,
+                        "client_stall_disconnects_total": diagnostics.get("client_stall_disconnects_total"),
+                        "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
+                        "runtime_mode": runtime_mode,
+                    }
+                    logger.warning(
+                        "audio_delivery_path_lost session_id=%s source_id=%s details=%s",
+                        session_id,
+                        session.source_id,
+                        details,
+                    )
+                    self._event_bus.emit(
+                        EventType.SOURCE_STATE_CHANGED,
+                        session_id=session_id,
+                        payload={"state": "playing_degraded", "details": details},
+                    )
+                    if session.auto_heal:
+                        self._schedule_media_plane_heal(session_id, "replay", "client_detached_while_session_open")
+
                 if session.state == SessionState.DEGRADED and encoder_alive and not session.media_heal_in_progress:
                     if transport_recovery_started_at is None:
                         transport_recovery_started_at = now
@@ -1094,6 +1176,7 @@ class SessionManager:
                     and encoder_alive
                     and transport_recovery_started_at is not None
                     and (now - transport_recovery_started_at) * 1000 >= transport_heartbeat_window_ms
+                    and (session.media_reason != "client_detached_while_session_open" or delivery_alive)
                     and (real_frames_written > 0 or keepalive_active)
                 ):
                     session.transition_to(SessionState.PLAYING)
@@ -1325,9 +1408,11 @@ class SessionManager:
 
         if session.state == SessionState.DEGRADED and session.media_reason in {
             "transport_heartbeat_lost",
+            "client_detached_while_session_open",
             "media_plane_heal_failed",
         }:
-            self._schedule_media_plane_heal(session_id, "swap", session.media_reason)
+            mode = "replay" if session.media_reason == "client_detached_while_session_open" else "swap"
+            self._schedule_media_plane_heal(session_id, mode, session.media_reason)
             self._event_bus.emit(EventType.HEAL_ATTEMPTED, session_id=session_id)
             return
 
