@@ -86,6 +86,26 @@ def test_start_stop_session(mock_get_sd: MagicMock, mock_platform: MagicMock) ->
     assert adapter._session_id is None
 
 
+@patch("platform.system")
+@patch("adapter_windows_audio._get_sd")
+def test_start_loopback_not_supported(mock_get_sd: MagicMock, mock_platform: MagicMock) -> None:
+    mock_platform.return_value = "Windows"
+    local_mock_sd = MagicMock()
+    mock_get_sd.return_value = local_mock_sd
+
+    # Mock WasapiSettings to raise TypeError (e.g. unexpected keyword argument 'loopback')
+    local_mock_sd.WasapiSettings.side_effect = TypeError("Unexpected keyword argument 'loopback'")
+
+    adapter = WindowsAudioAdapter()
+    frame_sink = MagicMock()
+
+    result = adapter.start("default", frame_sink)
+
+    assert result.success is False
+    assert result.code == "windows_loopback_not_supported"
+    assert "Windows system audio capture requires wasapi_loopback or similar Windows-native backend" in result.message
+
+
 def test_audio_callback() -> None:
     adapter = WindowsAudioAdapter()
     frame_sink = MagicMock()

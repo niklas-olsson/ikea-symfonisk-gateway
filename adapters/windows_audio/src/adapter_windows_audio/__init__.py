@@ -236,7 +236,13 @@ class WindowsAudioAdapter(IngressAdapter):
                 try:
                     extra_settings = sd.WasapiSettings(loopback=True)
                 except (AttributeError, TypeError):
-                    logger.warning("sd.WasapiSettings doesn't support loopback=True, attempting fallback")
+                    error_msg = "Windows system audio capture requires wasapi_loopback or similar Windows-native backend"
+                    logger.error(error_msg)
+                    return StartResult(
+                        success=False,
+                        message=error_msg,
+                        code="windows_loopback_not_supported",
+                    )
 
             try:
                 self._stream = sd.InputStream(
