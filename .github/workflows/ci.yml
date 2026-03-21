@@ -60,7 +60,15 @@ jobs:
         run: uv run ruff check .
 
       - name: Type check
-        run: uv run mypy . --no-error-summary || true
+        run: uv run mypy .
+
+      - name: Circular Import Check
+        run: |
+          uv pip install pylint
+          uv run python scripts/check_circular_imports.py
+
+      - name: Package Boundary Check
+        run: uv run python scripts/check_package_boundaries.py
 
       - name: Test
         run: uv run pytest .

@@ -623,15 +623,12 @@ class SessionManager:
 
     async def _start_renderer_playback(self, session: Session) -> None:
         session.last_renderer_play_requested_monotonic = time.monotonic()
-        session.primary_attach_grace_deadline_monotonic = (
-            session.last_renderer_play_requested_monotonic
-            + (self._get_int_config("audio_primary_attach_grace_ms", AUDIO_PRIMARY_ATTACH_GRACE_MS_DEFAULT) / 1000)
+        session.primary_attach_grace_deadline_monotonic = session.last_renderer_play_requested_monotonic + (
+            self._get_int_config("audio_primary_attach_grace_ms", AUDIO_PRIMARY_ATTACH_GRACE_MS_DEFAULT) / 1000
         )
         prep_target_res = await self._target_registry.prepare_target(session.target_id)
         if not prep_target_res.get("success"):
-            session.last_error = create_session_error(
-                RENDERER_PLAYBACK_FAILED, f"Failed to prepare target: {prep_target_res.get('error')}"
-            )
+            session.last_error = create_session_error(RENDERER_PLAYBACK_FAILED, f"Failed to prepare target: {prep_target_res.get('error')}")
             raise RuntimeError(session.last_error.message)
 
         if session.stream_url:
@@ -663,7 +660,8 @@ class SessionManager:
 
     def _primary_attach_grace_open(self, session: Session) -> bool:
         return bool(
-            session.primary_attach_grace_deadline_monotonic is not None and time.monotonic() <= session.primary_attach_grace_deadline_monotonic
+            session.primary_attach_grace_deadline_monotonic is not None
+            and time.monotonic() <= session.primary_attach_grace_deadline_monotonic
         )
 
     def _find_primary_candidate(self, session: Session, diagnostics: dict[str, Any]) -> dict[str, Any] | None:
@@ -712,7 +710,11 @@ class SessionManager:
         session = self.get(session_id)
         if not session or session.media_heal_in_progress:
             return
-        if mode == "replay" and not force and not self._get_bool_config("audio_auto_heal_delivery_enabled", AUDIO_AUTO_HEAL_DELIVERY_ENABLED_DEFAULT):
+        if (
+            mode == "replay"
+            and not force
+            and not self._get_bool_config("audio_auto_heal_delivery_enabled", AUDIO_AUTO_HEAL_DELIVERY_ENABLED_DEFAULT)
+        ):
             return
         if session.media_heal_attempts >= 3:
             return
@@ -729,7 +731,10 @@ class SessionManager:
         self._event_bus.emit(
             EventType.SOURCE_STATE_CHANGED,
             session_id=session_id,
-            payload={"state": "media_plane_heal_started", "details": {"mode": mode, "reason": reason, "attempt": session.media_heal_attempts}},
+            payload={
+                "state": "media_plane_heal_started",
+                "details": {"mode": mode, "reason": reason, "attempt": session.media_heal_attempts},
+            },
         )
         self._session_heals[session_id] = asyncio.create_task(self._heal_media_plane(session_id, mode, reason, delay_seconds, epoch))
 
@@ -1008,7 +1013,13 @@ class SessionManager:
                 session_id=session_id,
                 payload=session.to_dict(),
             )
-            self._start_session_monitor(session_id, source_desc, verification_result if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT else None)
+            self._start_session_monitor(
+                session_id,
+                source_desc,
+                verification_result
+                if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT
+                else None,
+            )
             return True
 
         except Exception as e:
@@ -1244,7 +1255,9 @@ class SessionManager:
             self._monitor_media_delivery_session(
                 session_id,
                 source_desc,
-                startup_result if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT else None,
+                startup_result
+                if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT
+                else None,
             )
         )
 
@@ -1252,7 +1265,9 @@ class SessionManager:
         activation_watchdog_ms = WINDOWS_SOURCE_ACTIVITY_WATCHDOG_MS_DEFAULT
         source_outage_grace_ms = self._get_int_config("audio_source_outage_grace_ms", AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT)
         started_at = time.monotonic()
-        windows_startup_monitor = bool(source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT)
+        windows_startup_monitor = bool(
+            source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT
+        )
         activation_seen = startup_result == "active"
         activation_degraded_emitted = False
         transport_degraded_emitted = False

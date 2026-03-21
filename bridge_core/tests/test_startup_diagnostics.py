@@ -16,12 +16,12 @@ from ingress_sdk.types import SourceCapabilities, SourceDescriptor, SourceType
 
 
 @pytest.fixture
-def mock_event_bus():
+def mock_event_bus() -> MagicMock:
     return MagicMock(spec=EventBus)
 
 
 @pytest.fixture
-def mock_source_registry():
+def mock_source_registry() -> MagicMock:
     registry = MagicMock()
     registry.prepare_source.return_value = MagicMock(success=True)
     registry.start_source.return_value = MagicMock(success=True, session_id="adapter_sess_1")
@@ -30,7 +30,7 @@ def mock_source_registry():
 
 
 @pytest.fixture
-def mock_target_registry():
+def mock_target_registry() -> MagicMock:
     registry = MagicMock()
     registry.prepare_target = AsyncMock(return_value={"success": True})
     registry.play_stream = AsyncMock(return_value={"success": True})
@@ -39,7 +39,11 @@ def mock_target_registry():
 
 
 @pytest.fixture
-def session_manager(mock_event_bus, mock_source_registry, mock_target_registry):
+def session_manager(
+    mock_event_bus: MagicMock,
+    mock_source_registry: MagicMock,
+    mock_target_registry: MagicMock,
+) -> SessionManager:
     return SessionManager(
         event_bus=mock_event_bus,
         source_registry=mock_source_registry,
@@ -50,7 +54,7 @@ def session_manager(mock_event_bus, mock_source_registry, mock_target_registry):
 
 
 @pytest.mark.asyncio
-async def test_startup_failed_media_engine_not_found(session_manager, mock_source_registry):
+async def test_startup_failed_media_engine_not_found(session_manager: SessionManager, mock_source_registry: MagicMock) -> None:
     session = session_manager.create("source_1", "target_1")
 
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path") as mock_resolve:
@@ -67,7 +71,7 @@ async def test_startup_failed_media_engine_not_found(session_manager, mock_sourc
 
 
 @pytest.mark.asyncio
-async def test_startup_failed_source_prepare(session_manager, mock_source_registry):
+async def test_startup_failed_source_prepare(session_manager: SessionManager, mock_source_registry: MagicMock) -> None:
     session = session_manager.create("source_1", "target_1")
     mock_source_registry.prepare_source.return_value = MagicMock(success=False, error="Permission denied", code=None)
 
@@ -75,12 +79,13 @@ async def test_startup_failed_source_prepare(session_manager, mock_source_regist
         success = await session_manager.start_session(session.session_id)
 
         assert success is False
+        assert session.last_error is not None
         assert session.last_error.code == SOURCE_START_FAILED
         assert "Permission denied" in session.last_error.message
 
 
 @pytest.mark.asyncio
-async def test_startup_failed_renderer_playback(session_manager, mock_target_registry):
+async def test_startup_failed_renderer_playback(session_manager: SessionManager, mock_target_registry: MagicMock) -> None:
     session = session_manager.create("source_1", "target_1")
     # Need to mock StreamPipeline so it doesn't actually try to start subprocesses
     with (
@@ -98,12 +103,13 @@ async def test_startup_failed_renderer_playback(session_manager, mock_target_reg
         success = await session_manager.start_session(session.session_id)
 
         assert success is False
+        assert session.last_error is not None
         assert session.last_error.code == RENDERER_PLAYBACK_FAILED
         assert "Connection reset" in session.last_error.message
 
 
 @pytest.mark.asyncio
-async def test_startup_failed_frame_ingest_timeout(session_manager, mock_target_registry):
+async def test_startup_failed_frame_ingest_timeout(session_manager: SessionManager, mock_target_registry: MagicMock) -> None:
     session = session_manager.create("source_1", "target_1")
 
     with (
@@ -127,7 +133,11 @@ async def test_startup_failed_frame_ingest_timeout(session_manager, mock_target_
 
 
 @pytest.mark.asyncio
-async def test_windows_system_output_silent_startup_proceeds(session_manager, mock_source_registry, mock_target_registry):
+async def test_windows_system_output_silent_startup_proceeds(
+    session_manager: SessionManager,
+    mock_source_registry: MagicMock,
+    mock_target_registry: MagicMock,
+) -> None:
     session = session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
@@ -199,9 +209,14 @@ async def test_windows_system_output_silent_startup_proceeds(session_manager, mo
 
 
 @pytest.mark.asyncio
-async def test_windows_system_output_viable_silent_startup_proceeds(session_manager, mock_source_registry, mock_target_registry):
+async def test_windows_system_output_viable_silent_startup_proceeds(
+    session_manager: SessionManager,
+    mock_source_registry: MagicMock,
+    mock_target_registry: MagicMock,
+) -> None:
     session = session_manager.create("windows-audio-adapter:system:default", "target_1")
-    session_manager._config_store.get.side_effect = lambda key, default=None: {
+    assert session_manager._config_store is not None
+    session_manager._config_store.get.side_effect = lambda key, default=None: {  # type: ignore[attr-defined]
         "audio_live_startup_allow_silent_source": True,
         "audio_live_startup_viability_timeout_ms": 1000,
     }.get(key, default)
@@ -269,7 +284,11 @@ async def test_windows_system_output_viable_silent_startup_proceeds(session_mana
 
 
 @pytest.mark.asyncio
-async def test_windows_system_output_active_backend_state_proceeds(session_manager, mock_source_registry, mock_target_registry):
+async def test_windows_system_output_active_backend_state_proceeds(
+    session_manager: SessionManager,
+    mock_source_registry: MagicMock,
+    mock_target_registry: MagicMock,
+) -> None:
     session = session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
@@ -317,7 +336,11 @@ async def test_windows_system_output_active_backend_state_proceeds(session_manag
 
 
 @pytest.mark.asyncio
-async def test_windows_system_output_active_frames_emitted_proceeds(session_manager, mock_source_registry, mock_target_registry):
+async def test_windows_system_output_active_frames_emitted_proceeds(
+    session_manager: SessionManager,
+    mock_source_registry: MagicMock,
+    mock_target_registry: MagicMock,
+) -> None:
     session = session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
@@ -364,7 +387,11 @@ async def test_windows_system_output_active_frames_emitted_proceeds(session_mana
 
 
 @pytest.mark.asyncio
-async def test_windows_system_output_active_callbacks_with_signal_proceeds(session_manager, mock_source_registry, mock_target_registry):
+async def test_windows_system_output_active_callbacks_with_signal_proceeds(
+    session_manager: SessionManager,
+    mock_source_registry: MagicMock,
+    mock_target_registry: MagicMock,
+) -> None:
     session = session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
@@ -411,7 +438,11 @@ async def test_windows_system_output_active_callbacks_with_signal_proceeds(sessi
 
 
 @pytest.mark.asyncio
-async def test_windows_system_output_stalled_capture_fails(session_manager, mock_source_registry, mock_target_registry):
+async def test_windows_system_output_stalled_capture_fails(
+    session_manager: SessionManager,
+    mock_source_registry: MagicMock,
+    mock_target_registry: MagicMock,
+) -> None:
     session = session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
@@ -469,7 +500,11 @@ async def test_windows_system_output_stalled_capture_fails(session_manager, mock
 
 
 @pytest.mark.asyncio
-async def test_windows_system_output_callbacks_active_no_samples_fails(session_manager, mock_source_registry, mock_target_registry):
+async def test_windows_system_output_callbacks_active_no_samples_fails(
+    session_manager: SessionManager,
+    mock_source_registry: MagicMock,
+    mock_target_registry: MagicMock,
+) -> None:
     session = session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
@@ -518,7 +553,11 @@ async def test_windows_system_output_callbacks_active_no_samples_fails(session_m
 
 
 @pytest.mark.asyncio
-async def test_windows_system_output_samples_received_no_frames_emitted_fails(session_manager, mock_source_registry, mock_target_registry):
+async def test_windows_system_output_samples_received_no_frames_emitted_fails(
+    session_manager: SessionManager,
+    mock_source_registry: MagicMock,
+    mock_target_registry: MagicMock,
+) -> None:
     session = session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(

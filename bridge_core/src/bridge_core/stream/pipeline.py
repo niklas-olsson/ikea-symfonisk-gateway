@@ -853,13 +853,20 @@ class StreamPipeline:
         if subscriber.last_successful_dequeue_monotonic is None and subscriber.last_successful_yield_monotonic is None:
             return False
         latest_progress = max(
-            [marker for marker in (subscriber.last_successful_dequeue_monotonic, subscriber.last_successful_yield_monotonic) if marker is not None],
+            [
+                marker
+                for marker in (subscriber.last_successful_dequeue_monotonic, subscriber.last_successful_yield_monotonic)
+                if marker is not None
+            ],
             default=None,
         )
         if latest_progress is None or (now - latest_progress) > heartbeat_window_seconds:
             return False
         if self._primary_health_require_yield_progress:
-            if subscriber.last_successful_yield_monotonic is None or (now - subscriber.last_successful_yield_monotonic) > heartbeat_window_seconds:
+            if (
+                subscriber.last_successful_yield_monotonic is None
+                or (now - subscriber.last_successful_yield_monotonic) > heartbeat_window_seconds
+            ):
                 return False
         if self._subscriber_is_past_overflow_grace(subscriber, now):
             return False

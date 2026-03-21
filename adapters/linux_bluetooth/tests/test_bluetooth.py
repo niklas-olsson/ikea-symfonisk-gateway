@@ -1,6 +1,7 @@
 """Unit tests for the Linux Bluetooth ingress adapter."""
 
 import asyncio
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,7 +15,7 @@ def event_bus() -> MagicMock:
 
 
 @pytest.fixture
-async def adapter(event_bus: MagicMock) -> LinuxBluetoothAdapter:
+async def adapter(event_bus: MagicMock) -> AsyncGenerator[LinuxBluetoothAdapter, None]:
     adapter = LinuxBluetoothAdapter(event_bus=event_bus)
     adapter._store._data["blocked_devices"] = []
     yield adapter

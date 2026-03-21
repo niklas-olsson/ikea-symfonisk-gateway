@@ -23,12 +23,12 @@ def source_registry(event_bus: EventBus) -> SourceRegistry:
 def target_registry(event_bus: EventBus) -> TargetRegistry:
     registry = TargetRegistry(event_bus=event_bus)
     # Mock some methods to avoid external dependencies
-    registry.prepare_target = MagicMock(return_value=asyncio.Future())
-    registry.prepare_target.return_value.set_result({"success": True})
-    registry.play_stream = MagicMock(return_value=asyncio.Future())
-    registry.play_stream.return_value.set_result({"success": True})
-    registry.stop_target = MagicMock(return_value=asyncio.Future())
-    registry.stop_target.return_value.set_result({"success": True})
+    setattr(registry, "prepare_target", MagicMock(return_value=asyncio.Future()))
+    getattr(registry, "prepare_target").return_value.set_result({"success": True})
+    setattr(registry, "play_stream", MagicMock(return_value=asyncio.Future()))
+    getattr(registry, "play_stream").return_value.set_result({"success": True})
+    setattr(registry, "stop_target", MagicMock(return_value=asyncio.Future()))
+    getattr(registry, "stop_target").return_value.set_result({"success": True})
     return registry
 
 
@@ -99,7 +99,8 @@ async def test_platform_any_works(session_manager: SessionManager, source_regist
 
     # 2. Mock FFmpeg resolution to avoid failure
     import bridge_core.core.session_manager as sm
-    sm.resolve_ffmpeg_path = MagicMock(return_value="/usr/bin/ffmpeg")
+
+    sm.resolve_ffmpeg_path = MagicMock(return_value="/usr/bin/ffmpeg")  # type: ignore[attr-defined]
 
     # 3. Create and start session
     _ = session_manager.create(source_id="linux_adapter:synthetic:any_source", target_id="target1")
@@ -114,6 +115,7 @@ async def test_platform_any_works(session_manager: SessionManager, source_regist
     res = source_registry.prepare_source("linux_adapter:synthetic:any_source")
     assert res.success
     assert res.code != "source_adapter_platform_mismatch"
+
 
 @pytest.mark.asyncio
 async def test_source_listing_includes_extra_fields(session_manager: SessionManager, source_registry: SourceRegistry) -> None:

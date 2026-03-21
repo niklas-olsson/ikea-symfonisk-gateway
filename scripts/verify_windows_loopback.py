@@ -51,13 +51,13 @@ def main() -> int:
 
     diagnostics = backend.get_diagnostics_snapshot()
     health = backend.probe_health("default")
-    print(f"Callback count: {diagnostics.callback_count}")
-    print(f"Non-empty buffer count: {diagnostics.non_empty_buffer_count}")
-    print(f"Samples received: {diagnostics.samples_received}")
-    print(f"Raw bytes received: {diagnostics.raw_bytes_received}")
-    print(f"Frames emitted: {diagnostics.frames_emitted}")
-    print(f"First callback at: {diagnostics.first_callback_at}")
-    print(f"Startup substate: {diagnostics.startup_substate}")
+    print(f"Callback count: {diagnostics['callback_count']}")
+    print(f"Non-empty buffer count: {diagnostics['non_empty_buffer_count']}")
+    print(f"Samples received: {diagnostics['samples_received']}")
+    print(f"Raw bytes received: {diagnostics['raw_bytes_received']}")
+    print(f"Frames emitted: {diagnostics['frames_emitted']}")
+    print(f"First callback at: {diagnostics['first_callback_at']}")
+    print(f"Startup substate: {diagnostics['startup_substate']}")
     print(f"Start viability: {backend.get_start_viability_snapshot()}")
     print(f"Health: {health.model_dump()}")
     if sink.errors:
@@ -65,10 +65,10 @@ def main() -> int:
 
     backend.stop(start.session_id)
 
-    if diagnostics.callback_count == 0:
+    if diagnostics["callback_count"] == 0:
         print("No callbacks arrived within the observation window.")
         return 1
-    if diagnostics.samples_received == 0:
+    if diagnostics["samples_received"] == 0:
         print("Callbacks fired but no samples were received.")
         return 1
 

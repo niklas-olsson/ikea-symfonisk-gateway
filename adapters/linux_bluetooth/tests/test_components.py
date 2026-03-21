@@ -1,6 +1,7 @@
 """Tests for Bluetooth adapter components."""
 
 import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,12 +12,12 @@ from bridge_core.core.event_bus import EventBus
 
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path: Any) -> TrustedDeviceStore:
     path = tmp_path / "test_trusted_devices.json"
     return TrustedDeviceStore(storage_path=path)
 
 
-def test_store_operations(store):
+def test_store_operations(store: TrustedDeviceStore) -> None:
     mac = "00:11:22:33:44:55"
     metadata = {"alias": "Test Turntable"}
 
@@ -34,7 +35,7 @@ def test_store_operations(store):
 
 
 @pytest.mark.asyncio
-async def test_adapter_controller_properties():
+async def test_adapter_controller_properties() -> None:
     with patch("adapter_linux_bluetooth.dbus_adapter.MessageBus") as mock_bus_cls:
         mock_bus = MagicMock()
         mock_bus.connect = AsyncMock(return_value=mock_bus)
@@ -69,7 +70,7 @@ async def test_adapter_controller_properties():
 
 
 @pytest.mark.asyncio
-async def test_pairing_window_auto_close_and_trust(store):
+async def test_pairing_window_auto_close_and_trust(store: TrustedDeviceStore) -> None:
     event_bus = EventBus()
     controller = MagicMock(spec=BlueZAdapterController)
     controller.set_powered = AsyncMock(return_value=True)
@@ -102,13 +103,14 @@ async def test_pairing_window_auto_close_and_trust(store):
         assert store.is_trusted(test_mac)
 
         # Wait for the task to finish due to completion event
+        assert window._pairing_task is not None
         await asyncio.wait_for(window._pairing_task, timeout=1.0)
         assert window.is_open is False
         mock_unreg.assert_called()
 
 
 @pytest.mark.asyncio
-async def test_pairing_window_timeout(store):
+async def test_pairing_window_timeout(store: TrustedDeviceStore) -> None:
     event_bus = EventBus()
     controller = MagicMock(spec=BlueZAdapterController)
     controller.set_powered = AsyncMock(return_value=True)
@@ -129,10 +131,11 @@ async def test_pairing_window_timeout(store):
         mock_bus_cls.return_value = mock_bus
 
         # Open window with very short timeout
-        await window.open_window(timeout_seconds=0.1)
+        await window.open_window(timeout_seconds=1)
         assert window.is_open is True
 
         # Wait for timeout
+        assert window._pairing_task is not None
         await asyncio.wait_for(window._pairing_task, timeout=1.0)
         assert window.is_open is False
         mock_unreg.assert_called()

@@ -37,7 +37,7 @@ def target_registry() -> MagicMock:
 
 
 @pytest.fixture
-def session_manager(event_bus, source_registry, target_registry) -> SessionManager:
+def session_manager(event_bus: EventBus, source_registry: MagicMock, target_registry: MagicMock) -> SessionManager:
     return SessionManager(
         event_bus=event_bus,
         source_registry=source_registry,
@@ -46,7 +46,9 @@ def session_manager(event_bus, source_registry, target_registry) -> SessionManag
 
 
 @pytest.mark.asyncio
-async def test_supervised_push_frame_failure(session_manager, event_bus, caplog):
+async def test_supervised_push_frame_failure(
+    session_manager: SessionManager, event_bus: EventBus, caplog: pytest.LogCaptureFixture
+) -> None:
     """
     Verify that a failure in push_frame is now supervised and triggers session failure.
     """
@@ -92,7 +94,9 @@ async def test_supervised_push_frame_failure(session_manager, event_bus, caplog)
 
 
 @pytest.mark.asyncio
-async def test_supervised_pipeline_task_failure(session_manager, event_bus, caplog):
+async def test_supervised_pipeline_task_failure(
+    session_manager: SessionManager, event_bus: EventBus, caplog: pytest.LogCaptureFixture
+) -> None:
     """
     Verify that a failure in pipeline background tasks is now supervised.
     """
@@ -138,7 +142,7 @@ async def test_supervised_pipeline_task_failure(session_manager, event_bus, capl
 
 
 @pytest.mark.asyncio
-async def test_adapter_on_error_propagation(session_manager, event_bus):
+async def test_adapter_on_error_propagation(session_manager: SessionManager, event_bus: EventBus) -> None:
     """
     Verify that adapter calling on_error propagates to SessionManager.
     """

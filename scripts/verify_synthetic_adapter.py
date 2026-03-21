@@ -34,6 +34,9 @@ class VerifyingSink:
         if not np.array_equal(left, right):
             self.errors.append("Left and Right channels are not equal")
 
+    def on_error(self, error: Exception) -> None:
+        self.errors.append(str(error))
+
 
 async def run_verification() -> None:
     print("Starting Synthetic Adapter Gold-Standard Verification...")

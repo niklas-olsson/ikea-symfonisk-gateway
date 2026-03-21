@@ -243,8 +243,7 @@ async def test_pipeline_tracks_transport_heartbeat_from_stdout() -> None:
 async def test_stable_pipeline_feeds_real_frames_without_fixed_slot_pacing() -> None:
     pipeline = StreamPipeline("test_sess", "mp3_48k_stereo_320", delivery_profile="stable")
     frames = [
-        AudioFrame(sequence=index, pts_ns=index * 10_000_000, duration_ns=10_000_000, format={}, audio_data=b"x" * 4)
-        for index in range(3)
+        AudioFrame(sequence=index, pts_ns=index * 10_000_000, duration_ns=10_000_000, format={}, audio_data=b"x" * 4) for index in range(3)
     ]
     write_times: list[float] = []
 

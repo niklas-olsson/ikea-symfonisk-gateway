@@ -63,6 +63,7 @@ class _PairingWindowManager(Protocol):
 
     async def close_window(self) -> None: ...
 
+
 logger = logging.getLogger(__name__)
 
 
