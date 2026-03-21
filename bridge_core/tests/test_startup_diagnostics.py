@@ -54,9 +54,7 @@ def session_manager(
 
 
 @pytest.mark.asyncio
-async def test_startup_failed_media_engine_not_found(
-    session_manager: SessionManager, mock_source_registry: MagicMock
-) -> None:
+async def test_startup_failed_media_engine_not_found(session_manager: SessionManager, mock_source_registry: MagicMock) -> None:
     session = session_manager.create("source_1", "target_1")
 
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path") as mock_resolve:
@@ -73,9 +71,7 @@ async def test_startup_failed_media_engine_not_found(
 
 
 @pytest.mark.asyncio
-async def test_startup_failed_source_prepare(
-    session_manager: SessionManager, mock_source_registry: MagicMock
-) -> None:
+async def test_startup_failed_source_prepare(session_manager: SessionManager, mock_source_registry: MagicMock) -> None:
     session = session_manager.create("source_1", "target_1")
     mock_source_registry.prepare_source.return_value = MagicMock(success=False, error="Permission denied", code=None)
 
@@ -89,9 +85,7 @@ async def test_startup_failed_source_prepare(
 
 
 @pytest.mark.asyncio
-async def test_startup_failed_renderer_playback(
-    session_manager: SessionManager, mock_target_registry: MagicMock
-) -> None:
+async def test_startup_failed_renderer_playback(session_manager: SessionManager, mock_target_registry: MagicMock) -> None:
     session = session_manager.create("source_1", "target_1")
     # Need to mock StreamPipeline so it doesn't actually try to start subprocesses
     with (
@@ -115,9 +109,7 @@ async def test_startup_failed_renderer_playback(
 
 
 @pytest.mark.asyncio
-async def test_startup_failed_frame_ingest_timeout(
-    session_manager: SessionManager, mock_target_registry: MagicMock
-) -> None:
+async def test_startup_failed_frame_ingest_timeout(session_manager: SessionManager, mock_target_registry: MagicMock) -> None:
     session = session_manager.create("source_1", "target_1")
 
     with (

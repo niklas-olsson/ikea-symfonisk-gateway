@@ -116,6 +116,7 @@ async def test_platform_any_works(session_manager: SessionManager, source_regist
     assert res.success
     assert res.code != "source_adapter_platform_mismatch"
 
+
 @pytest.mark.asyncio
 async def test_source_listing_includes_extra_fields(session_manager: SessionManager, source_registry: SourceRegistry) -> None:
     source_registry.register_adapter(

@@ -37,9 +37,7 @@ def target_registry() -> MagicMock:
 
 
 @pytest.fixture
-def session_manager(
-    event_bus: EventBus, source_registry: MagicMock, target_registry: MagicMock
-) -> SessionManager:
+def session_manager(event_bus: EventBus, source_registry: MagicMock, target_registry: MagicMock) -> SessionManager:
     return SessionManager(
         event_bus=event_bus,
         source_registry=source_registry,
@@ -144,9 +142,7 @@ async def test_supervised_pipeline_task_failure(
 
 
 @pytest.mark.asyncio
-async def test_adapter_on_error_propagation(
-    session_manager: SessionManager, event_bus: EventBus
-) -> None:
+async def test_adapter_on_error_propagation(session_manager: SessionManager, event_bus: EventBus) -> None:
     """
     Verify that adapter calling on_error propagates to SessionManager.
     """

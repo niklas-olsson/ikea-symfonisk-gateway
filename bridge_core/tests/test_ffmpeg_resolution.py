@@ -11,9 +11,7 @@ def mock_config_store() -> MagicMock:
     return MagicMock()
 
 
-def test_resolve_ffmpeg_path_config_store(
-    mock_config_store: MagicMock, tmp_path: Any
-) -> None:
+def test_resolve_ffmpeg_path_config_store(mock_config_store: MagicMock, tmp_path: Any) -> None:
     ffmpeg_file = tmp_path / "ffmpeg_config"
     ffmpeg_file.write_text("dummy")
     ffmpeg_file.chmod(0o755)
@@ -47,9 +45,7 @@ def test_resolve_ffmpeg_path_not_found() -> None:
                 resolve_ffmpeg_path(None)
 
 
-def test_resolve_ffmpeg_path_priority(
-    mock_config_store: MagicMock, tmp_path: Any
-) -> None:
+def test_resolve_ffmpeg_path_priority(mock_config_store: MagicMock, tmp_path: Any) -> None:
     # Setup config store path
     config_file = tmp_path / "ffmpeg_config"
     config_file.write_text("dummy")

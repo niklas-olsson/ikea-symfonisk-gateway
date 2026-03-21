@@ -1,11 +1,21 @@
-import sys
 import os
 import subprocess
+import sys
 
-def main():
+
+def main() -> None:
     print("Checking for circular imports...")
     # Packages to check
-    packages = ["bridge_core", "ingress_sdk", "shared", "renderer_sonos", "adapters/synthetic", "adapters/linux_audio", "adapters/linux_bluetooth", "adapters/windows_audio"]
+    packages = [
+        "bridge_core",
+        "ingress_sdk",
+        "shared",
+        "renderer_sonos",
+        "adapters/synthetic",
+        "adapters/linux_audio",
+        "adapters/linux_bluetooth",
+        "adapters/windows_audio",
+    ]
 
     # Filter only existing directories
     packages = [pkg for pkg in packages if os.path.exists(pkg)]
@@ -37,12 +47,7 @@ def main():
             print("No targets found for pylint check.")
             return
 
-        result = subprocess.run(
-            ["pylint", "--disable=all", "--enable=cyclic-import"] + targets,
-            capture_output=True,
-            text=True,
-            env=env
-        )
+        result = subprocess.run(["pylint", "--disable=all", "--enable=cyclic-import"] + targets, capture_output=True, text=True, env=env)
 
         # pylint returns non-zero if it finds anything, but we only care about R0401
         if "R0401" in result.stdout:
@@ -54,6 +59,7 @@ def main():
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"Error running pylint: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

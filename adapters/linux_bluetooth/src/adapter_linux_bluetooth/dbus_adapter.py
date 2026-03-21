@@ -82,6 +82,7 @@ class BlueZAdapterController:
         """Set the adapter device class explicitly (e.g. 0x240404 for speaker)."""
         try:
             import subprocess
+
             # hciconfig is available in the container and needed because
             # BlueZ's D-Bus API exposes Class as read-only.
             subprocess.run(["hciconfig", self.adapter_name, "class", class_hex], check=True)

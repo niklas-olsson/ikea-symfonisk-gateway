@@ -13,7 +13,7 @@ ALLOWED_DEPENDENCIES = {
         "adapter_synthetic",
         "adapter_linux_audio",
         "adapter_linux_bluetooth",
-        "adapter_windows_audio"
+        "adapter_windows_audio",
     ],
     "ingress_sdk": ["shared"],
     "shared": [],
@@ -36,17 +36,19 @@ PACKAGE_MAP = {
     "adapter_windows_audio": "adapters/windows_audio/src/adapter_windows_audio",
 }
 
-def get_imports_from_file(filepath):
+
+def get_imports_from_file(filepath: str) -> set[str]:
     imports = set()
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, encoding="utf-8") as f:
         for line in f:
             # Simple regex for imports
-            match = re.match(r'^(?:from|import)\s+([a-zA-Z0-9_]+)', line)
+            match = re.match(r"^(?:from|import)\s+([a-zA-Z0-9_]+)", line)
             if match:
                 imports.add(match.group(1))
     return imports
 
-def check_boundaries():
+
+def check_boundaries() -> None:
     print("Checking package boundaries...")
     errors = 0
 
@@ -76,6 +78,7 @@ def check_boundaries():
         sys.exit(1)
     else:
         print("No boundary violations detected.")
+
 
 if __name__ == "__main__":
     check_boundaries()

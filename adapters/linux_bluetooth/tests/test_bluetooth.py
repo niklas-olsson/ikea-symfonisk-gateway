@@ -1,6 +1,7 @@
 """Unit tests for the Linux Bluetooth ingress adapter."""
 
 import asyncio
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,8 +13,6 @@ from ingress_sdk.types import SourceType
 def event_bus() -> MagicMock:
     return MagicMock()
 
-
-from collections.abc import AsyncGenerator
 
 @pytest.fixture
 async def adapter(event_bus: MagicMock) -> AsyncGenerator[LinuxBluetoothAdapter, None]:

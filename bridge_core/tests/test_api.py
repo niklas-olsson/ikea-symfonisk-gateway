@@ -46,7 +46,7 @@ def test_list_sources(client: TestClient) -> None:
     assert len(data["sources"]) > 0
     assert "adapter_id" in data["sources"][0]
     assert "local_source_id" in data["sources"][0]
-    assert data["sources"][0]["source_id"].startswith(f'{data["sources"][0]["adapter_id"]}:')
+    assert data["sources"][0]["source_id"].startswith(f"{data['sources'][0]['adapter_id']}:")
     assert data["sources"][0]["source_id"] == "synthetic-adapter:synthetic:default"
     assert data["sources"][0]["local_source_id"] == "default"
 

@@ -1505,6 +1505,7 @@ async def test_last_effective_delivery_path_loss_degrades_and_replays(
             }
         ],
     }
+
     def detached() -> dict[str, Any]:
         return {
             **healthy,
@@ -1893,7 +1894,9 @@ async def test_primary_pause_resume_survives_without_heal(
             primary_snapshot(real_frames=3, keepalive_active=False),
             primary_snapshot(real_frames=3, keepalive_active=False),
         ]
-        mock_pipeline.get_diagnostics_snapshot.side_effect = lambda: sequence.pop(0) if sequence else primary_snapshot(real_frames=3, keepalive_active=False)
+        mock_pipeline.get_diagnostics_snapshot.side_effect = lambda: (
+            sequence.pop(0) if sequence else primary_snapshot(real_frames=3, keepalive_active=False)
+        )
 
         success = await manager.start_session(session.session_id)
         assert success is True
@@ -2106,7 +2109,9 @@ async def test_primary_detach_recovers_within_grace_without_replay(
             capabilities=SourceCapabilities(),
         )
     )
-    source_registry.probe_source_health.return_value = MagicMock(healthy=True, signal_present=True, source_state="active", last_error=None, details={"callback_count": 5, "frames_emitted": 5})
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True, signal_present=True, source_state="active", last_error=None, details={"callback_count": 5, "frames_emitted": 5}
+    )
     config_store = MagicMock()
     config_store.get.side_effect = lambda key, default=None: {
         "audio_delivery_profile": "experimental",
@@ -2169,7 +2174,9 @@ async def test_primary_detach_beyond_grace_with_auto_heal_false_degrades_without
             capabilities=SourceCapabilities(),
         )
     )
-    source_registry.probe_source_health.return_value = MagicMock(healthy=True, signal_present=True, source_state="active", last_error=None, details={"callback_count": 5, "frames_emitted": 5})
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True, signal_present=True, source_state="active", last_error=None, details={"callback_count": 5, "frames_emitted": 5}
+    )
     config_store = MagicMock()
     config_store.get.side_effect = lambda key, default=None: {
         "audio_delivery_profile": "experimental",
@@ -2271,7 +2278,9 @@ async def test_stable_profile_ignores_primary_detach_delivery_degradation(
             capabilities=SourceCapabilities(),
         )
     )
-    source_registry.probe_source_health.return_value = MagicMock(healthy=True, signal_present=True, source_state="active", last_error=None, details={"callback_count": 5, "frames_emitted": 5})
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True, signal_present=True, source_state="active", last_error=None, details={"callback_count": 5, "frames_emitted": 5}
+    )
     config_store = MagicMock()
     config_store.get.side_effect = lambda key, default=None: {
         "audio_primary_attach_grace_ms": 100,
