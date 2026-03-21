@@ -60,7 +60,7 @@ ERROR_DETAILS = {
         "action": "Check source registration and adapter selection logic.",
     },
     WINDOWS_LOOPBACK_NOT_SUPPORTED: {
-        "message": "Windows WASAPI loopback is not supported on this device or version of Windows.",
+        "message": "Windows system audio capture requires wasapi_loopback or similar Windows-native backend",
         "subsystem": "source",
         "action": "Ensure you are on Windows 10 or later and your audio driver supports loopback.",
     },
