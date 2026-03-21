@@ -1,6 +1,7 @@
 """Type definitions for ingress adapters."""
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -29,6 +30,7 @@ class SourceDescriptor(BaseModel):
     display_name: str
     platform: str
     capabilities: SourceCapabilities
+    metadata: dict[str, Any] = {}
 
 
 class AdapterCapabilities(BaseModel):

@@ -55,7 +55,7 @@ async def test_list_sources_success(adapter: LinuxBluetoothAdapter) -> None:
     mock_pactl_output = "1\tbluez_source.XX_XX_XX_XX_XX_XX.a2dp_source\tmodule-bluez5-device.c\ts16le 2ch 48000Hz\tIDLE"
 
     with (
-        patch("shutil.which", return_value="/usr/bin/pactl"),
+        patch("shutil.which", side_effect=lambda x: "/usr/bin/pactl" if x == "pactl" else None),
         patch("subprocess.run") as mock_run,
     ):
         mock_run.return_value = MagicMock(stdout=mock_pactl_output, returncode=0)
@@ -63,9 +63,10 @@ async def test_list_sources_success(adapter: LinuxBluetoothAdapter) -> None:
         sources = adapter.list_sources()
 
         assert len(sources) == 1
-        assert sources[0].source_id == "bluez_source.XX_XX_XX_XX_XX_XX.a2dp_source"
+        assert sources[0].source_id == "bluetooth:xx:xx:xx:xx:xx:xx"
         assert sources[0].source_type == SourceType.BLUETOOTH_AUDIO
         assert "XX:XX:XX:XX:XX:XX" in sources[0].display_name
+        assert sources[0].metadata["mac"] == "XX:XX:XX:XX:XX:XX"
 
 
 @pytest.mark.asyncio
