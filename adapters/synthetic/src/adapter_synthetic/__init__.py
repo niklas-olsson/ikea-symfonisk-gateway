@@ -106,7 +106,7 @@ class SyntheticAdapter(IngressAdapter):
         self._running = True
         self._task = asyncio.create_task(self._generate_loop())
         logger.info(f"Started synthetic source {source_id} (session: {self._session_id})")
-        return StartResult(success=True, session_id=self._session_id)
+        return StartResult(success=True, session_id=self._session_id, backend="synthetic")
 
     def stop(self, session_id: str) -> None:
         if self._session_id != session_id:
