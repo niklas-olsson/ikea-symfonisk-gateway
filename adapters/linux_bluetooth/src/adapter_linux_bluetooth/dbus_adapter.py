@@ -78,6 +78,18 @@ class BlueZAdapterController:
     async def set_pairable_timeout(self, timeout: int) -> bool:
         return await self.set_property("PairableTimeout", timeout, "u")
 
+    async def set_class(self, class_hex: str) -> bool:
+        """Set the adapter device class explicitly (e.g. 0x240404 for speaker)."""
+        try:
+            import subprocess
+            # hciconfig is available in the container and needed because
+            # BlueZ's D-Bus API exposes Class as read-only.
+            subprocess.run(["hciconfig", self.adapter_name, "class", class_hex], check=True)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set adapter class to {class_hex}: {e}")
+            return False
+
     async def is_available(self) -> bool:
         """Check if the adapter is available on DBus."""
         try:

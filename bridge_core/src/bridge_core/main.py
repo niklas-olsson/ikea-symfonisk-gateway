@@ -27,6 +27,7 @@ from bridge_core.api import (
     targets_router,
 )
 from bridge_core.core import (
+    AutoPlayController,
     ConfigStore,
     EventBus,
     SessionManager,
@@ -73,6 +74,8 @@ def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventB
             sources=linux_bluetooth_adapter.list_sources(),
             adapter_instance=linux_bluetooth_adapter,
         )
+        # Start auto-reconnect routine in the background
+        asyncio.create_task(linux_bluetooth_adapter.on_startup())
         return
 
     if normalized_platform == "windows":
@@ -106,6 +109,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         publisher,
         config_store=config_store,
     )
+    auto_play_controller = AutoPlayController(event_bus, session_manager, target_registry)
 
     # Store in app state
     app.state.config_store = config_store
@@ -114,6 +118,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.target_registry = target_registry
     app.state.stream_publisher = publisher
     app.state.session_manager = session_manager
+    app.state.auto_play_controller = auto_play_controller
 
     # Register adapters
     sonos_adapter = SonosRendererAdapter(event_bus)

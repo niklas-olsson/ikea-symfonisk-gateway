@@ -117,6 +117,7 @@ class SessionFrameSink:
         self._queue: asyncio.Queue[AudioFrame] = asyncio.Queue(maxsize=100)
         self._task: asyncio.Task[None] | None = None
         self._active = False
+        self._next_seq = 0
 
     def start(self) -> None:
         """Start the ingestion task."""
@@ -161,12 +162,13 @@ class SessionFrameSink:
 
         # Wrap in AudioFrame envelope as expected by the pipeline
         frame = AudioFrame(
-            sequence=0,  # Sequence handled by jitter buffer/adapter if needed
+            sequence=self._next_seq,
             pts_ns=pts_ns,
             duration_ns=duration_ns,
             format={"sample_rate": 48000, "channels": 2, "bit_depth": 16},
             audio_data=data,
         )
+        self._next_seq += 1
         # Push to queue (non-blocking)
         try:
             self._queue.put_nowait(frame)
@@ -414,8 +416,9 @@ class SessionManager:
 
             # 6. Verify frame ingestion
             frames_ingested = False
-            for _ in range(6):  # 3 seconds, 500ms intervals
-                if session.pipeline and session.pipeline.jitter_buffer.size_ms > 0:
+            for _ in range(20):  # 10 seconds total, 500ms intervals
+                high_water = getattr(session.pipeline.jitter_buffer, "_counter", 0)
+                if session.pipeline and (session.pipeline.jitter_buffer.size_ms > 0 or high_water > 0):
                     frames_ingested = True
                     break
                 await asyncio.sleep(0.5)

@@ -1,15 +1,24 @@
-version: "3.8"
-
 services:
   bridge:
     build: .
     network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
     environment:
       - BRIDGE_HOST=0.0.0.0
       - BRIDGE_PORT=8732
       - BRIDGE_API_PORT=8732
       - BRIDGE_STREAM_PORT=8080
       - LOG_LEVEL=INFO
+      - XDG_RUNTIME_DIR=/run/user/1000
+      - PULSE_SERVER=unix:/run/user/1000/pulse/native
     volumes:
       - ./config:/app/config
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      - /run/user/1000/pipewire-0:/run/user/1000/pipewire-0
+      - /run/user/1000/pulse:/run/user/1000/pulse
+      - /var/lib/bluetooth:/var/lib/bluetooth
     restart: unless-stopped

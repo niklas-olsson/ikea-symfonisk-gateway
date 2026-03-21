@@ -117,6 +117,43 @@ class LinuxBluetoothAdapter(IngressAdapter):
             supports_pairing=True,
         )
 
+    async def on_startup(self) -> None:
+        """Attempt to reconnect trusted/preferred devices on startup."""
+        if not self._adapter_controller:
+            return
+
+        logger.info("Bluetooth adapter: starting auto-reconnect routine...")
+
+        # Wait for adapter to be available
+        for _ in range(10):
+            if await self._adapter_controller.is_available():
+                break
+            await asyncio.sleep(1)
+        else:
+            logger.error("Bluetooth adapter not available for auto-reconnect")
+            return
+
+        trusted = self._store.list_trusted()
+        preferred_mac = self._store.get_preferred_device()
+        
+        # Prioritize preferred device
+        macs_to_connect = []
+        if preferred_mac and preferred_mac in trusted:
+            macs_to_connect.append(preferred_mac)
+        
+        for mac in trusted:
+            if mac != preferred_mac:
+                macs_to_connect.append(mac)
+
+        for mac in macs_to_connect:
+            device_path = self._adapter_controller.get_device_path(mac)
+            logger.info(f"Attempting auto-reconnect to {mac} ({device_path})")
+            success = await self._adapter_controller.connect_device(device_path)
+            if success:
+                logger.info(f"Successfully auto-reconnected to {mac}")
+            else:
+                logger.debug(f"Auto-reconnect failed for {mac} (maybe not in range)")
+
     def list_sources(self) -> list[SourceDescriptor]:
         """Discover connected Bluetooth A2DP sources using pactl."""
         sources: list[SourceDescriptor] = []
@@ -127,9 +164,17 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
         try:
             backend_type = "PulseAudio"
-            if shutil.which("pw-cli"):
-                backend_type = "PipeWire"
+            default_source = "auto_null.monitor"
+            info_res = subprocess.run(["pactl", "info"], capture_output=True, text=True)
+            for line in info_res.stdout.split("\n"):
+                if "PipeWire" in line:
+                    backend_type = "PipeWire"
+                if line.startswith("Default Source:"):
+                    default_source = line.split(":", 1)[1].strip()
 
+            macs_found = set()
+
+            # 1. Check for explicit pulse sources
             result = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
@@ -137,40 +182,58 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 parts = line.split("\t")
                 if len(parts) < 2:
                     continue
-
+                
                 source_id = parts[1]
                 if "bluez" in source_id:
                     mac = source_id.replace("bluez_source.", "").replace(".a2dp_source", "").replace("_", ":")
-                    if self._store.is_blocked(mac):
-                        logger.info(f"Ignoring blocked Bluetooth source: {source_id}")
+                    macs_found.add((mac.upper(), source_id))
+
+            # 2. Check for explicit pulse cards (PipeWire Loopback fallback)
+            if backend_type == "PipeWire":
+                res = subprocess.run(["pactl", "list", "short", "cards"], capture_output=True, text=True)
+                for line in res.stdout.strip().split("\n"):
+                    if not line:
                         continue
+                    parts = line.split("\t")
+                    if len(parts) >= 2 and "bluez_card." in parts[1]:
+                        cid = parts[1]
+                        mac = cid.replace("bluez_card.", "").replace("_", ":")
+                        # Add it with the default source monitor
+                        macs_found.add((mac.upper(), default_source))
 
-                    display_name = f"Bluetooth: {mac}"
-                    metadata = self._store.get_device_metadata(mac)
-                    if metadata is None:
-                        metadata = {}
-                    if "alias" in metadata:
-                        display_name = f"Bluetooth: {metadata['alias']} ({mac})"
+            for mac, pa_source in macs_found:
+                if self._store.is_blocked(mac):
+                    continue
 
-                    virtual_id = f"bluetooth:{mac.lower()}"
-                    metadata["backend_type"] = backend_type
-                    metadata["pa_source_id"] = source_id
+                virtual_id = f"bluetooth:{mac.lower()}"
+                
+                # If we already have this virtual_id, prefer the direct source over the default monitor fallback
+                if virtual_id in new_source_id_map and new_source_id_map[virtual_id] != default_source:
+                    continue
 
-                    sources.append(
-                        SourceDescriptor(
-                            source_id=virtual_id,
-                            source_type=SourceType.BLUETOOTH_AUDIO,
-                            display_name=display_name,
-                            platform="linux",
-                            capabilities=SourceCapabilities(
-                                sample_rates=[48000],
-                                channels=[2],
-                                bit_depths=[16],
-                            ),
-                            metadata=metadata,
-                        )
+                display_name = f"Bluetooth: {mac}"
+                metadata = self._store.get_device_metadata(mac) or {}
+                if "alias" in metadata:
+                    display_name = f"Bluetooth: {metadata['alias']} ({mac})"
+
+                metadata["backend_type"] = backend_type
+                metadata["pa_source_id"] = pa_source
+
+                sources.append(
+                    SourceDescriptor(
+                        source_id=virtual_id,
+                        source_type=SourceType.BLUETOOTH_AUDIO,
+                        display_name=display_name,
+                        platform="linux",
+                        capabilities=SourceCapabilities(
+                            sample_rates=[48000],
+                            channels=[2],
+                            bit_depths=[16],
+                        ),
+                        metadata=metadata,
                     )
-                    new_source_id_map[virtual_id] = source_id
+                )
+                new_source_id_map[virtual_id] = pa_source
 
             # Check for available/unavailable sources
             if self._event_bus:
@@ -181,6 +244,9 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     self._event_bus.emit(EventType.BLUETOOTH_SOURCE_AVAILABLE, payload={"source_id": sid})
                 for sid in old_sources - new_sources:
                     self._event_bus.emit(EventType.BLUETOOTH_SOURCE_UNAVAILABLE, payload={"source_id": sid})
+
+                if new_sources != old_sources:
+                    self._event_bus.emit(EventType.TOPOLOGY_CHANGED, payload={"adapter_id": self.id()})
 
             self._source_id_map = new_source_id_map
 
@@ -255,19 +321,29 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            if self._process.stdout is None:
-                logger.error("Failed to open stdout for capture process")
-                return
+            async def log_stderr(stderr):
+                while True:
+                    line = await stderr.readline()
+                    if not line:
+                        break
+                    logger.error(f"parec stderr: {line.decode().strip()}")
+
+            stderr_task = asyncio.create_task(log_stderr(self._process.stderr))
 
             chunk_size = 1920  # 10ms at 48kHz, 16-bit stereo
             pts_ns = 0
             duration_ns = 10_000_000  # 10ms
 
+            frame_count = 0
             while self._running:
                 try:
                     data = await self._process.stdout.readexactly(chunk_size)
                     if not data:
                         break
+
+                    frame_count += 1
+                    if frame_count % 100 == 0:
+                        logger.info(f"Bluetooth capture: {frame_count} frames sent to sink")
 
                     if self._frame_sink:
                         try:
@@ -279,6 +355,11 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     pts_ns += duration_ns
                 except asyncio.IncompleteReadError:
                     break
+                except Exception as e:
+                    logger.error(f"Error reading from parec: {e}")
+                    break
+            
+            stderr_task.cancel()
 
         except asyncio.CancelledError:
             pass
@@ -463,6 +544,9 @@ class LinuxBluetoothAdapter(IngressAdapter):
         """Periodically check adapter status and emit events on change."""
         try:
             while True:
+                # Discover sources periodically to automatically emit BLUETOOTH_SOURCE_AVAILABLE
+                await asyncio.to_thread(self.list_sources)
+
                 status = await self.get_adapter_status()
 
                 # Check for readiness errors to emit READY/FAILED events

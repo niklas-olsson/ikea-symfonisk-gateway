@@ -1,12 +1,15 @@
 FROM python:3.12-slim
 
-# Install system dependencies for audio and networking
+# Install system dependencies for audio, networking, and Bluetooth
 RUN apt-get update && apt-get install -y \
     libasound2-dev \
     pulseaudio-utils \
     alsa-utils \
     ffmpeg \
     curl \
+    dbus \
+    bluez \
+    rfkill \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv

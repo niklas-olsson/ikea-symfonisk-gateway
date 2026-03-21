@@ -1,5 +1,6 @@
 """Bridge core subsystems."""
 
+from bridge_core.core.auto_play import AutoPlayController
 from bridge_core.core.config_store import ConfigStore
 from bridge_core.core.event_bus import EventBus
 from bridge_core.core.pipeline import PipelineManager
@@ -14,4 +15,5 @@ __all__ = [
     "PipelineManager",
     "EventBus",
     "ConfigStore",
+    "AutoPlayController",
 ]

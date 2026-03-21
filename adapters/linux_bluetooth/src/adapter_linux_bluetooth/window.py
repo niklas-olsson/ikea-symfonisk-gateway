@@ -103,6 +103,12 @@ class PairingWindowManager:
             await self.adapter_controller.set_discoverable_timeout(timeout)
             await self.adapter_controller.set_pairable_timeout(timeout)
 
+            # Enforce Speaker class (0x240404) immediately after entering
+            # discoverable mode, as bluetoothd will likely override it back
+            # to a PC chassis based on system defaults.
+            if hasattr(self.adapter_controller, "set_class"):
+                await self.adapter_controller.set_class("0x240404")
+
             # 3. Wait for timeout or completion
             try:
                 await asyncio.wait_for(self._completion_event.wait(), timeout=timeout)
