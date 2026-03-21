@@ -169,13 +169,15 @@ class SonosRendererAdapter(RendererAdapter):
                     elif len(members) > 2:
                         target_type = "group"
 
-                    groups[coord_id] = SonosTargetDescriptor(
+                    t = SonosTargetDescriptor(
                         target_id=coord_id,
                         target_type=target_type,
                         display_name=coordinator.player_name,
                         members=members,
                         coordinator_id=coord_id,
                     )
+                    setattr(t, "is_available", True)
+                    groups[coord_id] = t
             except Exception as e:
                 logger.warning("Failed to process player %s during topology build: %s", player.uid, e)
                 continue

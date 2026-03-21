@@ -819,12 +819,22 @@ class SessionManager:
 
     def create(
         self,
-        source_id: str,
-        target_id: str,
+        source_id: str | None = None,
+        target_id: str | None = None,
         stream_profile: str = "mp3_48k_stereo_320",
         auto_heal: bool = True,
     ) -> Session:
-        """Create a new session."""
+        """Create a new session, using preferred devices if IDs are not provided."""
+        if not source_id and self._config_store:
+            source_id = self._config_store.get("preferred_source_id")
+        if not target_id and self._config_store:
+            target_id = self._config_store.get("preferred_target_id")
+
+        if not source_id:
+            raise ValueError("No source_id provided and no preferred source set")
+        if not target_id:
+            raise ValueError("No target_id provided and no preferred target set")
+
         session = Session(
             source_id=source_id,
             target_id=target_id,

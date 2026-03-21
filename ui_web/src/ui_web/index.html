@@ -111,6 +111,11 @@
             align-items: center;
         }
 
+        .field-actions {
+            display: flex;
+            gap: var(--spacing-8);
+        }
+
         label {
             font-size: 0.75rem;
             color: var(--text-muted);
@@ -594,7 +599,10 @@
                 <div class="field">
                     <div class="field-header">
                         <label for="source-select">Audio Source</label>
-                        <button id="refresh-sources" class="small-text">Refresh</button>
+                        <div class="field-actions">
+                            <button id="set-preferred-source" class="small-text">★ Set Preferred</button>
+                            <button id="refresh-sources" class="small-text">Refresh</button>
+                        </div>
                     </div>
                     <select id="source-select">
                         <option value="">Loading sources...</option>
@@ -603,7 +611,10 @@
                 <div class="field">
                     <div class="field-header">
                         <label for="target-select">Playback Target</label>
-                        <button id="refresh-targets" class="small-text">Refresh</button>
+                        <div class="field-actions">
+                            <button id="set-preferred-target" class="small-text">★ Set Preferred</button>
+                            <button id="refresh-targets" class="small-text">Refresh</button>
+                        </div>
                     </div>
                     <select id="target-select">
                         <option value="">Loading targets...</option>
@@ -775,9 +786,22 @@
             try {
                 const res = await fetch('/v1/sources');
                 const { sources } = await res.json();
-                sourceSelect.innerHTML = sources.map(s =>
-                    `<option value="${s.source_id}">${s.display_name} (${s.source_type})</option>`
-                ).join('') || '<option value="">No sources available</option>';
+                const currentValue = sourceSelect.value;
+                sourceSelect.innerHTML = sources.map(s => {
+                    let prefix = '';
+                    if (s.is_active) prefix += '● ';
+                    if (s.is_preferred) prefix += '★ ';
+                    if (!s.is_available) prefix += '⚠ [OFFLINE] ';
+                    return `<option value="${s.source_id}">${prefix}${s.display_name} (${s.source_type})</option>`;
+                }).join('') || '<option value="">No sources available</option>';
+
+                if (currentValue && sources.find(s => s.source_id === currentValue)) {
+                    sourceSelect.value = currentValue;
+                } else if (!currentValue) {
+                    const preferred = sources.find(s => s.is_preferred && s.is_available);
+                    if (preferred) sourceSelect.value = preferred.source_id;
+                }
+
                 syncDeliveryProfileSelection();
             } catch (err) {
                 console.error('Failed to fetch sources', err);
@@ -789,12 +813,35 @@
             try {
                 const res = await fetch('/v1/targets');
                 const { targets } = await res.json();
-                targetSelect.innerHTML = targets.map(t =>
-                    `<option value="${t.target_id}">${t.display_name} (${t.renderer})</option>`
-                ).join('') || '<option value="">No targets available</option>';
+                const currentValue = targetSelect.value;
+                targetSelect.innerHTML = targets.map(t => {
+                    let prefix = '';
+                    if (t.is_active) prefix += '● ';
+                    if (t.is_preferred) prefix += '★ ';
+                    if (!t.is_available) prefix += '⚠ [OFFLINE] ';
+                    return `<option value="${t.target_id}">${prefix}${t.display_name} (${t.renderer})</option>`;
+                }).join('') || '<option value="">No targets available</option>';
+
+                if (currentValue && targets.find(t => t.target_id === currentValue)) {
+                    targetSelect.value = currentValue;
+                } else if (!currentValue) {
+                    const preferred = targets.find(t => t.is_preferred && t.is_available);
+                    if (preferred) targetSelect.value = preferred.target_id;
+                }
             } catch (err) {
                 console.error('Failed to fetch targets', err);
                 addLog('ERROR', 'Failed to fetch targets');
+            }
+        }
+
+        async function refreshSources() {
+            addLog('SYSTEM', 'Refreshing sources...');
+            try {
+                await fetch('/v1/sources/refresh', { method: 'POST' });
+                await fetchSources();
+            } catch (err) {
+                console.error('Refresh sources failed', err);
+                addLog('ERROR', 'Refresh sources failed');
             }
         }
 
@@ -806,6 +853,38 @@
             } catch (err) {
                 console.error('Refresh targets failed', err);
                 addLog('ERROR', 'Refresh targets failed');
+            }
+        }
+
+        async function setPreferredSource() {
+            const sourceId = sourceSelect.value;
+            if (!sourceId) return;
+            addLog('SYSTEM', 'Saving preferred source...');
+            try {
+                await fetch('/v1/config/preferred_source_id', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: sourceId })
+                });
+                await fetchSources();
+            } catch (err) {
+                addLog('ERROR', 'Failed to save preferred source');
+            }
+        }
+
+        async function setPreferredTarget() {
+            const targetId = targetSelect.value;
+            if (!targetId) return;
+            addLog('SYSTEM', 'Saving preferred target...');
+            try {
+                await fetch('/v1/config/preferred_target_id', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: targetId })
+                });
+                await fetchTargets();
+            } catch (err) {
+                addLog('ERROR', 'Failed to save preferred target');
             }
         }
 
@@ -1188,8 +1267,18 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ mac })
                 });
+
+                // Sync with global preferred source
+                const virtualSourceId = `linux-bluetooth-adapter:bluetooth:${mac.toLowerCase()}`;
+                await fetch('/v1/config/preferred_source_id', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: virtualSourceId })
+                });
+
                 addLog('BLUETOOTH', `Set preferred device: ${mac}`);
                 await btRefreshDevices();
+                await fetchSources(); // Refresh main source list to show preferred badge
             } catch (err) {
                 addLog('BT-ERROR', 'Set preferred failed: ' + err.message);
             }
@@ -1315,8 +1404,10 @@
                 addLog('ERROR', 'Failed to save delivery profile');
             });
         };
-        refreshSourcesBtn.onclick = fetchSources;
+        refreshSourcesBtn.onclick = refreshSources;
         refreshTargetsBtn.onclick = refreshTargets;
+        document.getElementById('set-preferred-source').onclick = setPreferredSource;
+        document.getElementById('set-preferred-target').onclick = setPreferredTarget;
 
         // Check for existing active sessions on load
         async function checkActiveSessions() {

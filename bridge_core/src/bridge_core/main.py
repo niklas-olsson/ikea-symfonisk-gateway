@@ -123,8 +123,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize core components
     config_store = ConfigStore(db_path="config.db")
     event_bus = EventBus()
-    source_registry = SourceRegistry(event_bus)
-    target_registry = TargetRegistry(event_bus)
+    source_registry = SourceRegistry(event_bus, config_store=config_store)
+    target_registry = TargetRegistry(event_bus, config_store=config_store)
     publisher = StreamPublisher(port=8080)
     session_manager = SessionManager(
         event_bus,
@@ -133,6 +133,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         publisher,
         config_store=config_store,
     )
+    source_registry.set_session_manager(session_manager)
+    target_registry.set_session_manager(session_manager)
     auto_play_controller = AutoPlayController(event_bus, session_manager, target_registry)
 
     # Store in app state

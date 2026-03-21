@@ -11,8 +11,20 @@ from bridge_core.core import TargetRegistry
 router = APIRouter(prefix="/v1/targets", tags=["targets"])
 
 
+class TargetResponse(BaseModel):
+    target_id: str
+    renderer: str
+    type: str
+    display_name: str
+    members: list[str]
+    coordinator_id: str
+    is_preferred: bool = False
+    is_active: bool = False
+    is_available: bool = True
+
+
 class TargetListResponse(BaseModel):
-    targets: list[dict[str, Any]]
+    targets: list[TargetResponse]
 
 
 class VolumeRequest(BaseModel):
@@ -26,14 +38,17 @@ async def list_targets(request: Request) -> TargetListResponse:
     targets = []
     for t in registry.list_targets():
         targets.append(
-            {
-                "target_id": t.target_id,
-                "renderer": t.renderer,
-                "type": t.target_type,
-                "display_name": t.display_name,
-                "members": t.members,
-                "coordinator_id": t.coordinator_id,
-            }
+            TargetResponse(
+                target_id=t.target_id,
+                renderer=t.renderer,
+                type=t.target_type,
+                display_name=t.display_name,
+                members=t.members,
+                coordinator_id=t.coordinator_id,
+                is_preferred=getattr(t, "is_preferred", False),
+                is_active=getattr(t, "is_active", False),
+                is_available=getattr(t, "is_available", True),
+            )
         )
     return TargetListResponse(targets=targets)
 

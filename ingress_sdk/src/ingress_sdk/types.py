@@ -30,6 +30,9 @@ class SourceDescriptor(BaseModel):
     capabilities: SourceCapabilities
     adapter_id: str | None = None
     local_source_id: str | None = None
+    is_preferred: bool = False
+    is_active: bool = False
+    is_available: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

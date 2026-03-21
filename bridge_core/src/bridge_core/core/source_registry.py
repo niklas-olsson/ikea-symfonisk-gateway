@@ -72,13 +72,26 @@ class SourceRegistry:
         "synthetic_test_source": "synthetic",
     }
 
-    def __init__(self, event_bus: EventBus) -> None:
+    def __init__(self, event_bus: EventBus, config_store: Any | None = None) -> None:
         self._event_bus = event_bus
+        self._config_store = config_store
+        self._session_manager: Any | None = None
         self._adapters: dict[str, AdapterInfo] = {}
         self._sources: dict[str, SourceDescriptor] = {}
         self._source_to_adapter: dict[str, str] = {}
         self._source_health: dict[str, HealthResult] = {}
         self._event_bus.subscribe_handler(self._handle_topology_changed, EventType.TOPOLOGY_CHANGED)
+
+    def set_session_manager(self, session_manager: Any) -> None:
+        """Set the session manager reference for active state tracking."""
+        self._session_manager = session_manager
+
+    def refresh_sources(self) -> None:
+        """Force a refresh of sources from all adapters."""
+        for adapter_id, adapter_info in self._adapters.items():
+            if adapter_info.adapter:
+                sources = adapter_info.adapter.list_sources()
+                self.update_adapter_sources(adapter_id, sources)
 
     async def _handle_topology_changed(self, event: BridgeEvent) -> None:
         """Handle topology changed events from adapters."""
@@ -219,8 +232,44 @@ class SourceRegistry:
         return list(self._adapters.values())
 
     def list_sources(self) -> list[SourceDescriptor]:
-        """List all available sources."""
-        return list(self._sources.values())
+        """List all sources, including preferred ones that might be offline."""
+        preferred_id = None
+        if self._config_store:
+            preferred_id = self._config_store.get("preferred_source_id")
+
+        active_source_ids = set()
+        if self._session_manager:
+            active_source_ids = {
+                sess.source_id for sess in self._session_manager.list()
+                if str(sess.state) in ("playing", "starting", "preparing", "healing", "degraded")
+            }
+
+        results = []
+        for s in self._sources.values():
+            copy = s.model_copy()
+            copy.is_preferred = (s.source_id == preferred_id)
+            copy.is_active = (s.source_id in active_source_ids)
+            copy.is_available = True
+            results.append(copy)
+
+        # If the preferred source is missing, add a stub for it
+        if preferred_id and preferred_id not in self._sources:
+            # We don't have the full descriptor, but we can provide the ID and a hint
+            # In a more advanced version, we might have cached the last known descriptor
+            results.append(
+                SourceDescriptor(
+                    source_id=preferred_id,
+                    source_type="system_audio",  # Placeholder
+                    display_name=f"Missing Preferred Source ({preferred_id})",
+                    platform="any",
+                    capabilities={"sample_rates": [48000], "channels": [2], "bit_depths": [16]},
+                    is_preferred=True,
+                    is_active=False,
+                    is_available=False,
+                )
+            )
+
+        return results
 
     def get_source_adapter(self, source_id: str) -> AdapterInfo | None:
         """Find which adapter owns this source."""
