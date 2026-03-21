@@ -2,6 +2,8 @@
 
 import asyncio
 import time
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -995,7 +997,10 @@ async def test_client_detach_does_not_degrade_healthy_stream(
         },
     )
     config_store = MagicMock()
-    config_store.get.side_effect = lambda key, default=None: {"audio_transport_heartbeat_window_ms": 100}.get(key, default)
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_transport_heartbeat_window_ms": 100,
+        "audio_primary_attach_grace_ms": 100,
+    }.get(key, default)
 
     manager = SessionManager(
         event_bus=event_bus,
@@ -1021,14 +1026,46 @@ async def test_client_detach_does_not_degrade_healthy_stream(
         "last_stdin_write_monotonic": time.monotonic(),
         "keepalive_active": True,
         "active_client_count": 1,
+        "effective_client_count": 1,
+        "primary_client_count": 1,
+        "primary_effective_client_count": 1,
+        "primary_delivery_alive": True,
         "last_client_fanout_monotonic": time.monotonic(),
         "last_client_attach_monotonic": time.monotonic() - 1,
         "last_client_detach_monotonic": None,
+        "last_primary_attach_monotonic": time.monotonic() - 1,
+        "last_primary_enqueue_monotonic": time.monotonic(),
+        "last_primary_dequeue_monotonic": time.monotonic(),
+        "last_primary_yield_monotonic": time.monotonic(),
+        "subscribers": [
+            {
+                "subscriber_id": 1,
+                "role": "primary_renderer",
+                "delivery_path_id": "tgt_1",
+                "remote_addr": "192.168.1.10",
+                "user_agent": "Sonos/1.0",
+                "attached_monotonic": time.monotonic() - 1,
+                "last_successful_enqueue_monotonic": time.monotonic(),
+                "last_successful_dequeue_monotonic": time.monotonic(),
+                "last_successful_yield_monotonic": time.monotonic(),
+                "overflow_started_monotonic": None,
+                "overflow_events": 0,
+                "queued_bytes": 0,
+                "estimated_backlog_ms": 20.0,
+                "closed": False,
+                "is_primary_candidate": True,
+                "is_establishing_candidate": True,
+                "is_primary_healthy": True,
+            }
+        ],
     }
     detached = {
         **healthy,
-        "active_client_count": 0,
-        "last_client_fanout_monotonic": time.monotonic() - 1,
+        "active_client_count": 1,
+        "effective_client_count": 1,
+        "primary_client_count": 1,
+        "primary_effective_client_count": 1,
+        "primary_delivery_alive": True,
         "last_client_detach_monotonic": time.monotonic(),
     }
     with (
@@ -1040,15 +1077,7 @@ async def test_client_detach_does_not_degrade_healthy_stream(
         mock_pipeline.stop = AsyncMock()
         mock_pipeline.jitter_buffer = MagicMock()
         mock_pipeline.jitter_buffer.size_ms = 0.0
-        mock_pipeline.get_diagnostics_snapshot.side_effect = [
-            healthy,
-            detached,
-            detached,
-            detached,
-            detached,
-            detached,
-            detached,
-        ]
+        mock_pipeline.get_diagnostics_snapshot.side_effect = [healthy, healthy, detached, detached, detached, detached, detached, detached]
 
         success = await manager.start_session(session.session_id)
         assert success is True
@@ -1094,7 +1123,10 @@ async def test_normal_reconnect_churn_remains_non_fatal(
         },
     )
     config_store = MagicMock()
-    config_store.get.side_effect = lambda key, default=None: {"audio_transport_heartbeat_window_ms": 100}.get(key, default)
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_transport_heartbeat_window_ms": 100,
+        "audio_primary_attach_grace_ms": 100,
+    }.get(key, default)
 
     manager = SessionManager(
         event_bus=event_bus,
@@ -1120,15 +1152,49 @@ async def test_normal_reconnect_churn_remains_non_fatal(
         "last_stdin_write_monotonic": time.monotonic(),
         "keepalive_active": False,
         "active_client_count": 1,
+        "effective_client_count": 1,
+        "primary_client_count": 1,
+        "primary_effective_client_count": 1,
+        "primary_delivery_alive": True,
         "last_client_fanout_monotonic": time.monotonic(),
         "last_client_attach_monotonic": time.monotonic() - 1,
         "last_client_detach_monotonic": None,
+        "last_primary_attach_monotonic": time.monotonic() - 1,
+        "last_primary_enqueue_monotonic": time.monotonic(),
+        "last_primary_dequeue_monotonic": time.monotonic(),
+        "last_primary_yield_monotonic": time.monotonic(),
+        "subscribers": [
+            {
+                "subscriber_id": 1,
+                "role": "primary_renderer",
+                "delivery_path_id": "tgt_1",
+                "remote_addr": "192.168.1.10",
+                "user_agent": "Sonos/1.0",
+                "attached_monotonic": time.monotonic() - 1,
+                "last_successful_enqueue_monotonic": time.monotonic(),
+                "last_successful_dequeue_monotonic": time.monotonic(),
+                "last_successful_yield_monotonic": time.monotonic(),
+                "overflow_started_monotonic": None,
+                "overflow_events": 0,
+                "queued_bytes": 0,
+                "estimated_backlog_ms": 20.0,
+                "closed": False,
+                "is_primary_candidate": True,
+                "is_establishing_candidate": True,
+                "is_primary_healthy": True,
+            }
+        ],
     }
     detached = {
         **healthy,
         "active_client_count": 0,
+        "effective_client_count": 0,
+        "primary_client_count": 0,
+        "primary_effective_client_count": 0,
+        "primary_delivery_alive": False,
         "last_client_fanout_monotonic": time.monotonic() - 1,
         "last_client_detach_monotonic": time.monotonic(),
+        "subscribers": [],
     }
     reattached = {
         **healthy,
@@ -1136,6 +1202,10 @@ async def test_normal_reconnect_churn_remains_non_fatal(
         "last_client_attach_monotonic": time.monotonic(),
         "last_client_fanout_monotonic": time.monotonic(),
         "last_client_detach_monotonic": time.monotonic() - 0.5,
+        "last_primary_attach_monotonic": time.monotonic(),
+        "last_primary_enqueue_monotonic": time.monotonic(),
+        "last_primary_dequeue_monotonic": time.monotonic(),
+        "last_primary_yield_monotonic": time.monotonic(),
     }
 
     with (
@@ -1198,7 +1268,10 @@ async def test_last_effective_delivery_path_loss_degrades_and_replays(
         },
     )
     config_store = MagicMock()
-    config_store.get.side_effect = lambda key, default=None: {"audio_transport_heartbeat_window_ms": 100}.get(key, default)
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_transport_heartbeat_window_ms": 100,
+        "audio_primary_attach_grace_ms": 100,
+    }.get(key, default)
 
     manager = SessionManager(
         event_bus=event_bus,
@@ -1225,28 +1298,67 @@ async def test_last_effective_delivery_path_loss_degrades_and_replays(
         "keepalive_active": False,
         "active_client_count": 1,
         "effective_client_count": 1,
+        "primary_client_count": 1,
+        "primary_effective_client_count": 1,
+        "primary_delivery_alive": True,
         "last_client_fanout_monotonic": time.monotonic(),
         "last_client_attach_monotonic": time.monotonic() - 1,
         "last_client_detach_monotonic": None,
+        "last_primary_attach_monotonic": time.monotonic() - 1,
+        "last_primary_enqueue_monotonic": time.monotonic(),
+        "last_primary_dequeue_monotonic": time.monotonic(),
+        "last_primary_yield_monotonic": time.monotonic(),
+        "max_primary_backlog_ms_observed": 100.0,
+        "primary_resume_to_first_successful_yield_ms": 25.0,
         "client_stall_disconnects_total": 0,
         "last_client_stall_disconnect_monotonic": None,
+        "subscribers": [
+            {
+                "subscriber_id": 1,
+                "role": "primary_renderer",
+                "delivery_path_id": "tgt_1",
+                "remote_addr": "192.168.1.10",
+                "user_agent": "Sonos/1.0",
+                "attached_monotonic": time.monotonic() - 1,
+                "last_successful_enqueue_monotonic": time.monotonic(),
+                "last_successful_dequeue_monotonic": time.monotonic(),
+                "last_successful_yield_monotonic": time.monotonic(),
+                "overflow_started_monotonic": None,
+                "overflow_events": 0,
+                "queued_bytes": 0,
+                "estimated_backlog_ms": 20.0,
+                "closed": False,
+                "is_primary_candidate": True,
+                "is_establishing_candidate": True,
+                "is_primary_healthy": True,
+            }
+        ],
     }
-    def detached() -> dict[str, float | int | bool | None | str]:
+    def detached() -> dict[str, Any]:
         return {
             **healthy,
             "active_client_count": 0,
             "effective_client_count": 0,
-            "last_client_fanout_monotonic": time.monotonic() - 1,
+            "primary_client_count": 0,
+            "primary_effective_client_count": 0,
+            "primary_delivery_alive": False,
+            "last_client_fanout_monotonic": time.monotonic() - 1.5,
             "last_client_detach_monotonic": time.monotonic() - 0.01,
             "client_stall_disconnects_total": 1,
             "last_client_stall_disconnect_monotonic": time.monotonic() - 0.01,
+            "last_primary_yield_monotonic": time.monotonic() - 1.5,
+            "subscribers": [],
         }
 
-    def replayed() -> dict[str, float | int | bool | None | str]:
+    def replayed() -> dict[str, Any]:
         return {
             **healthy,
             "last_client_attach_monotonic": time.monotonic(),
             "last_client_fanout_monotonic": time.monotonic(),
+            "last_primary_attach_monotonic": time.monotonic(),
+            "last_primary_enqueue_monotonic": time.monotonic(),
+            "last_primary_dequeue_monotonic": time.monotonic(),
+            "last_primary_yield_monotonic": time.monotonic(),
         }
 
     with (
@@ -1258,20 +1370,23 @@ async def test_last_effective_delivery_path_loss_degrades_and_replays(
         mock_pipeline.stop = AsyncMock()
         mock_pipeline.jitter_buffer = MagicMock()
         mock_pipeline.jitter_buffer.size_ms = 0.0
-        sequence = [healthy, detached, detached, detached, detached, replayed, replayed, replayed, replayed, replayed]
+        sequence: list[dict[str, Any] | Callable[[], dict[str, Any]]] = [healthy, healthy, detached, detached, detached, detached]
 
-        def next_snapshot() -> dict[str, float | int | bool | None | str]:
+        def next_snapshot() -> dict[str, Any]:
+            if target_registry.play_stream.await_count >= 2:
+                return replayed()
             if sequence:
                 entry = sequence.pop(0)
-            else:
-                entry = replayed
-            return entry() if callable(entry) else entry
+                if callable(entry):
+                    return entry()
+                return entry
+            return detached()
 
         mock_pipeline.get_diagnostics_snapshot.side_effect = next_snapshot
 
         success = await manager.start_session(session.session_id)
         assert success is True
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(1.2)
 
     assert session.state == SessionState.PLAYING
     assert target_registry.play_stream.await_count >= 2
@@ -1337,11 +1452,39 @@ async def test_stalled_subscriber_eviction_does_not_degrade_when_effective_path_
         "keepalive_active": False,
         "active_client_count": 2,
         "effective_client_count": 1,
+        "primary_client_count": 1,
+        "primary_effective_client_count": 1,
+        "primary_delivery_alive": True,
         "last_client_fanout_monotonic": time.monotonic(),
         "last_client_attach_monotonic": time.monotonic() - 1,
         "last_client_detach_monotonic": time.monotonic() - 0.05,
+        "last_primary_attach_monotonic": time.monotonic() - 1,
+        "last_primary_enqueue_monotonic": time.monotonic(),
+        "last_primary_dequeue_monotonic": time.monotonic(),
+        "last_primary_yield_monotonic": time.monotonic(),
         "client_stall_disconnects_total": 1,
         "last_client_stall_disconnect_monotonic": time.monotonic() - 0.05,
+        "subscribers": [
+            {
+                "subscriber_id": 1,
+                "role": "primary_renderer",
+                "delivery_path_id": "tgt_1",
+                "remote_addr": "192.168.1.10",
+                "user_agent": "Sonos/1.0",
+                "attached_monotonic": time.monotonic() - 1,
+                "last_successful_enqueue_monotonic": time.monotonic(),
+                "last_successful_dequeue_monotonic": time.monotonic(),
+                "last_successful_yield_monotonic": time.monotonic(),
+                "overflow_started_monotonic": None,
+                "overflow_events": 0,
+                "queued_bytes": 0,
+                "estimated_backlog_ms": 10.0,
+                "closed": False,
+                "is_primary_candidate": True,
+                "is_establishing_candidate": True,
+                "is_primary_healthy": True,
+            }
+        ],
     }
 
     with (
@@ -1460,4 +1603,255 @@ async def test_encoder_loss_triggers_pipeline_swap_without_restarting_source(
     stream_publisher.swap_pipeline.assert_called()
     replacement_pipeline.start.assert_awaited()
     initial_pipeline.stop.assert_awaited()
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_primary_pause_resume_survives_without_heal(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=True,
+        source_state="active",
+        last_error=None,
+        details={
+            "startup_substate": "active",
+            "callback_count": 5,
+            "frames_emitted": 5,
+            "start_viability": {"stream_opened": True, "stream_started": True, "callback_registered": True},
+        },
+    )
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_transport_heartbeat_window_ms": 100,
+        "audio_primary_attach_grace_ms": 100,
+    }.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+
+    def primary_snapshot(*, real_frames: int, keepalive_active: bool) -> dict[str, Any]:
+        now = time.monotonic()
+        return {
+            "real_frames_written": real_frames,
+            "silence_frames_written": 10,
+            "runtime_mode": "healthy_but_idle" if keepalive_active else "active",
+            "last_real_frame_age_ms": 2500.0 if keepalive_active else 5.0,
+            "keepalive_to_first_real_frame_ms": 20.0,
+            "first_keepalive_encoded_output_after_session_start_ms": 15.0,
+            "first_real_encoded_output_after_session_start_ms": 20.0,
+            "transport_alive": True,
+            "encoded_bytes_emitted_total": 4096,
+            "encoded_bytes_emitted_last_window": 1024,
+            "last_stdout_read_monotonic": now,
+            "last_stdin_write_monotonic": now,
+            "keepalive_active": keepalive_active,
+            "active_client_count": 1,
+            "effective_client_count": 1,
+            "primary_client_count": 1,
+            "primary_effective_client_count": 1,
+            "primary_delivery_alive": True,
+            "last_client_fanout_monotonic": now,
+            "last_client_attach_monotonic": now - 1,
+            "last_client_detach_monotonic": None,
+            "last_primary_attach_monotonic": now - 1,
+            "last_primary_enqueue_monotonic": now,
+            "last_primary_dequeue_monotonic": now,
+            "last_primary_yield_monotonic": now,
+            "max_primary_backlog_ms_observed": 50.0,
+            "primary_resume_to_first_successful_yield_ms": 30.0,
+            "client_stall_disconnects_total": 0,
+            "last_client_stall_disconnect_monotonic": None,
+            "subscribers": [
+                {
+                    "subscriber_id": 1,
+                    "role": "primary_renderer",
+                    "delivery_path_id": "tgt_1",
+                    "remote_addr": "192.168.1.10",
+                    "user_agent": "Sonos/1.0",
+                    "attached_monotonic": now - 1,
+                    "last_successful_enqueue_monotonic": now,
+                    "last_successful_dequeue_monotonic": now,
+                    "last_successful_yield_monotonic": now,
+                    "overflow_started_monotonic": None,
+                    "overflow_events": 0,
+                    "queued_bytes": 0,
+                    "estimated_backlog_ms": 20.0,
+                    "closed": False,
+                    "is_primary_candidate": True,
+                    "is_establishing_candidate": True,
+                    "is_primary_healthy": True,
+                }
+            ],
+        }
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        sequence = [
+            primary_snapshot(real_frames=3, keepalive_active=False),
+            primary_snapshot(real_frames=0, keepalive_active=True),
+            primary_snapshot(real_frames=0, keepalive_active=True),
+            primary_snapshot(real_frames=3, keepalive_active=False),
+            primary_snapshot(real_frames=3, keepalive_active=False),
+        ]
+        mock_pipeline.get_diagnostics_snapshot.side_effect = lambda: sequence.pop(0) if sequence else primary_snapshot(real_frames=3, keepalive_active=False)
+
+        success = await manager.start_session(session.session_id)
+        assert success is True
+        await asyncio.sleep(0.9)
+
+    assert session.state == SessionState.PLAYING
+    assert session.media_reason is None
+    assert target_registry.play_stream.await_count == 1
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_primary_extended_silence_survives_without_heal(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=True,
+        source_state="active",
+        last_error=None,
+        details={
+            "startup_substate": "active",
+            "callback_count": 5,
+            "frames_emitted": 5,
+            "start_viability": {"stream_opened": True, "stream_started": True, "callback_registered": True},
+        },
+    )
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_transport_heartbeat_window_ms": 100,
+        "audio_primary_attach_grace_ms": 100,
+    }.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+
+    def idle_snapshot() -> dict[str, Any]:
+        now = time.monotonic()
+        return {
+            "real_frames_written": 0,
+            "silence_frames_written": 100,
+            "runtime_mode": "healthy_but_idle",
+            "last_real_frame_age_ms": 40000.0,
+            "keepalive_to_first_real_frame_ms": 20.0,
+            "first_keepalive_encoded_output_after_session_start_ms": 15.0,
+            "first_real_encoded_output_after_session_start_ms": 20.0,
+            "transport_alive": True,
+            "encoded_bytes_emitted_total": 8192,
+            "encoded_bytes_emitted_last_window": 1024,
+            "last_stdout_read_monotonic": now,
+            "last_stdin_write_monotonic": now,
+            "keepalive_active": True,
+            "active_client_count": 1,
+            "effective_client_count": 1,
+            "primary_client_count": 1,
+            "primary_effective_client_count": 1,
+            "primary_delivery_alive": True,
+            "last_client_fanout_monotonic": now,
+            "last_client_attach_monotonic": now - 1,
+            "last_client_detach_monotonic": None,
+            "last_primary_attach_monotonic": now - 1,
+            "last_primary_enqueue_monotonic": now,
+            "last_primary_dequeue_monotonic": now,
+            "last_primary_yield_monotonic": now,
+            "max_primary_backlog_ms_observed": 100.0,
+            "primary_resume_to_first_successful_yield_ms": 30.0,
+            "client_stall_disconnects_total": 0,
+            "last_client_stall_disconnect_monotonic": None,
+            "subscribers": [
+                {
+                    "subscriber_id": 1,
+                    "role": "primary_renderer",
+                    "delivery_path_id": "tgt_1",
+                    "remote_addr": "192.168.1.10",
+                    "user_agent": "Sonos/1.0",
+                    "attached_monotonic": now - 1,
+                    "last_successful_enqueue_monotonic": now,
+                    "last_successful_dequeue_monotonic": now,
+                    "last_successful_yield_monotonic": now,
+                    "overflow_started_monotonic": None,
+                    "overflow_events": 0,
+                    "queued_bytes": 0,
+                    "estimated_backlog_ms": 20.0,
+                    "closed": False,
+                    "is_primary_candidate": True,
+                    "is_establishing_candidate": True,
+                    "is_primary_healthy": True,
+                }
+            ],
+        }
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        mock_pipeline.get_diagnostics_snapshot.side_effect = lambda: idle_snapshot()
+
+        success = await manager.start_session(session.session_id)
+        assert success is True
+        await asyncio.sleep(1.1)
+
+    assert session.state == SessionState.PLAYING
+    assert session.media_reason is None
+    assert target_registry.play_stream.await_count == 1
     await manager.stop_session(session.session_id)

@@ -2,12 +2,14 @@
 
 import logging
 import socket
+from typing import cast
+from urllib.parse import urlencode
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
-from bridge_core.stream.pipeline import StreamPipeline
+from bridge_core.stream.pipeline import PipelineSubscriberInfo, StreamPipeline, SubscriberRole
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +34,19 @@ class StreamPublisher:
         """Set up FastAPI routes."""
 
         @self.app.get("/streams/{session_id}/live.{ext}")
-        async def stream_audio(session_id: str, ext: str) -> StreamingResponse:
+        async def stream_audio(session_id: str, ext: str, request: Request) -> StreamingResponse:
             pipeline, media_type, headers = self._resolve_stream(session_id, ext)
+            role = request.query_params.get("subscriber_role", "auxiliary")
+            if role not in {"primary_renderer", "auxiliary", "unknown"}:
+                role = "unknown"
+            subscriber_info = PipelineSubscriberInfo(
+                role=cast(SubscriberRole, role),
+                remote_addr=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+                delivery_path_id=request.query_params.get("delivery_path_id"),
+            )
             return StreamingResponse(
-                pipeline.subscribe(),
+                pipeline.subscribe(subscriber_info),
                 media_type=media_type,
                 headers=headers,
             )
@@ -83,10 +94,21 @@ class StreamPublisher:
             logger.warning("Failed to auto-detect IP, falling back to localhost: %s", e)
             return "127.0.0.1"
 
-    def get_stream_url(self, session_id: str, profile_id: str) -> str:
+    def get_stream_url(
+        self,
+        session_id: str,
+        profile_id: str,
+        *,
+        subscriber_role: str = "auxiliary",
+        delivery_path_id: str | None = None,
+    ) -> str:
         """Get the stream URL for a session."""
         ext = self._get_extension(profile_id)
-        return f"http://{self.advertised_host}:{self.port}/streams/{session_id}/live.{ext}"
+        base_url = f"http://{self.advertised_host}:{self.port}/streams/{session_id}/live.{ext}"
+        query = {"subscriber_role": subscriber_role}
+        if delivery_path_id:
+            query["delivery_path_id"] = delivery_path_id
+        return f"{base_url}?{urlencode(query)}"
 
     def register_pipeline(self, session_id: str, pipeline: StreamPipeline) -> None:
         """Register a pipeline for publishing."""

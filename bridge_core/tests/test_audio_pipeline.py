@@ -3,11 +3,12 @@ import logging
 import time
 import wave
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from bridge_core.core.session_manager import SessionFrameSink
-from bridge_core.stream.pipeline import JitterBuffer, PipelineSubscriber, StreamPipeline
+from bridge_core.stream.pipeline import JitterBuffer, PipelineSubscriber, PipelineSubscriberInfo, StreamPipeline
 from ingress_sdk.protocol import AudioFrame
 
 
@@ -37,7 +38,7 @@ class FakeStdout:
 class FakeProcess:
     def __init__(self, stdout_chunks: list[bytes] | None = None) -> None:
         self.stdin = FakeStdin()
-        self.stdout = FakeStdout(stdout_chunks)
+        self.stdout: Any = FakeStdout(stdout_chunks)
         self.wait = AsyncMock(return_value=0)
         self.terminate = Mock()
 
@@ -256,32 +257,47 @@ async def test_pipeline_evicts_stalled_subscriber_and_keeps_healthy_one() -> Non
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
+        target_id="tgt_1",
         client_queue_bytes=8,
         client_overflow_grace_ms=1,
     )
     now = time.monotonic()
-    healthy = PipelineSubscriber(  # type: ignore[name-defined]
+    healthy = PipelineSubscriber(
+        subscriber_id=1,
         queue=asyncio.Queue(),
         wake_event=asyncio.Event(),
         attached_monotonic=now,
+        role="primary_renderer",
+        remote_addr="192.168.1.10",
+        user_agent="Sonos/1.0",
+        delivery_path_id="tgt_1",
         last_successful_enqueue_monotonic=now,
+        last_successful_dequeue_monotonic=now,
+        last_successful_yield_monotonic=now,
         overflow_started_monotonic=None,
         overflow_events=0,
         queued_bytes=0,
     )
-    stalled = PipelineSubscriber(  # type: ignore[name-defined]
+    stalled = PipelineSubscriber(
+        subscriber_id=2,
         queue=asyncio.Queue(),
         wake_event=asyncio.Event(),
         attached_monotonic=now,
+        role="auxiliary",
+        remote_addr="127.0.0.1",
+        user_agent="curl",
+        delivery_path_id=None,
         last_successful_enqueue_monotonic=now,
+        last_successful_dequeue_monotonic=now,
+        last_successful_yield_monotonic=now,
         overflow_started_monotonic=now - 1,
         overflow_events=1,
         queued_bytes=8,
     )
-    pipeline._clients = [healthy, stalled]  # type: ignore[assignment]
+    pipeline._clients = [healthy, stalled]
     pipeline._active = True
 
-    await pipeline._fan_out_encoded_chunk(b"abcd", time.monotonic())  # type: ignore[attr-defined]
+    await pipeline._fan_out_encoded_chunk(b"abcd", time.monotonic())
 
     diagnostics = pipeline.get_diagnostics_snapshot()
     assert diagnostics["active_client_count"] == 1
@@ -289,6 +305,7 @@ async def test_pipeline_evicts_stalled_subscriber_and_keeps_healthy_one() -> Non
     assert diagnostics["client_stall_disconnects_total"] == 1
     assert healthy.queue.qsize() == 1
     assert stalled.closed is True
+    assert diagnostics["primary_delivery_alive"] is True
 
 
 @pytest.mark.asyncio
@@ -296,18 +313,19 @@ async def test_pipeline_closes_evicted_subscriber_cleanly() -> None:
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
+        target_id="tgt_1",
         client_queue_bytes=8,
         client_overflow_grace_ms=1,
     )
-    subscriber = pipeline.subscribe()
+    subscriber = pipeline.subscribe(PipelineSubscriberInfo(role="primary_renderer", delivery_path_id="tgt_1"))
     subscribe_task = asyncio.create_task(anext(subscriber))
     await asyncio.sleep(0)
-    internal = pipeline._clients[0]  # type: ignore[index]
+    internal = pipeline._clients[0]
     internal.queued_bytes = 8
     internal.overflow_started_monotonic = time.monotonic() - 1
     pipeline._active = True
 
-    await pipeline._fan_out_encoded_chunk(b"abcd", time.monotonic())  # type: ignore[attr-defined]
+    await pipeline._fan_out_encoded_chunk(b"abcd", time.monotonic())
     with pytest.raises((StopAsyncIteration, asyncio.CancelledError)):
         await asyncio.wait_for(subscribe_task, timeout=1.0)
     await subscriber.aclose()
@@ -315,6 +333,46 @@ async def test_pipeline_closes_evicted_subscriber_cleanly() -> None:
     diagnostics = pipeline.get_diagnostics_snapshot()
     assert diagnostics["active_client_count"] == 0
     assert diagnostics["last_client_detach_monotonic"] is not None
+
+
+@pytest.mark.asyncio
+async def test_primary_establishment_and_health_require_yield_progress() -> None:
+    pipeline = StreamPipeline(
+        "test_sess",
+        "mp3_48k_stereo_320",
+        target_id="tgt_1",
+        transport_heartbeat_window_ms=100,
+        primary_health_require_yield_progress=True,
+    )
+    now = time.monotonic()
+    primary = PipelineSubscriber(
+        subscriber_id=1,
+        queue=asyncio.Queue(),
+        wake_event=asyncio.Event(),
+        attached_monotonic=now,
+        role="primary_renderer",
+        remote_addr="192.168.1.10",
+        user_agent="Sonos/1.0",
+        delivery_path_id="tgt_1",
+        last_successful_enqueue_monotonic=now,
+        last_successful_dequeue_monotonic=now,
+        last_successful_yield_monotonic=None,
+        overflow_started_monotonic=None,
+        overflow_events=0,
+        queued_bytes=0,
+    )
+    pipeline._clients = [primary]
+
+    diagnostics = pipeline.get_diagnostics_snapshot()
+    assert diagnostics["primary_client_count"] == 1
+    assert diagnostics["primary_effective_client_count"] == 0
+    assert diagnostics["primary_delivery_alive"] is False
+    assert diagnostics["subscribers"][0]["is_establishing_candidate"] is True
+
+    primary.last_successful_yield_monotonic = time.monotonic()
+    diagnostics = pipeline.get_diagnostics_snapshot()
+    assert diagnostics["primary_effective_client_count"] == 1
+    assert diagnostics["primary_delivery_alive"] is True
 
 
 @pytest.mark.asyncio

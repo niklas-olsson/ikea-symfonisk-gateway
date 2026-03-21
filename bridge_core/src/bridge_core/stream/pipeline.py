@@ -10,7 +10,7 @@ from collections import deque
 from collections.abc import AsyncGenerator
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ingress_sdk.protocol import AudioFrame
 
@@ -23,9 +23,21 @@ DEFAULT_KEEPALIVE_FRAME_DURATION_MS = 20
 DEFAULT_SOURCE_OUTAGE_GRACE_MS = 5000
 DEFAULT_JITTER_TARGET_MS = 250
 DEFAULT_TRANSPORT_HEARTBEAT_WINDOW_MS = 500
+DEFAULT_DELIVERY_MODE = "stability"
+DEFAULT_PRIMARY_CLIENT_QUEUE_BYTES = 262144
+DEFAULT_PRIMARY_CLIENT_OVERFLOW_GRACE_MS = 1500
+DEFAULT_PRIMARY_CLIENT_MAX_BACKLOG_MS = 1500
+DEFAULT_PRIMARY_CLIENT_QUEUE_BYTES_LIVE = 131072
+DEFAULT_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_LIVE = 750
+DEFAULT_PRIMARY_CLIENT_MAX_BACKLOG_MS_LIVE = 750
+DEFAULT_AUX_CLIENT_QUEUE_BYTES = 131072
+DEFAULT_AUX_CLIENT_OVERFLOW_GRACE_MS = 750
+DEFAULT_AUX_CLIENT_MAX_BACKLOG_MS = 1500
 DEFAULT_CLIENT_QUEUE_BYTES = 131072
 DEFAULT_CLIENT_OVERFLOW_GRACE_MS = 750
+PRIMARY_BACKLOG_WARNING_THRESHOLD_MS = 750.0
 PACING_LOG_INTERVAL_SECONDS = 2.0
+SubscriberRole = Literal["primary_renderer", "auxiliary", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -113,15 +125,40 @@ class JitterBuffer:
 class PipelineSubscriber:
     """Tracks per-subscriber delivery and backlog state."""
 
+    subscriber_id: int
     queue: asyncio.Queue[bytes]
     wake_event: asyncio.Event
     attached_monotonic: float
+    role: SubscriberRole
+    remote_addr: str | None
+    user_agent: str | None
+    delivery_path_id: str | None
     last_successful_enqueue_monotonic: float | None
+    last_successful_dequeue_monotonic: float | None
+    last_successful_yield_monotonic: float | None
     overflow_started_monotonic: float | None
     overflow_events: int
     queued_bytes: int
     closed: bool = False
+
+
+@dataclass(frozen=True)
+class PipelineSubscriberInfo:
+    """Metadata captured from the HTTP subscriber request."""
+
+    role: SubscriberRole = "auxiliary"
+    remote_addr: str | None = None
+    user_agent: str | None = None
     delivery_path_id: str | None = None
+
+
+@dataclass(frozen=True)
+class PipelineClientPolicy:
+    """Backpressure policy for a subscriber role."""
+
+    queue_bytes: int
+    overflow_grace_ms: int
+    max_backlog_ms: int | None
 
 
 class StreamPipeline:
@@ -131,6 +168,7 @@ class StreamPipeline:
         self,
         session_id: str,
         profile_id: str,
+        target_id: str | None = None,
         ffmpeg_path: str = "ffmpeg",
         on_error: Any | None = None,
         keepalive_enabled: bool = True,
@@ -139,9 +177,17 @@ class StreamPipeline:
         keepalive_frame_duration_ms: int = DEFAULT_KEEPALIVE_FRAME_DURATION_MS,
         live_jitter_target_ms: int = DEFAULT_JITTER_TARGET_MS,
         transport_heartbeat_window_ms: int = DEFAULT_TRANSPORT_HEARTBEAT_WINDOW_MS,
-        client_queue_bytes: int = DEFAULT_CLIENT_QUEUE_BYTES,
-        client_overflow_grace_ms: int = DEFAULT_CLIENT_OVERFLOW_GRACE_MS,
+        delivery_mode: Literal["stability", "live"] = "stability",
+        client_queue_bytes: int | None = None,
+        client_overflow_grace_ms: int | None = None,
         client_max_backlog_ms: int | None = None,
+        primary_client_queue_bytes: int | None = None,
+        primary_client_overflow_grace_ms: int | None = None,
+        primary_client_max_backlog_ms: int | None = None,
+        aux_client_queue_bytes: int | None = None,
+        aux_client_overflow_grace_ms: int | None = None,
+        aux_client_max_backlog_ms: int | None = None,
+        primary_health_require_yield_progress: bool = True,
         debug_capture_enabled: bool = False,
         debug_capture_pre_encoder_path: str | None = None,
         debug_capture_post_encoder_path: str | None = None,
@@ -150,6 +196,7 @@ class StreamPipeline:
     ):
         self.session_id = session_id
         self.profile_id = profile_id
+        self.target_id = target_id
         self.ffmpeg_path = ffmpeg_path
         self.on_error = on_error
         self.profile = STREAM_PROFILES[profile_id]
@@ -168,9 +215,20 @@ class StreamPipeline:
         self._frame_duration_ms = self._ffmpeg_input_format.frame_duration_ms
         self._live_jitter_target_ms = live_jitter_target_ms
         self._transport_heartbeat_window_ms = transport_heartbeat_window_ms
-        self._client_queue_bytes = client_queue_bytes
-        self._client_overflow_grace_ms = client_overflow_grace_ms
-        self._client_max_backlog_ms = client_max_backlog_ms
+        self._delivery_mode = delivery_mode
+        self._primary_policy, self._aux_policy = self._resolve_client_policies(
+            delivery_mode=delivery_mode,
+            client_queue_bytes=client_queue_bytes,
+            client_overflow_grace_ms=client_overflow_grace_ms,
+            client_max_backlog_ms=client_max_backlog_ms,
+            primary_client_queue_bytes=primary_client_queue_bytes,
+            primary_client_overflow_grace_ms=primary_client_overflow_grace_ms,
+            primary_client_max_backlog_ms=primary_client_max_backlog_ms,
+            aux_client_queue_bytes=aux_client_queue_bytes,
+            aux_client_overflow_grace_ms=aux_client_overflow_grace_ms,
+            aux_client_max_backlog_ms=aux_client_max_backlog_ms,
+        )
+        self._primary_health_require_yield_progress = primary_health_require_yield_progress
         self._debug_capture_enabled = debug_capture_enabled
         self._debug_capture_pre_encoder_path = debug_capture_pre_encoder_path
         self._debug_capture_post_encoder_path = debug_capture_post_encoder_path
@@ -213,6 +271,16 @@ class StreamPipeline:
         self._backpressure_events_total = 0
         self._client_queue_overflow_events_total = 0
         self._client_stall_disconnects_total = 0
+        self._next_subscriber_id = 0
+        self._first_primary_attach_monotonic: float | None = None
+        self._last_primary_attach_monotonic: float | None = None
+        self._last_primary_enqueue_monotonic: float | None = None
+        self._last_primary_dequeue_monotonic: float | None = None
+        self._last_primary_yield_monotonic: float | None = None
+        self._max_primary_backlog_ms_observed = 0.0
+        self._primary_backlog_warning_emitted = False
+        self._awaiting_primary_resume_yield_since_monotonic: float | None = None
+        self._primary_resume_to_first_successful_yield_ms: float | None = None
 
         self._pre_encoder_debug_writer: Any | None = None
         self._pre_encoder_debug_mode: str | None = None
@@ -227,6 +295,63 @@ class StreamPipeline:
             bytes_per_sample=_bytes_per_sample_for_format(DEFAULT_PCM_SAMPLE_FORMAT),
             frame_duration_ms=frame_duration_ms,
         )
+
+    def _resolve_client_policies(
+        self,
+        *,
+        delivery_mode: Literal["stability", "live"],
+        client_queue_bytes: int | None,
+        client_overflow_grace_ms: int | None,
+        client_max_backlog_ms: int | None,
+        primary_client_queue_bytes: int | None,
+        primary_client_overflow_grace_ms: int | None,
+        primary_client_max_backlog_ms: int | None,
+        aux_client_queue_bytes: int | None,
+        aux_client_overflow_grace_ms: int | None,
+        aux_client_max_backlog_ms: int | None,
+    ) -> tuple[PipelineClientPolicy, PipelineClientPolicy]:
+        if delivery_mode == "live":
+            primary_defaults = PipelineClientPolicy(
+                queue_bytes=DEFAULT_PRIMARY_CLIENT_QUEUE_BYTES_LIVE,
+                overflow_grace_ms=DEFAULT_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_LIVE,
+                max_backlog_ms=DEFAULT_PRIMARY_CLIENT_MAX_BACKLOG_MS_LIVE,
+            )
+        else:
+            primary_defaults = PipelineClientPolicy(
+                queue_bytes=DEFAULT_PRIMARY_CLIENT_QUEUE_BYTES,
+                overflow_grace_ms=DEFAULT_PRIMARY_CLIENT_OVERFLOW_GRACE_MS,
+                max_backlog_ms=DEFAULT_PRIMARY_CLIENT_MAX_BACKLOG_MS,
+            )
+        aux_defaults = PipelineClientPolicy(
+            queue_bytes=DEFAULT_AUX_CLIENT_QUEUE_BYTES,
+            overflow_grace_ms=DEFAULT_AUX_CLIENT_OVERFLOW_GRACE_MS,
+            max_backlog_ms=DEFAULT_AUX_CLIENT_MAX_BACKLOG_MS,
+        )
+
+        # Temporary compatibility for older config keys.
+        if client_queue_bytes is not None:
+            primary_defaults = PipelineClientPolicy(
+                queue_bytes=client_queue_bytes,
+                overflow_grace_ms=client_overflow_grace_ms or DEFAULT_CLIENT_OVERFLOW_GRACE_MS,
+                max_backlog_ms=client_max_backlog_ms,
+            )
+            aux_defaults = PipelineClientPolicy(
+                queue_bytes=client_queue_bytes,
+                overflow_grace_ms=client_overflow_grace_ms or DEFAULT_CLIENT_OVERFLOW_GRACE_MS,
+                max_backlog_ms=client_max_backlog_ms,
+            )
+
+        primary_policy = PipelineClientPolicy(
+            queue_bytes=primary_client_queue_bytes or primary_defaults.queue_bytes,
+            overflow_grace_ms=primary_client_overflow_grace_ms or primary_defaults.overflow_grace_ms,
+            max_backlog_ms=primary_client_max_backlog_ms if primary_client_max_backlog_ms is not None else primary_defaults.max_backlog_ms,
+        )
+        aux_policy = PipelineClientPolicy(
+            queue_bytes=aux_client_queue_bytes or aux_defaults.queue_bytes,
+            overflow_grace_ms=aux_client_overflow_grace_ms or aux_defaults.overflow_grace_ms,
+            max_backlog_ms=aux_client_max_backlog_ms if aux_client_max_backlog_ms is not None else aux_defaults.max_backlog_ms,
+        )
+        return primary_policy, aux_policy
 
     async def start(self) -> None:
         """Start the pipeline and FFmpeg subprocess."""
@@ -385,13 +510,23 @@ class StreamPipeline:
                 logger.exception("Error reading from FFmpeg for session %s", self.session_id)
                 raise
 
-    async def subscribe(self) -> AsyncGenerator[bytes, None]:
+    async def subscribe(self, subscriber_info: PipelineSubscriberInfo | None = None) -> AsyncGenerator[bytes, None]:
         """Subscribe to encoded audio data. Yields chunks of encoded data."""
+        info = subscriber_info or PipelineSubscriberInfo()
+        now = time.monotonic()
+        self._next_subscriber_id += 1
         subscriber = PipelineSubscriber(
+            subscriber_id=self._next_subscriber_id,
             queue=asyncio.Queue(),
             wake_event=asyncio.Event(),
-            attached_monotonic=time.monotonic(),
+            attached_monotonic=now,
+            role=info.role if info.role in {"primary_renderer", "auxiliary", "unknown"} else "unknown",
+            remote_addr=info.remote_addr,
+            user_agent=info.user_agent,
+            delivery_path_id=info.delivery_path_id,
             last_successful_enqueue_monotonic=None,
+            last_successful_dequeue_monotonic=None,
+            last_successful_yield_monotonic=None,
             overflow_started_monotonic=None,
             overflow_events=0,
             queued_bytes=0,
@@ -399,6 +534,19 @@ class StreamPipeline:
         async with self._lock:
             self._clients.append(subscriber)
             self._last_client_attach_monotonic = subscriber.attached_monotonic
+            if self._is_primary_candidate(subscriber):
+                self._last_primary_attach_monotonic = subscriber.attached_monotonic
+                if self._first_primary_attach_monotonic is None:
+                    self._first_primary_attach_monotonic = subscriber.attached_monotonic
+        logger.info(
+            "audio_subscriber_attached session_id=%s subscriber_id=%s role=%s delivery_path_id=%s remote_addr=%s user_agent=%s",
+            self.session_id,
+            subscriber.subscriber_id,
+            subscriber.role,
+            subscriber.delivery_path_id,
+            subscriber.remote_addr,
+            subscriber.user_agent,
+        )
 
         try:
             while True:
@@ -418,9 +566,23 @@ class StreamPipeline:
                 if queue_get not in done:
                     continue
                 data = queue_get.result()
+                dequeue_now = time.monotonic()
                 async with self._lock:
                     subscriber.queued_bytes = max(0, subscriber.queued_bytes - len(data))
+                    subscriber.last_successful_dequeue_monotonic = dequeue_now
+                    if self._is_primary_candidate(subscriber):
+                        self._last_primary_dequeue_monotonic = dequeue_now
                 yield data
+                yield_now = time.monotonic()
+                async with self._lock:
+                    subscriber.last_successful_yield_monotonic = yield_now
+                    if self._is_primary_candidate(subscriber):
+                        self._last_primary_yield_monotonic = yield_now
+                        if self._awaiting_primary_resume_yield_since_monotonic is not None:
+                            self._primary_resume_to_first_successful_yield_ms = (
+                                yield_now - self._awaiting_primary_resume_yield_since_monotonic
+                            ) * 1000
+                            self._awaiting_primary_resume_yield_since_monotonic = None
         finally:
             await self._remove_subscriber(subscriber, reason="subscriber_closed")
 
@@ -429,6 +591,8 @@ class StreamPipeline:
         now = time.monotonic()
         encoded_bytes_emitted_last_window = self._encoded_bytes_emitted_last_window(now)
         effective_client_count = self._effective_client_count(now)
+        primary_client_count = self._primary_client_count(now)
+        primary_effective_client_count = self._primary_effective_client_count(now)
         return {
             "keepalive_active": self._keepalive_active,
             "source_outage_active": self._source_outage_active,
@@ -455,12 +619,24 @@ class StreamPipeline:
             "last_client_stall_disconnect_monotonic": self._last_client_stall_disconnect_monotonic,
             "active_client_count": len(self._clients),
             "effective_client_count": effective_client_count,
+            "primary_client_count": primary_client_count,
+            "primary_effective_client_count": primary_effective_client_count,
+            "primary_delivery_alive": primary_effective_client_count > 0,
+            "first_primary_attach_after_session_start_ms": self._elapsed_since_start_ms(self._first_primary_attach_monotonic),
+            "last_primary_attach_monotonic": self._last_primary_attach_monotonic,
+            "last_primary_enqueue_monotonic": self._last_primary_enqueue_monotonic,
+            "last_primary_dequeue_monotonic": self._last_primary_dequeue_monotonic,
+            "last_primary_yield_monotonic": self._last_primary_yield_monotonic,
+            "primary_resume_to_first_successful_yield_ms": self._primary_resume_to_first_successful_yield_ms,
+            "max_primary_backlog_ms_observed": self._max_primary_backlog_ms_observed,
+            "delivery_mode": self._delivery_mode,
             "encoded_bytes_emitted_total": self._encoded_bytes_emitted_total,
             "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
             "backpressure_events_total": self._backpressure_events_total,
             "client_queue_overflow_events_total": self._client_queue_overflow_events_total,
             "client_stall_disconnects_total": self._client_stall_disconnects_total,
             "transport_alive": self._is_transport_alive(now, encoded_bytes_emitted_last_window),
+            "subscribers": [self._subscriber_snapshot(subscriber, now) for subscriber in self._clients],
             "first_encoded_output_after_session_start_ms": self._elapsed_since_start_ms(self._first_encoded_output_monotonic),
             "first_real_encoded_output_after_session_start_ms": self._elapsed_since_start_ms(self._first_real_encoded_output_monotonic),
             "first_keepalive_encoded_output_after_session_start_ms": self._elapsed_since_start_ms(
@@ -481,6 +657,19 @@ class StreamPipeline:
             for subscriber in list(self._clients):
                 if subscriber.closed:
                     continue
+                backlog_ms = self._estimate_backlog_ms(subscriber.queued_bytes + len(data), now)
+                if self._is_primary_candidate(subscriber) and isinstance(backlog_ms, (int, float)):
+                    self._max_primary_backlog_ms_observed = max(self._max_primary_backlog_ms_observed, backlog_ms)
+                    if backlog_ms > PRIMARY_BACKLOG_WARNING_THRESHOLD_MS and not self._primary_backlog_warning_emitted:
+                        logger.warning(
+                            "audio_primary_backlog_warning session_id=%s subscriber_id=%s backlog_ms=%.1f queued_bytes=%s",
+                            self.session_id,
+                            subscriber.subscriber_id,
+                            backlog_ms,
+                            subscriber.queued_bytes,
+                        )
+                        self._primary_backlog_warning_emitted = True
+
                 if self._subscriber_is_overflowing(subscriber, len(data), now):
                     self._backpressure_events_total += 1
                     self._client_queue_overflow_events_total += 1
@@ -488,16 +677,37 @@ class StreamPipeline:
                     subscriber.overflow_events += 1
                     if subscriber.overflow_started_monotonic is None:
                         subscriber.overflow_started_monotonic = now
+                        logger.info(
+                            "audio_subscriber_backpressure_started session_id=%s subscriber_id=%s role=%s delivery_path_id=%s queued_bytes=%s estimated_backlog_ms=%s",
+                            self.session_id,
+                            subscriber.subscriber_id,
+                            subscriber.role,
+                            subscriber.delivery_path_id,
+                            subscriber.queued_bytes,
+                            backlog_ms,
+                        )
                     overflow_age_ms = (now - subscriber.overflow_started_monotonic) * 1000
-                    if overflow_age_ms >= self._client_overflow_grace_ms:
+                    if overflow_age_ms >= self._policy_for_subscriber(subscriber).overflow_grace_ms:
                         to_evict.append(subscriber)
                         continue
                 else:
+                    if subscriber.overflow_started_monotonic is not None:
+                        logger.info(
+                            "audio_subscriber_backpressure_cleared session_id=%s subscriber_id=%s role=%s delivery_path_id=%s queued_bytes=%s estimated_backlog_ms=%s",
+                            self.session_id,
+                            subscriber.subscriber_id,
+                            subscriber.role,
+                            subscriber.delivery_path_id,
+                            subscriber.queued_bytes,
+                            backlog_ms,
+                        )
                     subscriber.overflow_started_monotonic = None
 
                 subscriber.queue.put_nowait(data)
                 subscriber.queued_bytes += len(data)
                 subscriber.last_successful_enqueue_monotonic = now
+                if self._is_primary_candidate(subscriber):
+                    self._last_primary_enqueue_monotonic = now
                 subscriber.wake_event.set()
                 delivered = True
 
@@ -508,13 +718,14 @@ class StreamPipeline:
             await self._evict_subscriber(subscriber, now)
 
     def _subscriber_is_overflowing(self, subscriber: PipelineSubscriber, incoming_bytes: int, now: float) -> bool:
+        policy = self._policy_for_subscriber(subscriber)
         next_queued_bytes = subscriber.queued_bytes + incoming_bytes
-        if next_queued_bytes > self._client_queue_bytes:
+        if next_queued_bytes > policy.queue_bytes:
             return True
-        if self._client_max_backlog_ms is None:
+        if policy.max_backlog_ms is None:
             return False
         backlog_ms = self._estimate_backlog_ms(next_queued_bytes, now)
-        return backlog_ms is not None and backlog_ms > self._client_max_backlog_ms
+        return backlog_ms is not None and backlog_ms > policy.max_backlog_ms
 
     def _estimate_backlog_ms(self, queued_bytes: int, now: float) -> float | None:
         encoded_bytes_emitted_last_window = self._encoded_bytes_emitted_last_window(now)
@@ -537,6 +748,91 @@ class StreamPipeline:
                 count += 1
         return count
 
+    def _primary_client_count(self, now: float) -> int:
+        del now
+        return sum(1 for subscriber in self._clients if self._is_primary_candidate(subscriber) and not subscriber.closed)
+
+    def _primary_effective_client_count(self, now: float) -> int:
+        return sum(1 for subscriber in self._clients if self._subscriber_primary_healthy(subscriber, now))
+
+    def _policy_for_subscriber(self, subscriber: PipelineSubscriber) -> PipelineClientPolicy:
+        if subscriber.role == "primary_renderer":
+            return self._primary_policy
+        return self._aux_policy
+
+    def _is_primary_candidate(self, subscriber: PipelineSubscriber) -> bool:
+        return (
+            not subscriber.closed
+            and subscriber.role == "primary_renderer"
+            and self.target_id is not None
+            and subscriber.delivery_path_id == self.target_id
+        )
+
+    def _subscriber_primary_healthy(self, subscriber: PipelineSubscriber, now: float) -> bool:
+        if not self._is_primary_candidate(subscriber):
+            return False
+        if subscriber.last_successful_enqueue_monotonic is None:
+            return False
+        heartbeat_window_seconds = self._transport_heartbeat_window_ms / 1000
+        if (now - subscriber.last_successful_enqueue_monotonic) > heartbeat_window_seconds:
+            return False
+        if subscriber.last_successful_dequeue_monotonic is None and subscriber.last_successful_yield_monotonic is None:
+            return False
+        latest_progress = max(
+            [marker for marker in (subscriber.last_successful_dequeue_monotonic, subscriber.last_successful_yield_monotonic) if marker is not None],
+            default=None,
+        )
+        if latest_progress is None or (now - latest_progress) > heartbeat_window_seconds:
+            return False
+        if self._primary_health_require_yield_progress:
+            if subscriber.last_successful_yield_monotonic is None or (now - subscriber.last_successful_yield_monotonic) > heartbeat_window_seconds:
+                return False
+        if self._subscriber_is_past_overflow_grace(subscriber, now):
+            return False
+        backlog_ms = self._estimate_backlog_ms(subscriber.queued_bytes, now)
+        policy = self._policy_for_subscriber(subscriber)
+        if subscriber.queued_bytes > policy.queue_bytes:
+            return False
+        return backlog_ms is None or policy.max_backlog_ms is None or backlog_ms <= policy.max_backlog_ms
+
+    def _subscriber_is_establishing_candidate(self, subscriber: PipelineSubscriber, now: float) -> bool:
+        if not self._is_primary_candidate(subscriber):
+            return False
+        if subscriber.last_successful_enqueue_monotonic is None:
+            return False
+        heartbeat_window_seconds = self._transport_heartbeat_window_ms / 1000
+        if (now - subscriber.attached_monotonic) > heartbeat_window_seconds:
+            return False
+        if (now - subscriber.last_successful_enqueue_monotonic) > heartbeat_window_seconds:
+            return False
+        return not self._subscriber_is_past_overflow_grace(subscriber, now)
+
+    def _subscriber_is_past_overflow_grace(self, subscriber: PipelineSubscriber, now: float) -> bool:
+        if subscriber.overflow_started_monotonic is None:
+            return False
+        return (now - subscriber.overflow_started_monotonic) * 1000 >= self._policy_for_subscriber(subscriber).overflow_grace_ms
+
+    def _subscriber_snapshot(self, subscriber: PipelineSubscriber, now: float) -> dict[str, Any]:
+        return {
+            "subscriber_id": subscriber.subscriber_id,
+            "role": subscriber.role,
+            "delivery_path_id": subscriber.delivery_path_id,
+            "remote_addr": subscriber.remote_addr,
+            "user_agent": subscriber.user_agent,
+            "attached_monotonic": subscriber.attached_monotonic,
+            "last_successful_enqueue_monotonic": subscriber.last_successful_enqueue_monotonic,
+            "last_successful_dequeue_monotonic": subscriber.last_successful_dequeue_monotonic,
+            "last_successful_yield_monotonic": subscriber.last_successful_yield_monotonic,
+            "overflow_started_monotonic": subscriber.overflow_started_monotonic,
+            "overflow_events": subscriber.overflow_events,
+            "queued_bytes": subscriber.queued_bytes,
+            "estimated_backlog_ms": self._estimate_backlog_ms(subscriber.queued_bytes, now),
+            "closed": subscriber.closed,
+            "is_primary_candidate": self._is_primary_candidate(subscriber),
+            "is_establishing_candidate": self._subscriber_is_establishing_candidate(subscriber, now),
+            "is_primary_healthy": self._subscriber_primary_healthy(subscriber, now),
+        }
+
     async def _evict_subscriber(self, subscriber: PipelineSubscriber, now: float) -> None:
         async with self._lock:
             if subscriber.closed:
@@ -555,6 +851,15 @@ class StreamPipeline:
                 self._clients.remove(subscriber)
             self._last_client_detach_monotonic = now
             subscriber.wake_event.set()
+        logger.warning(
+            "audio_subscriber_evicted session_id=%s subscriber_id=%s role=%s delivery_path_id=%s queued_bytes=%s overflow_events=%s",
+            self.session_id,
+            subscriber.subscriber_id,
+            subscriber.role,
+            subscriber.delivery_path_id,
+            subscriber.queued_bytes,
+            subscriber.overflow_events,
+        )
 
     async def _remove_subscriber(self, subscriber: PipelineSubscriber, *, reason: str) -> None:
         del reason
@@ -643,6 +948,7 @@ class StreamPipeline:
             self._ffmpeg_stdin_write_errors += 1
             raise
 
+        was_silence_before = self._last_encoder_write_was_silence
         self._encoder_write_count += 1
         self._last_encoder_write_monotonic = now
         self._last_stdin_write_monotonic = now
@@ -651,6 +957,8 @@ class StreamPipeline:
             self._silence_frames_written += 1
             self._awaiting_keepalive_encoded_output = True
         else:
+            if self._keepalive_active or self._runtime_mode != "active" or was_silence_before:
+                self._awaiting_primary_resume_yield_since_monotonic = now
             self._real_frames_written += 1
             self._awaiting_real_encoded_output = True
         self._write_pre_encoder_debug(data)
@@ -670,7 +978,7 @@ class StreamPipeline:
 
     def _log_format_audit(self) -> None:
         logger.info(
-            "audio_format_audit session_id=%s sample_format=%s sample_rate=%s channels=%s bytes_per_sample=%s frame_duration_ms=%s bytes_per_frame=%s live_jitter_target_ms=%s transport_heartbeat_window_ms=%s",
+            "audio_format_audit session_id=%s sample_format=%s sample_rate=%s channels=%s bytes_per_sample=%s frame_duration_ms=%s bytes_per_frame=%s live_jitter_target_ms=%s transport_heartbeat_window_ms=%s delivery_mode=%s primary_policy=%s aux_policy=%s",
             self.session_id,
             self._ffmpeg_input_format.sample_format,
             self._ffmpeg_input_format.sample_rate,
@@ -680,6 +988,9 @@ class StreamPipeline:
             self._ffmpeg_input_format.bytes_per_frame,
             self._live_jitter_target_ms,
             self._transport_heartbeat_window_ms,
+            self._delivery_mode,
+            asdict(self._primary_policy),
+            asdict(self._aux_policy),
         )
 
     def _evict_old_stdout_window_samples(self, now: float) -> None:
