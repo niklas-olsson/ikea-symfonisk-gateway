@@ -1,13 +1,13 @@
 import sys
 
-import requests
+import httpx
 
 
-def verify_system_health(base_url: str = "http://localhost:8732"):
+def verify_system_health(base_url: str = "http://localhost:8732") -> None:
     print(f"Starting SYMFONISK Bridge System Verification via {base_url}/health...")
 
     try:
-        response = requests.get(f"{base_url}/health", timeout=5)
+        response = httpx.get(f"{base_url}/health", timeout=5.0)
         response.raise_for_status()
         health_data = response.json()
     except Exception as e:

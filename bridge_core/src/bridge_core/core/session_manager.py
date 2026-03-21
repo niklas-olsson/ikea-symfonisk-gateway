@@ -227,7 +227,7 @@ class Session:
                 else None,
                 "keepalive_active": bool(diagnostics.get("keepalive_active", False)),
                 "jitter_buffer_size_ms": float(diagnostics.get("jitter_buffer_size_ms") or 0.0),
-                "source_health": source_health.model_dump() if hasattr(source_health, "model_dump") else source_health,
+                "source_health": source_health.model_dump() if (source_health is not None and hasattr(source_health, "model_dump")) else source_health,
             },
         }
 
