@@ -609,6 +609,18 @@
                         <option value="">Loading targets...</option>
                     </select>
                 </div>
+                <div class="field">
+                    <div class="field-header">
+                        <label for="delivery-profile-select">Delivery Profile</label>
+                    </div>
+                    <select id="delivery-profile-select">
+                        <option value="stable">Stable</option>
+                        <option value="experimental">Experimental</option>
+                    </select>
+                    <label id="delivery-profile-note" for="delivery-profile-select" style="text-transform: none; letter-spacing: 0; font-size: 0.8rem; display: none;">
+                        Lower latency, reduced buffering, may fall back to Stable if delivery becomes unstable.
+                    </label>
+                </div>
             </div>
 
             <div class="actions">
@@ -635,6 +647,8 @@
         // ── Session UI refs ────────────────────────────────
         const sourceSelect = document.getElementById('source-select');
         const targetSelect = document.getElementById('target-select');
+        const deliveryProfileSelect = document.getElementById('delivery-profile-select');
+        const deliveryProfileNote = document.getElementById('delivery-profile-note');
         const playBtn = document.getElementById('play-btn');
         const stopBtn = document.getElementById('stop-btn');
         const sessionState = document.getElementById('session-state');
@@ -648,6 +662,35 @@
         let btPairingTotalSeconds = 90;
         let btPairingRemainingSeconds = 0;
         let btPreferredMac = null;
+
+        function updateDeliveryProfileUI() {
+            deliveryProfileNote.style.display = deliveryProfileSelect.value === 'experimental' ? 'block' : 'none';
+        }
+
+        async function loadDeliveryProfile() {
+            try {
+                const res = await fetch('/v1/config/audio_delivery_profile');
+                if (res.ok) {
+                    const { value } = await res.json();
+                    deliveryProfileSelect.value = value === 'experimental' ? 'experimental' : 'stable';
+                } else {
+                    deliveryProfileSelect.value = 'stable';
+                }
+            } catch (err) {
+                deliveryProfileSelect.value = 'stable';
+            }
+            updateDeliveryProfileUI();
+        }
+
+        async function persistDeliveryProfile() {
+            const value = deliveryProfileSelect.value === 'experimental' ? 'experimental' : 'stable';
+            await fetch('/v1/config/audio_delivery_profile', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value })
+            });
+            updateDeliveryProfileUI();
+        }
 
         // ── Session functions ──────────────────────────────
 
@@ -701,6 +744,7 @@
             addLog('SYSTEM', 'Creating session...');
 
             try {
+                await persistDeliveryProfile();
                 const createRes = await fetch('/v1/sessions', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1177,6 +1221,7 @@
 
         // ── Initialize ─────────────────────────────────────
 
+        loadDeliveryProfile();
         fetchSources();
         fetchTargets();
         btFetchStatus();
@@ -1185,6 +1230,12 @@
 
         playBtn.onclick = createAndStartSession;
         stopBtn.onclick = stopCurrentSession;
+        deliveryProfileSelect.onchange = () => {
+            persistDeliveryProfile().catch(err => {
+                console.error('Failed to persist delivery profile', err);
+                addLog('ERROR', 'Failed to save delivery profile');
+            });
+        };
         refreshSourcesBtn.onclick = fetchSources;
         refreshTargetsBtn.onclick = refreshTargets;
 

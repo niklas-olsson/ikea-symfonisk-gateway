@@ -2,7 +2,6 @@
 
 import asyncio
 import time
-from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -402,7 +401,167 @@ async def test_session_manager_passes_pipeline_runtime_config(
     assert kwargs["debug_capture_pre_encoder_path"] == "/tmp/pre.wav"
     assert kwargs["debug_capture_post_encoder_path"] == "/tmp/post.mp3"
     assert kwargs["debug_pacing_logs_enabled"] is True
+    assert kwargs["delivery_profile"] == "stable"
     assert "source_health_provider" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_delivery_profile_defaults_to_stable_for_linux_and_windows_sources(
+    event_bus: EventBus,
+    source_registry: MagicMock,
+    target_registry: MagicMock,
+    stream_publisher: MagicMock,
+) -> None:
+    manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher)
+
+    source_registry.resolve_source.side_effect = [
+        MagicMock(
+            source=SourceDescriptor(
+                source_id="linux-audio:default",
+                source_type=SourceType.SYSTEM_OUTPUT,
+                display_name="Linux Audio",
+                platform="linux",
+                capabilities=SourceCapabilities(),
+            )
+        ),
+        MagicMock(
+            source=SourceDescriptor(
+                source_id="windows-audio-adapter:system:default",
+                source_type=SourceType.SYSTEM_OUTPUT,
+                display_name="Windows Audio",
+                platform="windows",
+                capabilities=SourceCapabilities(),
+            )
+        ),
+    ]
+
+    linux_kwargs = manager._build_pipeline_kwargs("linux-audio:default")
+    windows_kwargs = manager._build_pipeline_kwargs("windows-audio-adapter:system:default")
+
+    for kwargs in (linux_kwargs, windows_kwargs):
+        assert kwargs["delivery_profile"] == "stable"
+        assert kwargs["keepalive_idle_threshold_ms"] == 200
+        assert kwargs["keepalive_frame_duration_ms"] == 20
+        assert kwargs["live_jitter_target_ms"] == 250
+        assert kwargs["transport_heartbeat_window_ms"] == 500
+        assert kwargs["primary_client_queue_bytes"] == 262144
+        assert kwargs["primary_client_overflow_grace_ms"] == 1500
+        assert kwargs["primary_client_max_backlog_ms"] == 1500
+
+
+def test_source_override_profile_beats_global_profile(
+    event_bus: EventBus,
+    source_registry: MagicMock,
+    target_registry: MagicMock,
+    stream_publisher: MagicMock,
+) -> None:
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_delivery_profile": "stable",
+        "audio_delivery_profile_overrides": {"src_1": "experimental"},
+    }.get(key, default)
+    manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
+
+    assert manager._resolve_delivery_profile_for_source("src_1") == "experimental"
+    assert manager._resolve_delivery_profile_for_source("src_2") == "stable"
+
+
+def test_invalid_source_override_falls_back_to_global_then_stable(
+    event_bus: EventBus,
+    source_registry: MagicMock,
+    target_registry: MagicMock,
+    stream_publisher: MagicMock,
+) -> None:
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_delivery_profile": "experimental",
+        "audio_delivery_profile_overrides": {"src_1": "nope"},
+    }.get(key, default)
+    manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
+
+    assert manager._resolve_delivery_profile_for_source("src_1") == "experimental"
+
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_delivery_profile": "bogus",
+        "audio_delivery_profile_overrides": {"src_1": "nope"},
+    }.get(key, default)
+    assert manager._resolve_delivery_profile_for_source("src_1") == "stable"
+
+
+def test_malformed_profile_override_map_is_ignored_safely(
+    event_bus: EventBus,
+    source_registry: MagicMock,
+    target_registry: MagicMock,
+    stream_publisher: MagicMock,
+) -> None:
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_delivery_profile": "experimental",
+        "audio_delivery_profile_overrides": ["bad", "shape"],
+    }.get(key, default)
+    manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
+    assert manager._get_delivery_profile_overrides() == {}
+    assert manager._resolve_delivery_profile_for_source("src_1") == "experimental"
+
+
+def test_legacy_live_keys_do_not_poison_stable_when_profile_unset(
+    event_bus: EventBus,
+    source_registry: MagicMock,
+    target_registry: MagicMock,
+    stream_publisher: MagicMock,
+) -> None:
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_delivery_mode": "live",
+    }.get(key, default)
+    manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
+
+    kwargs = manager._build_pipeline_kwargs("src_1")
+    assert kwargs["delivery_profile"] == "stable"
+    assert kwargs["transport_heartbeat_window_ms"] == 500
+
+
+def test_global_advanced_override_applies_without_changing_selected_profile(
+    event_bus: EventBus,
+    source_registry: MagicMock,
+    target_registry: MagicMock,
+    stream_publisher: MagicMock,
+) -> None:
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_transport_heartbeat_window_ms": 900,
+    }.get(key, default)
+    manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
+
+    kwargs = manager._build_pipeline_kwargs("src_1")
+    assert manager._resolve_delivery_profile_for_source("src_1") == "stable"
+    assert kwargs["delivery_profile"] == "stable"
+    assert kwargs["transport_heartbeat_window_ms"] == 900
+
+
+@pytest.mark.asyncio
+async def test_experimental_profile_applies_shared_defaults_across_platforms(
+    event_bus: EventBus,
+    source_registry: MagicMock,
+    target_registry: MagicMock,
+    stream_publisher: MagicMock,
+) -> None:
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_delivery_profile": "experimental",
+    }.get(key, default)
+    manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
+
+    for source_id in ("linux-audio:default", "windows-audio-adapter:system:default"):
+        kwargs = manager._build_pipeline_kwargs(source_id)
+        assert kwargs["delivery_profile"] == "experimental"
+        assert kwargs["keepalive_idle_threshold_ms"] == 100
+        assert kwargs["keepalive_frame_duration_ms"] == 10
+        assert kwargs["live_jitter_target_ms"] == 60
+        assert kwargs["transport_heartbeat_window_ms"] == 750
+        assert kwargs["primary_client_queue_bytes"] == 131072
+        assert kwargs["primary_client_overflow_grace_ms"] == 750
+        assert kwargs["primary_client_max_backlog_ms"] == 750
 
 
 @pytest.mark.asyncio
@@ -1000,6 +1159,7 @@ async def test_client_detach_does_not_degrade_healthy_stream(
     config_store.get.side_effect = lambda key, default=None: {
         "audio_transport_heartbeat_window_ms": 100,
         "audio_primary_attach_grace_ms": 100,
+        "audio_stable_primary_detach_grace_ms": 200,
     }.get(key, default)
 
     manager = SessionManager(
@@ -1126,6 +1286,7 @@ async def test_normal_reconnect_churn_remains_non_fatal(
     config_store.get.side_effect = lambda key, default=None: {
         "audio_transport_heartbeat_window_ms": 100,
         "audio_primary_attach_grace_ms": 100,
+        "audio_stable_primary_detach_grace_ms": 200,
     }.get(key, default)
 
     manager = SessionManager(
@@ -1271,6 +1432,7 @@ async def test_last_effective_delivery_path_loss_degrades_and_replays(
     config_store.get.side_effect = lambda key, default=None: {
         "audio_transport_heartbeat_window_ms": 100,
         "audio_primary_attach_grace_ms": 100,
+        "audio_stable_primary_detach_grace_ms": 200,
     }.get(key, default)
 
     manager = SessionManager(
@@ -1370,16 +1532,13 @@ async def test_last_effective_delivery_path_loss_degrades_and_replays(
         mock_pipeline.stop = AsyncMock()
         mock_pipeline.jitter_buffer = MagicMock()
         mock_pipeline.jitter_buffer.size_ms = 0.0
-        sequence: list[dict[str, Any] | Callable[[], dict[str, Any]]] = [healthy, healthy, detached, detached, detached, detached]
+        started_at = time.monotonic()
 
         def next_snapshot() -> dict[str, Any]:
             if target_registry.play_stream.await_count >= 2:
                 return replayed()
-            if sequence:
-                entry = sequence.pop(0)
-                if callable(entry):
-                    return entry()
-                return entry
+            if (time.monotonic() - started_at) < 0.35:
+                return healthy
             return detached()
 
         mock_pipeline.get_diagnostics_snapshot.side_effect = next_snapshot
@@ -1855,3 +2014,227 @@ async def test_primary_extended_silence_survives_without_heal(
     assert session.media_reason is None
     assert target_registry.play_stream.await_count == 1
     await manager.stop_session(session.session_id)
+
+
+def _primary_delivery_snapshot(*, delivery_alive: bool, now: float | None = None) -> dict[str, Any]:
+    current = now or time.monotonic()
+    primary_effective_count = 1 if delivery_alive else 0
+    subscribers = (
+        [
+            {
+                "subscriber_id": 1,
+                "role": "primary_renderer",
+                "delivery_path_id": "tgt_1",
+                "remote_addr": "192.168.1.10",
+                "user_agent": "Sonos/1.0",
+                "attached_monotonic": current - 1,
+                "last_successful_enqueue_monotonic": current,
+                "last_successful_dequeue_monotonic": current if delivery_alive else current - 1,
+                "last_successful_yield_monotonic": current if delivery_alive else current - 1,
+                "overflow_started_monotonic": None,
+                "overflow_events": 0,
+                "queued_bytes": 0,
+                "estimated_backlog_ms": 10.0,
+                "closed": False,
+                "is_primary_candidate": True,
+                "is_establishing_candidate": False,
+                "is_primary_healthy": delivery_alive,
+            }
+        ]
+        if delivery_alive
+        else []
+    )
+    return {
+        "real_frames_written": 3,
+        "silence_frames_written": 0,
+        "runtime_mode": "active",
+        "last_real_frame_age_ms": 5.0,
+        "keepalive_to_first_real_frame_ms": None,
+        "first_keepalive_encoded_output_after_session_start_ms": 15.0,
+        "first_real_encoded_output_after_session_start_ms": 20.0,
+        "transport_alive": True,
+        "encoded_bytes_emitted_total": 1024,
+        "encoded_bytes_emitted_last_window": 512,
+        "last_stdout_read_monotonic": current,
+        "last_stdin_write_monotonic": current,
+        "keepalive_active": False,
+        "active_client_count": 1 if delivery_alive else 0,
+        "effective_client_count": 1 if delivery_alive else 0,
+        "primary_client_count": 1 if delivery_alive else 0,
+        "primary_effective_client_count": primary_effective_count,
+        "primary_delivery_alive": delivery_alive,
+        "last_client_fanout_monotonic": current if delivery_alive else current - 1,
+        "last_client_attach_monotonic": current - 1,
+        "last_client_detach_monotonic": None if delivery_alive else current,
+        "last_primary_attach_monotonic": current - 1,
+        "last_primary_enqueue_monotonic": current,
+        "last_primary_dequeue_monotonic": current if delivery_alive else current - 1,
+        "last_primary_yield_monotonic": current if delivery_alive else current - 1,
+        "client_stall_disconnects_total": 0,
+        "max_primary_backlog_ms_observed": 10.0,
+        "subscribers": subscribers,
+        "running_delivery_profile": "experimental",
+    }
+
+
+@pytest.mark.asyncio
+async def test_primary_detach_recovers_within_grace_without_replay(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="src_1",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        )
+    )
+    source_registry.probe_source_health.return_value = MagicMock(healthy=True, signal_present=True, source_state="active", last_error=None, details={"callback_count": 5, "frames_emitted": 5})
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_primary_attach_grace_ms": 100,
+        "audio_stable_primary_detach_grace_ms": 1000,
+    }.get(key, default)
+    manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
+    session = manager.create(source_id="src_1", target_id="tgt_1")
+
+    healthy = _primary_delivery_snapshot(delivery_alive=True)
+    detached = _primary_delivery_snapshot(delivery_alive=False)
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        started_at = time.monotonic()
+
+        def diagnostics_snapshot() -> dict[str, Any]:
+            elapsed = time.monotonic() - started_at
+            if elapsed < 0.35:
+                return healthy
+            if elapsed < 0.65:
+                return detached
+            return healthy
+
+        mock_pipeline.get_diagnostics_snapshot.side_effect = diagnostics_snapshot
+        with patch.object(manager, "_schedule_media_plane_heal") as heal_mock:
+            success = await manager.start_session(session.session_id)
+            assert success is True
+            await asyncio.sleep(0.8)
+        heal_mock.assert_not_called()
+
+    assert session.state == SessionState.PLAYING
+    assert session.primary_detach_events_total >= 1
+    assert session.primary_detach_grace_recoveries_total >= 1
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_primary_detach_beyond_grace_with_auto_heal_false_degrades_without_replay(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="src_1",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        )
+    )
+    source_registry.probe_source_health.return_value = MagicMock(healthy=True, signal_present=True, source_state="active", last_error=None, details={"callback_count": 5, "frames_emitted": 5})
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_primary_attach_grace_ms": 100,
+        "audio_stable_primary_detach_grace_ms": 200,
+    }.get(key, default)
+    manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
+    session = manager.create(source_id="src_1", target_id="tgt_1", auto_heal=False)
+
+    healthy = _primary_delivery_snapshot(delivery_alive=True)
+    detached = _primary_delivery_snapshot(delivery_alive=False)
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        started_at = time.monotonic()
+
+        def diagnostics_snapshot() -> dict[str, Any]:
+            elapsed = time.monotonic() - started_at
+            if elapsed < 0.35:
+                return healthy
+            return detached
+
+        mock_pipeline.get_diagnostics_snapshot.side_effect = diagnostics_snapshot
+        with patch.object(manager, "_schedule_media_plane_heal") as heal_mock:
+            success = await manager.start_session(session.session_id)
+            assert success is True
+            await asyncio.sleep(1.3)
+        heal_mock.assert_not_called()
+
+    assert session.state == SessionState.DEGRADED
+    assert session.primary_detach_events_total >= 1
+    assert session.primary_detach_escalations_total == 1
+    await manager.stop_session(session.session_id)
+
+
+def test_media_status_prefers_session_profile_fields_over_pipeline_diagnostics(session_manager: SessionManager) -> None:
+    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session.delivery_profile = "experimental"
+    session.effective_delivery_profile = "stable"
+    session.auto_fell_back_to_stable = True
+    session.fallback_reason = "repeated_primary_detach"
+    session.primary_detach_events_total = 2
+    session.primary_detach_grace_recoveries_total = 1
+    session.primary_detach_escalations_total = 1
+    session.pipeline = MagicMock(spec=StreamPipeline)
+    session.pipeline.get_diagnostics_snapshot.return_value = {
+        "delivery_profile": "experimental",
+        "running_delivery_profile": "experimental",
+        "transport_alive": True,
+    }
+
+    payload = session.to_dict()
+    media_status = payload["media_status"]
+    assert media_status["delivery_profile"] == "experimental"
+    assert media_status["effective_delivery_profile"] == "stable"
+    assert media_status["running_delivery_profile"] == "experimental"
+    assert media_status["auto_fell_back_to_stable"] is True
+    assert media_status["fallback_reason"] == "repeated_primary_detach"
+
+
+def test_auto_fallback_records_reason_and_sets_authoritative_session_fields(session_manager: SessionManager) -> None:
+    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session.effective_delivery_profile = "experimental"
+    now = time.monotonic()
+    session.recent_primary_detach_times_monotonic.extend([now - 10, now - 5])
+
+    should_fallback, reason = session_manager._should_fallback_to_stable(session, now)
+
+    assert should_fallback is True
+    assert reason == "repeated_primary_detach"
+    session_manager._apply_delivery_profile_fallback(session, reason)
+    assert session.effective_delivery_profile == "stable"
+    assert session.auto_fell_back_to_stable is True
+    assert session.fallback_reason == "repeated_primary_detach"

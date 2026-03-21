@@ -3,8 +3,10 @@
 import asyncio
 import logging
 import time
+from collections import deque
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from ingress_sdk.protocol import AudioFrame
@@ -30,23 +32,28 @@ from bridge_core.stream.utils import resolve_ffmpeg_path
 
 logger = logging.getLogger(__name__)
 AUDIO_KEEPALIVE_ENABLED_DEFAULT = True
-AUDIO_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 100
-AUDIO_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 10
+AUDIO_STABLE_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 200
+AUDIO_STABLE_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 20
+AUDIO_EXPERIMENTAL_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 100
+AUDIO_EXPERIMENTAL_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 10
 AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT = 5000
-AUDIO_LIVE_JITTER_TARGET_MS_DEFAULT = 60
+AUDIO_STABLE_LIVE_JITTER_TARGET_MS_DEFAULT = 250
+AUDIO_EXPERIMENTAL_LIVE_JITTER_TARGET_MS_DEFAULT = 60
 AUDIO_LIVE_STARTUP_ALLOW_SILENT_SOURCE_DEFAULT = True
 AUDIO_LIVE_STARTUP_VIABILITY_TIMEOUT_MS_DEFAULT = 1000
-AUDIO_DELIVERY_MODE_DEFAULT = "stability"
+AUDIO_DELIVERY_PROFILE_DEFAULT = "stable"
 AUDIO_AUTO_HEAL_DELIVERY_ENABLED_DEFAULT = True
 AUDIO_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT = True
-AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT = 1000
-AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_LIVE_DEFAULT = 750
-AUDIO_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT = 262144
-AUDIO_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 1500
-AUDIO_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT = 1500
-AUDIO_PRIMARY_CLIENT_QUEUE_BYTES_LIVE_DEFAULT = 131072
-AUDIO_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_LIVE_DEFAULT = 750
-AUDIO_PRIMARY_CLIENT_MAX_BACKLOG_MS_LIVE_DEFAULT = 750
+AUDIO_STABLE_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT = 500
+AUDIO_EXPERIMENTAL_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT = 750
+AUDIO_STABLE_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT = 262144
+AUDIO_STABLE_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 1500
+AUDIO_STABLE_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT = 1500
+AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT = 131072
+AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 750
+AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT = 750
+AUDIO_STABLE_PRIMARY_DETACH_GRACE_MS_DEFAULT = 10000
+AUDIO_EXPERIMENTAL_PRIMARY_DETACH_GRACE_MS_DEFAULT = 5000
 AUDIO_AUX_CLIENT_QUEUE_BYTES_DEFAULT = 131072
 AUDIO_AUX_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 750
 AUDIO_AUX_CLIENT_MAX_BACKLOG_MS_DEFAULT = 1500
@@ -56,10 +63,21 @@ AUDIO_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 750
 AUDIO_CLIENT_MAX_BACKLOG_MS_DEFAULT = 1500
 AUDIO_DEBUG_CAPTURE_ENABLED_DEFAULT = False
 AUDIO_DEBUG_PACING_LOGS_ENABLED_DEFAULT = False
-COMPAT_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 200
-COMPAT_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 20
-COMPAT_JITTER_TARGET_MS_DEFAULT = 250
 WINDOWS_SOURCE_ACTIVITY_WATCHDOG_MS_DEFAULT = 15000
+DeliveryProfile = Literal["stable", "experimental"]
+
+
+@dataclass(frozen=True)
+class DeliveryProfileDefaults:
+    delivery_profile: DeliveryProfile
+    keepalive_idle_threshold_ms: int
+    keepalive_frame_duration_ms: int
+    live_jitter_target_ms: int
+    transport_heartbeat_window_ms: int
+    primary_client_queue_bytes: int
+    primary_client_overflow_grace_ms: int
+    primary_client_max_backlog_ms: int
+    primary_detach_grace_ms: int
 
 
 class SessionState(str, Enum):
@@ -114,9 +132,20 @@ class Session:
         self.primary_attach_grace_deadline_monotonic: float | None = None
         self.primary_delivery_miss_started_at: float | None = None
         self.primary_delivery_recovery_started_at: float | None = None
+        self.primary_detach_started_at: float | None = None
+        self.primary_detach_grace_deadline_monotonic: float | None = None
         self.startup_viability_ms: float | None = None
         self.first_primary_attach_ms: float | None = None
         self.delivery_heal_attempts_total = 0
+        self.delivery_profile: DeliveryProfile = "stable"
+        self.effective_delivery_profile: DeliveryProfile = "stable"
+        self.primary_detach_events_total = 0
+        self.primary_detach_grace_recoveries_total = 0
+        self.primary_detach_escalations_total = 0
+        self.last_primary_detach_at: float | None = None
+        self.recent_primary_detach_times_monotonic: deque[float] = deque()
+        self.auto_fell_back_to_stable = False
+        self.fallback_reason: str | None = None
 
     def transition_to(self, new_state: SessionState) -> None:
         """Transitions the session to a new state if valid."""
@@ -191,7 +220,14 @@ class Session:
                 "primary_resume_to_first_successful_yield_ms": diagnostics.get("primary_resume_to_first_successful_yield_ms"),
                 "max_primary_backlog_ms_observed": diagnostics.get("max_primary_backlog_ms_observed"),
                 "delivery_heal_attempts_total": self.delivery_heal_attempts_total,
-                "delivery_mode": diagnostics.get("delivery_mode"),
+                "delivery_profile": self.delivery_profile,
+                "effective_delivery_profile": self.effective_delivery_profile,
+                "running_delivery_profile": diagnostics.get("running_delivery_profile", diagnostics.get("delivery_profile")),
+                "auto_fell_back_to_stable": self.auto_fell_back_to_stable,
+                "fallback_reason": self.fallback_reason,
+                "primary_detach_events_total": self.primary_detach_events_total,
+                "primary_detach_grace_recoveries_total": self.primary_detach_grace_recoveries_total,
+                "primary_detach_escalations_total": self.primary_detach_escalations_total,
                 "last_stdout_read_age_ms": (now - last_stdout_read_monotonic) * 1000
                 if isinstance(last_stdout_read_monotonic, (int, float))
                 else None,
@@ -367,71 +403,139 @@ class SessionManager:
         value = self._config_store.get(key, None)
         return value if isinstance(value, int) and not isinstance(value, bool) else None
 
-    def _get_delivery_mode(self) -> str:
-        value = self._get_optional_str_config("audio_delivery_mode")
-        if value in {"stability", "live"}:
-            return value
-        return AUDIO_DELIVERY_MODE_DEFAULT
+    def _normalize_delivery_profile(self, value: object) -> DeliveryProfile | None:
+        if value == "stable":
+            return "stable"
+        if value == "experimental":
+            return "experimental"
+        return None
 
-    def _get_delivery_heartbeat_window_ms(self) -> int:
-        delivery_mode = self._get_delivery_mode()
-        default = AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_LIVE_DEFAULT if delivery_mode == "live" else AUDIO_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT
-        return self._get_int_config("audio_transport_heartbeat_window_ms", default)
+    def _get_delivery_profile(self) -> DeliveryProfile:
+        configured = self._normalize_delivery_profile(self._get_optional_str_config("audio_delivery_profile"))
+        return configured or "stable"
+
+    def _get_delivery_profile_overrides(self) -> dict[str, DeliveryProfile]:
+        if not self._config_store:
+            return {}
+        value = self._config_store.get("audio_delivery_profile_overrides", None)
+        if not isinstance(value, dict):
+            return {}
+
+        overrides: dict[str, DeliveryProfile] = {}
+        for source_id, configured_profile in value.items():
+            if not isinstance(source_id, str):
+                continue
+            normalized = self._normalize_delivery_profile(configured_profile)
+            if normalized is None:
+                continue
+            overrides[source_id] = normalized
+        return overrides
+
+    def _resolve_delivery_profile_for_source(self, source_id: str) -> DeliveryProfile:
+        return self._get_delivery_profile_overrides().get(source_id, self._get_delivery_profile())
+
+    def _resolve_delivery_profile_defaults(self, profile: DeliveryProfile) -> DeliveryProfileDefaults:
+        if profile == "experimental":
+            return DeliveryProfileDefaults(
+                delivery_profile=profile,
+                keepalive_idle_threshold_ms=AUDIO_EXPERIMENTAL_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT,
+                keepalive_frame_duration_ms=AUDIO_EXPERIMENTAL_KEEPALIVE_FRAME_DURATION_MS_DEFAULT,
+                live_jitter_target_ms=AUDIO_EXPERIMENTAL_LIVE_JITTER_TARGET_MS_DEFAULT,
+                transport_heartbeat_window_ms=AUDIO_EXPERIMENTAL_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT,
+                primary_client_queue_bytes=AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT,
+                primary_client_overflow_grace_ms=AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT,
+                primary_client_max_backlog_ms=AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT,
+                primary_detach_grace_ms=AUDIO_EXPERIMENTAL_PRIMARY_DETACH_GRACE_MS_DEFAULT,
+            )
+        return DeliveryProfileDefaults(
+            delivery_profile=profile,
+            keepalive_idle_threshold_ms=AUDIO_STABLE_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT,
+            keepalive_frame_duration_ms=AUDIO_STABLE_KEEPALIVE_FRAME_DURATION_MS_DEFAULT,
+            live_jitter_target_ms=AUDIO_STABLE_LIVE_JITTER_TARGET_MS_DEFAULT,
+            transport_heartbeat_window_ms=AUDIO_STABLE_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT,
+            primary_client_queue_bytes=AUDIO_STABLE_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT,
+            primary_client_overflow_grace_ms=AUDIO_STABLE_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT,
+            primary_client_max_backlog_ms=AUDIO_STABLE_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT,
+            primary_detach_grace_ms=AUDIO_STABLE_PRIMARY_DETACH_GRACE_MS_DEFAULT,
+        )
+
+    def _resolve_profile_int_override(
+        self,
+        profile: DeliveryProfile,
+        per_profile_key_suffix: str,
+        global_key: str,
+        default: int,
+    ) -> int:
+        per_profile_key = f"audio_{profile}_{per_profile_key_suffix}"
+        per_profile_override = self._get_optional_int_config(per_profile_key)
+        if per_profile_override is not None:
+            return per_profile_override
+
+        global_override = self._get_optional_int_config(global_key)
+        if global_override is not None:
+            return global_override
+
+        return default
 
     def _is_windows_system_output_source(self, source_id: str) -> bool:
         source_binding = self._source_registry.resolve_source(source_id)
         source = source_binding.source if source_binding else None
         return bool(source and source.platform == "windows" and source.source_type == SourceType.SYSTEM_OUTPUT)
 
-    def _build_pipeline_kwargs(self, source_id: str) -> dict[str, Any]:
-        is_windows_live_source = self._is_windows_system_output_source(source_id)
-        delivery_mode = self._get_delivery_mode()
-        explicit_heartbeat_window_ms = self._get_optional_int_config("audio_transport_heartbeat_window_ms")
-        heartbeat_window_ms = (
-            explicit_heartbeat_window_ms
-            if explicit_heartbeat_window_ms is not None
-            else self._get_delivery_heartbeat_window_ms()
-            if is_windows_live_source
-            else 500
-        )
-        primary_queue_default = AUDIO_PRIMARY_CLIENT_QUEUE_BYTES_LIVE_DEFAULT if delivery_mode == "live" else AUDIO_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT
-        primary_grace_default = (
-            AUDIO_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_LIVE_DEFAULT if delivery_mode == "live" else AUDIO_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT
-        )
-        primary_backlog_default = (
-            AUDIO_PRIMARY_CLIENT_MAX_BACKLOG_MS_LIVE_DEFAULT if delivery_mode == "live" else AUDIO_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT
-        )
+    def _build_pipeline_kwargs(self, source_id: str, profile: DeliveryProfile | None = None) -> dict[str, Any]:
+        profile = profile or self._resolve_delivery_profile_for_source(source_id)
+        defaults = self._resolve_delivery_profile_defaults(profile)
         return {
             "keepalive_enabled": self._get_bool_config("audio_keepalive_enabled", AUDIO_KEEPALIVE_ENABLED_DEFAULT),
-            "keepalive_idle_threshold_ms": self._get_int_config(
+            "keepalive_idle_threshold_ms": self._resolve_profile_int_override(
+                profile,
+                "keepalive_idle_threshold_ms",
                 "audio_keepalive_idle_threshold_ms",
-                AUDIO_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT if is_windows_live_source else COMPAT_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT,
+                defaults.keepalive_idle_threshold_ms,
             ),
-            "keepalive_frame_duration_ms": self._get_int_config(
+            "keepalive_frame_duration_ms": self._resolve_profile_int_override(
+                profile,
+                "keepalive_frame_duration_ms",
                 "audio_keepalive_frame_duration_ms",
-                AUDIO_KEEPALIVE_FRAME_DURATION_MS_DEFAULT if is_windows_live_source else COMPAT_KEEPALIVE_FRAME_DURATION_MS_DEFAULT,
+                defaults.keepalive_frame_duration_ms,
             ),
             "source_outage_grace_ms": self._get_int_config(
                 "audio_source_outage_grace_ms",
                 AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT,
             ),
-            "live_jitter_target_ms": self._get_int_config(
+            "live_jitter_target_ms": self._resolve_profile_int_override(
+                profile,
+                "live_jitter_target_ms",
                 "audio_live_jitter_target_ms",
-                AUDIO_LIVE_JITTER_TARGET_MS_DEFAULT if is_windows_live_source else COMPAT_JITTER_TARGET_MS_DEFAULT,
+                defaults.live_jitter_target_ms,
             ),
-            "transport_heartbeat_window_ms": heartbeat_window_ms,
-            "delivery_mode": delivery_mode,
+            "transport_heartbeat_window_ms": self._resolve_profile_int_override(
+                profile,
+                "transport_heartbeat_window_ms",
+                "audio_transport_heartbeat_window_ms",
+                defaults.transport_heartbeat_window_ms,
+            ),
+            "delivery_profile": profile,
             "client_queue_bytes": self._get_optional_int_config("audio_client_queue_bytes"),
             "client_overflow_grace_ms": self._get_optional_int_config("audio_client_overflow_grace_ms"),
             "client_max_backlog_ms": self._get_optional_int_config("audio_client_max_backlog_ms"),
-            "primary_client_queue_bytes": self._get_int_config("audio_primary_client_queue_bytes", primary_queue_default),
-            "primary_client_overflow_grace_ms": self._get_int_config(
-                "audio_primary_client_overflow_grace_ms",
-                primary_grace_default,
+            "primary_client_queue_bytes": self._resolve_profile_int_override(
+                profile,
+                "primary_client_queue_bytes",
+                "audio_primary_client_queue_bytes",
+                defaults.primary_client_queue_bytes,
             ),
-            "primary_client_max_backlog_ms": self._get_int_config(
+            "primary_client_overflow_grace_ms": self._resolve_profile_int_override(
+                profile,
+                "primary_client_overflow_grace_ms",
+                "audio_primary_client_overflow_grace_ms",
+                defaults.primary_client_overflow_grace_ms,
+            ),
+            "primary_client_max_backlog_ms": self._resolve_profile_int_override(
+                profile,
+                "primary_client_max_backlog_ms",
                 "audio_primary_client_max_backlog_ms",
-                primary_backlog_default,
+                defaults.primary_client_max_backlog_ms,
             ),
             "aux_client_queue_bytes": self._get_int_config("audio_aux_client_queue_bytes", AUDIO_AUX_CLIENT_QUEUE_BYTES_DEFAULT),
             "aux_client_overflow_grace_ms": self._get_int_config(
@@ -465,13 +569,35 @@ class SessionManager:
             session.last_error = create_session_error(MEDIA_ENGINE_NOT_FOUND, str(e))
             raise
 
+        session.delivery_profile = self._resolve_delivery_profile_for_source(session.source_id)
+        if not session.auto_fell_back_to_stable:
+            session.effective_delivery_profile = session.delivery_profile
+
         return StreamPipeline(
             session.session_id,
             session.stream_profile,
             target_id=session.target_id,
             ffmpeg_path=ffmpeg_path,
             on_error=lambda e: self._handle_session_error(session.session_id, e),
-            **self._build_pipeline_kwargs(session.source_id),
+            **self._build_pipeline_kwargs(session.source_id, profile=session.effective_delivery_profile),
+        )
+
+    def _get_transport_heartbeat_window_ms(self, session: Session) -> int:
+        defaults = self._resolve_delivery_profile_defaults(session.effective_delivery_profile)
+        return self._resolve_profile_int_override(
+            session.effective_delivery_profile,
+            "transport_heartbeat_window_ms",
+            "audio_transport_heartbeat_window_ms",
+            defaults.transport_heartbeat_window_ms,
+        )
+
+    def _get_primary_detach_grace_ms(self, session: Session) -> int:
+        defaults = self._resolve_delivery_profile_defaults(session.effective_delivery_profile)
+        return self._resolve_profile_int_override(
+            session.effective_delivery_profile,
+            "primary_detach_grace_ms",
+            "audio_primary_detach_grace_ms",
+            defaults.primary_detach_grace_ms,
         )
 
     def _register_pipeline(self, session: Session, pipeline: StreamPipeline, *, swap: bool = False) -> None:
@@ -643,7 +769,7 @@ class SessionManager:
                     await old_pipeline.stop()
                 await self._start_renderer_playback(session)
 
-            heartbeat_window_ms = self._get_delivery_heartbeat_window_ms()
+            heartbeat_window_ms = self._get_transport_heartbeat_window_ms(session)
             recovery_started_at: float | None = None
             deadline = time.monotonic() + 5.0
             while time.monotonic() < deadline:
@@ -670,6 +796,7 @@ class SessionManager:
                             session_id=session_id,
                             payload={"state": "media_plane_heal_succeeded", "details": {"mode": mode, "reason": reason}},
                         )
+                        self._clear_primary_detach_state(session)
                         session.media_heal_attempts = 0
                         return
                 else:
@@ -686,6 +813,7 @@ class SessionManager:
             session = self.get(session_id)
             if session and session.media_epoch in {epoch, epoch + 1}:
                 session.media_heal_in_progress = False
+                self._clear_primary_detach_state(session)
             self._session_heals.pop(session_id, None)
 
     def create(
@@ -736,6 +864,12 @@ class SessionManager:
 
         try:
             phase_started_at = time.monotonic()
+            session.delivery_profile = self._resolve_delivery_profile_for_source(session.source_id)
+            session.effective_delivery_profile = session.delivery_profile
+            session.auto_fell_back_to_stable = False
+            session.fallback_reason = None
+            session.recent_primary_detach_times_monotonic.clear()
+            self._clear_primary_detach_state(session)
             # 1. Prepare and start source
             try:
                 prepare_res = self._source_registry.prepare_source(session.source_id)
@@ -1072,19 +1206,58 @@ class SessionManager:
         fatal_error = bool(health.last_error)
         return stream_opened and stream_started and not fatal_error
 
-    def _start_session_monitor(self, session_id: str, source_desc: Any, startup_result: str | None) -> None:
-        if not source_desc or source_desc.platform != "windows" or source_desc.source_type != SourceType.SYSTEM_OUTPUT:
+    def _clear_primary_detach_state(self, session: Session) -> None:
+        session.primary_delivery_miss_started_at = None
+        session.primary_delivery_recovery_started_at = None
+        session.primary_detach_started_at = None
+        session.primary_detach_grace_deadline_monotonic = None
+
+    def _record_primary_detach_event(self, session: Session, now: float) -> None:
+        session.primary_detach_events_total += 1
+        session.last_primary_detach_at = time.time()
+        session.recent_primary_detach_times_monotonic.append(now)
+        cutoff = now - 90.0
+        while session.recent_primary_detach_times_monotonic and session.recent_primary_detach_times_monotonic[0] < cutoff:
+            session.recent_primary_detach_times_monotonic.popleft()
+
+    def _should_fallback_to_stable(self, session: Session, now: float) -> tuple[bool, str | None]:
+        if session.effective_delivery_profile != "experimental":
+            return (False, None)
+
+        cutoff = now - 90.0
+        while session.recent_primary_detach_times_monotonic and session.recent_primary_detach_times_monotonic[0] < cutoff:
+            session.recent_primary_detach_times_monotonic.popleft()
+
+        if len(session.recent_primary_detach_times_monotonic) >= 2:
+            return (True, "repeated_primary_detach")
+        if session.delivery_heal_attempts_total > 1:
+            return (True, "repeated_delivery_heal")
+        return (False, None)
+
+    def _apply_delivery_profile_fallback(self, session: Session, reason: str) -> None:
+        if session.effective_delivery_profile == "stable":
             return
+        session.effective_delivery_profile = "stable"
+        session.auto_fell_back_to_stable = True
+        session.fallback_reason = reason
+
+    def _start_session_monitor(self, session_id: str, source_desc: Any, startup_result: str | None) -> None:
         existing = self._session_monitors.pop(session_id, None)
         if existing:
             existing.cancel()
-        self._session_monitors[session_id] = asyncio.create_task(self._monitor_windows_live_session(session_id, startup_result or "active"))
+        self._session_monitors[session_id] = asyncio.create_task(
+            self._monitor_media_delivery_session(
+                session_id,
+                source_desc,
+                startup_result if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT else None,
+            )
+        )
 
-    async def _monitor_windows_live_session(self, session_id: str, startup_result: str) -> None:
+    async def _monitor_media_delivery_session(self, session_id: str, source_desc: Any, startup_result: str | None) -> None:
         activation_watchdog_ms = WINDOWS_SOURCE_ACTIVITY_WATCHDOG_MS_DEFAULT
         source_outage_grace_ms = self._get_int_config("audio_source_outage_grace_ms", AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT)
-        transport_heartbeat_window_ms = self._get_delivery_heartbeat_window_ms()
         started_at = time.monotonic()
+        windows_startup_monitor = bool(source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT)
         activation_seen = startup_result == "active"
         activation_degraded_emitted = False
         transport_degraded_emitted = False
@@ -1099,6 +1272,8 @@ class SessionManager:
                     return
                 if not session.pipeline:
                     continue
+                transport_heartbeat_window_ms = self._get_transport_heartbeat_window_ms(session)
+                primary_detach_grace_ms = self._get_primary_detach_grace_ms(session)
 
                 health = self._source_registry.probe_source_health(session.source_id)
                 diagnostics = session.pipeline.get_diagnostics_snapshot()
@@ -1132,7 +1307,13 @@ class SessionManager:
                 activation_seen = activation_seen or callback_count > 0 or frames_emitted > 0 or signal_present or real_frames_written > 0
 
                 elapsed_ms = (time.monotonic() - started_at) * 1000
-                if startup_result == "idle_pending_signal" and not activation_seen and elapsed_ms >= activation_watchdog_ms and not activation_degraded_emitted:
+                if (
+                    windows_startup_monitor
+                    and startup_result == "idle_pending_signal"
+                    and not activation_seen
+                    and elapsed_ms >= activation_watchdog_ms
+                    and not activation_degraded_emitted
+                ):
                     if session.state == SessionState.PLAYING:
                         session.transition_to(SessionState.DEGRADED)
                     self._set_media_state(session, "playing_degraded", "degraded_no_source_activity_yet")
@@ -1228,21 +1409,29 @@ class SessionManager:
                         self._schedule_media_plane_heal(session_id, "swap", "transport_heartbeat_lost")
 
                 if session.primary_established and not self._primary_attach_grace_open(session) and encoder_alive and not delivery_alive:
-                    if session.primary_delivery_miss_started_at is None:
-                        session.primary_delivery_miss_started_at = now
+                    if session.primary_detach_started_at is None:
+                        session.primary_detach_started_at = now
+                        session.primary_detach_grace_deadline_monotonic = now + (primary_detach_grace_ms / 1000)
+                        self._record_primary_detach_event(session, now)
                     session.primary_delivery_recovery_started_at = None
+                    should_fallback, fallback_reason = self._should_fallback_to_stable(session, now)
+                    if should_fallback and fallback_reason:
+                        self._apply_delivery_profile_fallback(session, fallback_reason)
                 else:
-                    session.primary_delivery_miss_started_at = None
+                    if session.primary_detach_started_at is not None and delivery_alive:
+                        session.primary_detach_grace_recoveries_total += 1
+                    self._clear_primary_detach_state(session)
 
                 delivery_should_degrade = (
                     session.state == SessionState.PLAYING
                     and encoder_alive
                     and session.primary_established
                     and not self._primary_attach_grace_open(session)
-                    and session.primary_delivery_miss_started_at is not None
-                    and (now - session.primary_delivery_miss_started_at) * 1000 >= (transport_heartbeat_window_ms * 2)
+                    and session.primary_detach_grace_deadline_monotonic is not None
+                    and now >= session.primary_detach_grace_deadline_monotonic
                 )
                 if delivery_should_degrade and session.media_reason != "client_detached_while_session_open":
+                    session.primary_detach_escalations_total += 1
                     session.transition_to(SessionState.DEGRADED)
                     self._set_media_state(session, "playing_degraded", "client_detached_while_session_open")
                     details = {
@@ -1261,6 +1450,7 @@ class SessionManager:
                         "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
                         "max_primary_backlog_ms_observed": diagnostics.get("max_primary_backlog_ms_observed"),
                         "runtime_mode": runtime_mode,
+                        "primary_detach_grace_ms": primary_detach_grace_ms,
                     }
                     logger.warning(
                         "audio_primary_delivery_path_lost session_id=%s source_id=%s details=%s",
@@ -1346,14 +1536,14 @@ class SessionManager:
                     )
                     transport_degraded_emitted = False
                     transport_miss_started_at = None
-                    session.primary_delivery_miss_started_at = None
-                    session.primary_delivery_recovery_started_at = None
+                    self._clear_primary_detach_state(session)
                     if session.last_media_healthy_at and (time.time() - session.last_media_healthy_at) >= 5:
                         session.media_heal_attempts = 0
 
                 last_real_frame_age_ms = diagnostics.get("last_real_frame_age_ms")
                 if (
-                    activation_seen
+                    windows_startup_monitor
+                    and activation_seen
                     and isinstance(last_real_frame_age_ms, (int, float))
                     and last_real_frame_age_ms >= source_outage_grace_ms
                     and health is not None
@@ -1480,6 +1670,7 @@ class SessionManager:
         heal_task = self._session_heals.pop(session_id, None)
         if heal_task:
             heal_task.cancel()
+        self._clear_primary_detach_state(session)
 
         # 1. Stop renderer
         try:

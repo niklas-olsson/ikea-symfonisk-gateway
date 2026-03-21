@@ -8,6 +8,7 @@ import time
 import wave
 from collections import deque
 from collections.abc import AsyncGenerator
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -23,13 +24,13 @@ DEFAULT_KEEPALIVE_FRAME_DURATION_MS = 20
 DEFAULT_SOURCE_OUTAGE_GRACE_MS = 5000
 DEFAULT_JITTER_TARGET_MS = 250
 DEFAULT_TRANSPORT_HEARTBEAT_WINDOW_MS = 500
-DEFAULT_DELIVERY_MODE = "stability"
+DEFAULT_DELIVERY_PROFILE = "stable"
 DEFAULT_PRIMARY_CLIENT_QUEUE_BYTES = 262144
 DEFAULT_PRIMARY_CLIENT_OVERFLOW_GRACE_MS = 1500
 DEFAULT_PRIMARY_CLIENT_MAX_BACKLOG_MS = 1500
-DEFAULT_PRIMARY_CLIENT_QUEUE_BYTES_LIVE = 131072
-DEFAULT_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_LIVE = 750
-DEFAULT_PRIMARY_CLIENT_MAX_BACKLOG_MS_LIVE = 750
+DEFAULT_PRIMARY_CLIENT_QUEUE_BYTES_EXPERIMENTAL = 131072
+DEFAULT_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_EXPERIMENTAL = 750
+DEFAULT_PRIMARY_CLIENT_MAX_BACKLOG_MS_EXPERIMENTAL = 750
 DEFAULT_AUX_CLIENT_QUEUE_BYTES = 131072
 DEFAULT_AUX_CLIENT_OVERFLOW_GRACE_MS = 750
 DEFAULT_AUX_CLIENT_MAX_BACKLOG_MS = 1500
@@ -177,7 +178,7 @@ class StreamPipeline:
         keepalive_frame_duration_ms: int = DEFAULT_KEEPALIVE_FRAME_DURATION_MS,
         live_jitter_target_ms: int = DEFAULT_JITTER_TARGET_MS,
         transport_heartbeat_window_ms: int = DEFAULT_TRANSPORT_HEARTBEAT_WINDOW_MS,
-        delivery_mode: Literal["stability", "live"] = "stability",
+        delivery_profile: Literal["stable", "experimental"] = "stable",
         client_queue_bytes: int | None = None,
         client_overflow_grace_ms: int | None = None,
         client_max_backlog_ms: int | None = None,
@@ -215,9 +216,9 @@ class StreamPipeline:
         self._frame_duration_ms = self._ffmpeg_input_format.frame_duration_ms
         self._live_jitter_target_ms = live_jitter_target_ms
         self._transport_heartbeat_window_ms = transport_heartbeat_window_ms
-        self._delivery_mode = delivery_mode
+        self._delivery_profile = delivery_profile
         self._primary_policy, self._aux_policy = self._resolve_client_policies(
-            delivery_mode=delivery_mode,
+            delivery_profile=delivery_profile,
             client_queue_bytes=client_queue_bytes,
             client_overflow_grace_ms=client_overflow_grace_ms,
             client_max_backlog_ms=client_max_backlog_ms,
@@ -299,7 +300,7 @@ class StreamPipeline:
     def _resolve_client_policies(
         self,
         *,
-        delivery_mode: Literal["stability", "live"],
+        delivery_profile: Literal["stable", "experimental"],
         client_queue_bytes: int | None,
         client_overflow_grace_ms: int | None,
         client_max_backlog_ms: int | None,
@@ -310,11 +311,11 @@ class StreamPipeline:
         aux_client_overflow_grace_ms: int | None,
         aux_client_max_backlog_ms: int | None,
     ) -> tuple[PipelineClientPolicy, PipelineClientPolicy]:
-        if delivery_mode == "live":
+        if delivery_profile == "experimental":
             primary_defaults = PipelineClientPolicy(
-                queue_bytes=DEFAULT_PRIMARY_CLIENT_QUEUE_BYTES_LIVE,
-                overflow_grace_ms=DEFAULT_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_LIVE,
-                max_backlog_ms=DEFAULT_PRIMARY_CLIENT_MAX_BACKLOG_MS_LIVE,
+                queue_bytes=DEFAULT_PRIMARY_CLIENT_QUEUE_BYTES_EXPERIMENTAL,
+                overflow_grace_ms=DEFAULT_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_EXPERIMENTAL,
+                max_backlog_ms=DEFAULT_PRIMARY_CLIENT_MAX_BACKLOG_MS_EXPERIMENTAL,
             )
         else:
             primary_defaults = PipelineClientPolicy(
@@ -393,10 +394,11 @@ class StreamPipeline:
     async def stop(self) -> None:
         """Stop the pipeline and FFmpeg subprocess."""
         self._active = False
-        if self._feed_task:
-            self._feed_task.cancel()
-        if self._read_task:
-            self._read_task.cancel()
+        await self._close_all_subscribers(reason="pipeline_stopped")
+        await self._cancel_and_drain(self._feed_task)
+        await self._cancel_and_drain(self._read_task)
+        self._feed_task = None
+        self._read_task = None
 
         if self._process:
             try:
@@ -407,6 +409,19 @@ class StreamPipeline:
             self._process = None
 
         self._close_debug_captures()
+
+    async def _cancel_and_drain(self, task: asyncio.Task[Any] | None) -> None:
+        if task is None:
+            return
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    async def _close_all_subscribers(self, reason: str) -> None:
+        async with self._lock:
+            subscribers = list(self._clients)
+        for subscriber in subscribers:
+            await self._remove_subscriber(subscriber, reason=reason)
 
     def _get_ffmpeg_cmd(self) -> list[str]:
         """Generate the FFmpeg command based on the profile."""
@@ -554,18 +569,33 @@ class StreamPipeline:
                     break
                 queue_get = asyncio.create_task(subscriber.queue.get())
                 wake_wait = asyncio.create_task(subscriber.wake_event.wait())
-                done, pending = await asyncio.wait({queue_get, wake_wait}, return_when=asyncio.FIRST_COMPLETED)
-                for pending_task in pending:
-                    pending_task.cancel()
-                if wake_wait in done:
-                    subscriber.wake_event.clear()
-                    if subscriber.closed and subscriber.queue.empty():
-                        if not queue_get.done():
-                            queue_get.cancel()
-                        break
-                if queue_get not in done:
-                    continue
-                data = queue_get.result()
+                try:
+                    done, pending = await asyncio.wait({queue_get, wake_wait}, return_when=asyncio.FIRST_COMPLETED)
+                    for pending_task in pending:
+                        pending_task.cancel()
+                    for pending_task in pending:
+                        with suppress(asyncio.CancelledError):
+                            await pending_task
+                    if wake_wait in done:
+                        subscriber.wake_event.clear()
+                        if subscriber.closed and subscriber.queue.empty():
+                            if not queue_get.done():
+                                queue_get.cancel()
+                                with suppress(asyncio.CancelledError):
+                                    await queue_get
+                            break
+                    if queue_get not in done:
+                        continue
+                    data = queue_get.result()
+                finally:
+                    if not queue_get.done():
+                        queue_get.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await queue_get
+                    if not wake_wait.done():
+                        wake_wait.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await wake_wait
                 dequeue_now = time.monotonic()
                 async with self._lock:
                     subscriber.queued_bytes = max(0, subscriber.queued_bytes - len(data))
@@ -629,7 +659,8 @@ class StreamPipeline:
             "last_primary_yield_monotonic": self._last_primary_yield_monotonic,
             "primary_resume_to_first_successful_yield_ms": self._primary_resume_to_first_successful_yield_ms,
             "max_primary_backlog_ms_observed": self._max_primary_backlog_ms_observed,
-            "delivery_mode": self._delivery_mode,
+            "delivery_profile": self._delivery_profile,
+            "running_delivery_profile": self._delivery_profile,
             "encoded_bytes_emitted_total": self._encoded_bytes_emitted_total,
             "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
             "backpressure_events_total": self._backpressure_events_total,
@@ -978,7 +1009,7 @@ class StreamPipeline:
 
     def _log_format_audit(self) -> None:
         logger.info(
-            "audio_format_audit session_id=%s sample_format=%s sample_rate=%s channels=%s bytes_per_sample=%s frame_duration_ms=%s bytes_per_frame=%s live_jitter_target_ms=%s transport_heartbeat_window_ms=%s delivery_mode=%s primary_policy=%s aux_policy=%s",
+            "audio_format_audit session_id=%s sample_format=%s sample_rate=%s channels=%s bytes_per_sample=%s frame_duration_ms=%s bytes_per_frame=%s live_jitter_target_ms=%s transport_heartbeat_window_ms=%s delivery_profile=%s primary_policy=%s aux_policy=%s",
             self.session_id,
             self._ffmpeg_input_format.sample_format,
             self._ffmpeg_input_format.sample_rate,
@@ -988,7 +1019,7 @@ class StreamPipeline:
             self._ffmpeg_input_format.bytes_per_frame,
             self._live_jitter_target_ms,
             self._transport_heartbeat_window_ms,
-            self._delivery_mode,
+            self._delivery_profile,
             asdict(self._primary_policy),
             asdict(self._aux_policy),
         )

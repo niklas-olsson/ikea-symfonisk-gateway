@@ -85,6 +85,18 @@ async def test_stream_pipeline_lifecycle() -> None:
         assert diagnostics["live_jitter_target_ms"] == 250
         assert diagnostics["ffmpeg_input_format"]["frame_duration_ms"] == 20
         assert diagnostics["transport_heartbeat_window_ms"] == 500
+        assert diagnostics["running_delivery_profile"] == "stable"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_experimental_policy_defaults() -> None:
+    pipeline = StreamPipeline("test_sess", "mp3_48k_stereo_320", delivery_profile="experimental")
+    diagnostics = pipeline.get_diagnostics_snapshot()
+
+    assert diagnostics["running_delivery_profile"] == "experimental"
+    assert pipeline._primary_policy.queue_bytes == 131072
+    assert pipeline._primary_policy.overflow_grace_ms == 750
+    assert pipeline._primary_policy.max_backlog_ms == 750
 
 
 @pytest.mark.asyncio
@@ -250,6 +262,36 @@ async def test_pipeline_tracks_client_fanout_timestamp() -> None:
         assert detached_diagnostics["active_client_count"] == 0
         assert detached_diagnostics["last_client_detach_monotonic"] is not None
         await pipeline.stop()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_stop_drains_background_tasks() -> None:
+    pipeline = StreamPipeline("test_sess", "mp3_48k_stereo_320")
+    mock_process = FakeProcess()
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+        await pipeline.start()
+        await pipeline.stop()
+
+    assert pipeline._feed_task is None
+    assert pipeline._read_task is None
+    assert pipeline._process is None
+
+
+@pytest.mark.asyncio
+async def test_pipeline_subscriber_shutdown_drains_pending_waiters() -> None:
+    pipeline = StreamPipeline("test_sess", "mp3_48k_stereo_320")
+    mock_process = FakeProcess()
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+        await pipeline.start()
+        subscriber = pipeline.subscribe()
+        read_task = asyncio.create_task(anext(subscriber))
+        await asyncio.sleep(0)
+        await pipeline.stop()
+        with pytest.raises((StopAsyncIteration, asyncio.CancelledError)):
+            await asyncio.wait_for(read_task, timeout=1.0)
+        await subscriber.aclose()
 
 
 @pytest.mark.asyncio
