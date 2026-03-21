@@ -317,10 +317,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 self._device_paths[path] = mac
                 logger.info(f"Bluetooth device seen: {mac} at {path}")
                 if self._event_bus:
-                    self._event_bus.emit(
-                        "bluetooth.device.seen",
-                        payload={"mac": mac, "path": path}
-                    )
+                    self._event_bus.emit("bluetooth.device.seen", payload={"mac": mac, "path": path})
 
                 self._subscribe_to_device_changes(path)
                 self._check_and_trigger_reconnect(path, device_props)
@@ -370,7 +367,6 @@ class LinuxBluetoothAdapter(IngressAdapter):
         try:
             introspection = await self._dbus_bus.introspect("org.bluez", path)
             proxy = self._dbus_bus.get_proxy_object("org.bluez", path, introspection)
-            device = proxy.get_interface("org.bluez.Device1")
 
             # This is tricky with dbus-next proxy interfaces as they are not dictionaries.
             # We might need to call GetManagedObjects again or use properties interface.
@@ -419,8 +415,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 logger.info(f"Scheduling Bluetooth reconnect for {mac} in {delay}s")
                 if self._event_bus:
                     self._event_bus.emit(
-                        "bluetooth.device.reconnect_scheduled",
-                        payload={"mac": mac, "delay": delay, "retry_count": retry_count}
+                        "bluetooth.device.reconnect_scheduled", payload={"mac": mac, "delay": delay, "retry_count": retry_count}
                     )
                 await asyncio.sleep(delay)
 
@@ -431,9 +426,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
             try:
                 # Use bluetoothctl for connection as it's more robust than raw DBus calls for A2DP
                 process = await asyncio.create_subprocess_exec(
-                    "bluetoothctl", "connect", mac,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    "bluetoothctl", "connect", mac, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                 )
                 stdout, stderr = await process.communicate()
                 exit_code = process.returncode
@@ -448,13 +441,17 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
                     # Stop retrying on fatal/auth errors
                     # Common BlueZ error strings for fatal issues
-                    fatal_errors = ["Authentication Failed", "Authentication Canceled", "NotReady", "Failed to connect: org.bluez.Error.Failed"]
+                    fatal_errors = [
+                        "Authentication Failed",
+                        "Authentication Canceled",
+                        "NotReady",
+                        "Failed to connect: org.bluez.Error.Failed",
+                    ]
                     if any(err in error_msg for err in fatal_errors):
                         logger.error(f"Fatal connection error for {mac}. Stopping retries.")
                         if self._event_bus:
                             self._event_bus.emit(
-                                "bluetooth.device.reconnect_failed",
-                                payload={"mac": mac, "error": error_msg, "fatal": True}
+                                "bluetooth.device.reconnect_failed", payload={"mac": mac, "error": error_msg, "fatal": True}
                             )
                         break
 
@@ -463,10 +460,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
             retry_count += 1
             if self._event_bus:
-                self._event_bus.emit(
-                    "bluetooth.device.reconnect_failed",
-                    payload={"mac": mac, "retry_count": retry_count, "fatal": False}
-                )
+                self._event_bus.emit("bluetooth.device.reconnect_failed", payload={"mac": mac, "retry_count": retry_count, "fatal": False})
 
             # Check if device is still disconnected before retrying
             # (PropertiesChanged might have already updated connection state)
@@ -482,4 +476,4 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     logger.info(f"Device {mac} already connected, stopping reconnect loop.")
                     break
             except Exception:
-                pass # Continue retry if we can't check
+                pass  # Continue retry if we can't check

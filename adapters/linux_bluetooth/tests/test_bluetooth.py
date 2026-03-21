@@ -157,11 +157,7 @@ async def test_reconnect_logic(adapter: LinuxBluetoothAdapter, event_bus: MagicM
         event_bus.emit.assert_any_call("bluetooth.device.connecting", payload={"mac": mac})
 
         # Verify bluetoothctl was called
-        mock_exec.assert_called_with(
-            "bluetoothctl", "connect", mac,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        mock_exec.assert_called_with("bluetoothctl", "connect", mac, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
 
 @pytest.mark.asyncio
@@ -185,12 +181,13 @@ async def test_reconnect_backoff(adapter: LinuxBluetoothAdapter, event_bus: Magi
 
     # Mock asyncio.sleep to avoid waiting but still yield
     real_sleep = asyncio.sleep
+
     async def fast_sleep(delay):
         await real_sleep(0.0001)
 
     with (
         patch("asyncio.create_subprocess_exec") as mock_exec,
-        patch("asyncio.sleep", side_effect=fast_sleep) as mock_sleep,
+        patch("asyncio.sleep", side_effect=fast_sleep),
     ):
         mock_process = AsyncMock()
         mock_process.communicate.return_value = (b"", b"Connection Failed")
@@ -205,8 +202,7 @@ async def test_reconnect_backoff(adapter: LinuxBluetoothAdapter, event_bus: Magi
         # and some other async calls.
         for _ in range(20):
             await asyncio.sleep(0.005)
-            if len([call for call in event_bus.emit.call_args_list
-                    if call.args[0] == EventType.BLUETOOTH_DEVICE_RECONNECT_SCHEDULED]) >= 2:
+            if len([call for call in event_bus.emit.call_args_list if call.args[0] == EventType.BLUETOOTH_DEVICE_RECONNECT_SCHEDULED]) >= 2:
                 break
 
         task.cancel()
@@ -226,7 +222,7 @@ async def test_reconnect_backoff(adapter: LinuxBluetoothAdapter, event_bus: Magi
                 actual_delays.append(payload.get("delay"))
 
         for delay in expected_delays:
-            if delay > 0: # 0 delay might not be explicitly scheduled with sleep
+            if delay > 0:  # 0 delay might not be explicitly scheduled with sleep
                 assert delay in actual_delays
 
 
@@ -264,8 +260,7 @@ async def test_reconnect_stops_on_fatal(adapter: LinuxBluetoothAdapter, event_bu
         # Verify it stopped and emitted fatal error
 
         event_bus.emit.assert_any_call(
-            "bluetooth.device.reconnect_failed",
-            payload={"mac": mac, "error": " Authentication Failed", "fatal": True}
+            "bluetooth.device.reconnect_failed", payload={"mac": mac, "error": " Authentication Failed", "fatal": True}
         )
         # Should only have called connect once
         assert mock_exec.call_count == 1
