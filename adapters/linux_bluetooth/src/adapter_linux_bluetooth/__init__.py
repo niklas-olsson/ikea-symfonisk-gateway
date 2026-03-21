@@ -32,6 +32,8 @@ class _BlueZAdapterController(Protocol):
 
     async def check_readiness(self) -> list[str]: ...
 
+    async def is_available(self) -> bool: ...
+
     async def set_alias(self, alias: str) -> bool: ...
 
     async def set_discoverable_timeout(self, timeout: int) -> None: ...
@@ -320,15 +322,21 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+            stdout = self._process.stdout
+            stderr = self._process.stderr
+            if stdout is None or stderr is None:
+                logger.error("parec did not provide stdout/stderr pipes")
+                self._running = False
+                return
 
-            async def log_stderr(stderr):
+            async def log_stderr(stderr: asyncio.StreamReader) -> None:
                 while True:
                     line = await stderr.readline()
                     if not line:
                         break
                     logger.error(f"parec stderr: {line.decode().strip()}")
 
-            stderr_task = asyncio.create_task(log_stderr(self._process.stderr))
+            stderr_task = asyncio.create_task(log_stderr(stderr))
 
             chunk_size = 1920  # 10ms at 48kHz, 16-bit stereo
             pts_ns = 0
@@ -337,7 +345,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
             frame_count = 0
             while self._running:
                 try:
-                    data = await self._process.stdout.readexactly(chunk_size)
+                    data = await stdout.readexactly(chunk_size)
                     if not data:
                         break
 
