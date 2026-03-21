@@ -12,11 +12,6 @@ from typing import Any
 
 import numpy as np
 
-try:
-    import sounddevice as sd
-except ImportError:
-    sd = None
-
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
@@ -30,6 +25,16 @@ from ingress_sdk.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _get_sd():
+    """Helper to get sounddevice module, handled missing library on non-Windows."""
+    try:
+        import sounddevice as sd
+
+        return sd
+    except (ImportError, OSError):
+        return None
 
 
 class WindowsAudioAdapter(IngressAdapter):
@@ -73,7 +78,7 @@ class WindowsAudioAdapter(IngressAdapter):
         sources.append(
             SourceDescriptor(
                 source_id="default",
-                source_type=SourceType.SYSTEM_OUTPUT,
+                source_type=SourceType.SYSTEM_AUDIO,
                 display_name="Default System Sound windows",
                 platform="windows",
                 capabilities=SourceCapabilities(
@@ -84,7 +89,8 @@ class WindowsAudioAdapter(IngressAdapter):
             )
         )
 
-        if platform.system() != "Windows" or sd is None:
+        sd = _get_sd()
+        if sd is None:
             return sources
 
         try:
@@ -113,10 +119,10 @@ class WindowsAudioAdapter(IngressAdapter):
 
                 if dev["max_output_channels"] > 0:
                     # This is a render endpoint (Output)
-                    source_type = SourceType.APP_OUTPUT
+                    source_type = SourceType.SYSTEM_AUDIO
                     # If it's the default output, it might be labeled as such
                     if "default" in display_name.lower():
-                        source_type = SourceType.SYSTEM_OUTPUT
+                        source_type = SourceType.SYSTEM_AUDIO
 
                     render_sources.append(
                         SourceDescriptor(
@@ -136,7 +142,7 @@ class WindowsAudioAdapter(IngressAdapter):
                     capture_sources.append(
                         SourceDescriptor(
                             source_id=source_id,
-                            source_type=SourceType.MICROPHONE_INPUT,
+                            source_type=SourceType.MICROPHONE,
                             display_name=display_name,
                             platform="windows",
                             capabilities=SourceCapabilities(
@@ -147,7 +153,7 @@ class WindowsAudioAdapter(IngressAdapter):
                         )
                     )
 
-            # Prioritize: SYSTEM_OUTPUT (already first), then other render (APP_OUTPUT), then capture (MICROPHONE_INPUT)
+            # Prioritize: SYSTEM_AUDIO (already first), then other render (SYSTEM_AUDIO), then capture (MICROPHONE)
             # Filter out "default" if it was discovered to avoid duplicates if we want,
             # but keeping it simple: just append them in order.
             sources.extend(render_sources)
@@ -165,6 +171,10 @@ class WindowsAudioAdapter(IngressAdapter):
         if source_id == "default":
             return PrepareResult(success=True, source_id=source_id)
 
+        sd = _get_sd()
+        if sd is None:
+            return PrepareResult(success=False, source_id=source_id, error="sounddevice not available")
+
         try:
             device_index = int(source_id)
             sd.query_devices(device_index)
@@ -175,6 +185,10 @@ class WindowsAudioAdapter(IngressAdapter):
     def start(self, source_id: str, frame_sink: FrameSink) -> StartResult:
         if self._running:
             return StartResult(success=False, message="Already running")
+
+        sd = _get_sd()
+        if sd is None:
+            return StartResult(success=False, message="sounddevice not available")
 
         self._frame_sink = frame_sink
         self._session_id = f"win_sess_{int(time.time())}"
@@ -191,7 +205,7 @@ class WindowsAudioAdapter(IngressAdapter):
 
             # WASAPI Loopback requires specific settings in sounddevice/PortAudio
             extra_settings = None
-            if platform.system() == "Windows" and is_loopback:
+            if is_loopback:
                 try:
                     # Fix the 'unexpected keyword loopback' by ensuring we are using it correctly
                     # In some sounddevice versions, loopback is a boolean in WasapiSettings
