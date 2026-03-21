@@ -307,7 +307,11 @@ class LinuxAudioAdapter(IngressAdapter):
                     break
 
                 if self._frame_sink:
-                    self._frame_sink.on_frame(data, pts_ns, duration_ns)
+                    try:
+                        self._frame_sink.on_frame(data, pts_ns, duration_ns)
+                    except Exception as e:
+                        logger.error(f"Error in frame sink: {e}")
+                        self._frame_sink.on_error(e)
 
                 pts_ns += duration_ns
 
@@ -319,6 +323,8 @@ class LinuxAudioAdapter(IngressAdapter):
             pass
         except Exception as e:
             logger.error(f"Error capturing audio: {e}")
+            if self._frame_sink:
+                self._frame_sink.on_error(e)
         finally:
             self._running = False
             await self._cleanup_process()

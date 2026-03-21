@@ -20,6 +20,10 @@ class FrameSink(Protocol):
         """Called for each audio frame."""
         ...
 
+    def on_error(self, error: Exception) -> None:
+        """Called when a source error occurs."""
+        ...
+
 
 class IngressAdapter(ABC):
     """Abstract base class for all ingress adapters.
