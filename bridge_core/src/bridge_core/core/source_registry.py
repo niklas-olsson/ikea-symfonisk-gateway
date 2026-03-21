@@ -178,7 +178,11 @@ class SourceRegistry:
         if not old_health or old_health.source_state != health.source_state:
             self._event_bus.emit(
                 EventType.SOURCE_STATE_CHANGED,
-                payload={"source_id": source_id, "state": health.source_state},
+                payload={
+                    "source_id": source_id,
+                    "state": health.source_state,
+                    "health": health.model_dump(),
+                },
             )
 
         if not old_health or old_health.signal_present != health.signal_present:

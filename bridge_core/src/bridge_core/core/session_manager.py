@@ -144,7 +144,7 @@ class Session:
         elif new_state == SessionState.STOPPED:
             self.stopped_at = time.time()
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, source_health: Any | None = None) -> dict[str, Any]:
         diagnostics: dict[str, Any] = {}
         if self.pipeline and hasattr(self.pipeline, "get_diagnostics_snapshot"):
             try:
@@ -227,6 +227,7 @@ class Session:
                 else None,
                 "keepalive_active": bool(diagnostics.get("keepalive_active", False)),
                 "jitter_buffer_size_ms": float(diagnostics.get("jitter_buffer_size_ms") or 0.0),
+                "source_health": source_health.model_dump() if (source_health is not None and hasattr(source_health, "model_dump")) else source_health,
             },
         }
 
@@ -831,7 +832,8 @@ class SessionManager:
             auto_heal=auto_heal,
         )
         self._sessions[session.session_id] = session
-        self._event_bus.emit(EventType.SESSION_CREATED, payload=session.to_dict(), session_id=session.session_id)
+        source_health = self._source_registry.get_source_health(session.source_id)
+        self._event_bus.emit(EventType.SESSION_CREATED, payload=session.to_dict(source_health=source_health), session_id=session.session_id)
         return session
 
     def get(self, session_id: str) -> Session | None:
@@ -856,10 +858,11 @@ class SessionManager:
         except ValueError:
             return False
 
+        source_health = self._source_registry.get_source_health(session.source_id)
         self._event_bus.emit(
             EventType.SESSION_STARTING,
             session_id=session_id,
-            payload=session.to_dict(),
+            payload=session.to_dict(source_health=source_health),
         )
 
         try:
@@ -1008,10 +1011,11 @@ class SessionManager:
             initial_media_state = "establishing_primary"
             self._set_media_state(session, initial_media_state, None)
             session.last_media_healthy_at = time.time()
+            source_health = self._source_registry.get_source_health(session.source_id)
             self._event_bus.emit(
                 EventType.SESSION_STARTED,
                 session_id=session_id,
-                payload=session.to_dict(),
+                payload=session.to_dict(source_health=source_health),
             )
             self._start_session_monitor(
                 session_id,
@@ -1027,10 +1031,11 @@ class SessionManager:
             if not session.last_error:
                 session.last_error = create_session_error("session_start_failed", str(e))
 
+            source_health = self._source_registry.get_source_health(session.source_id)
             self._event_bus.emit(
                 EventType.SESSION_FAILED,
                 session_id=session_id,
-                payload=session.to_dict(),
+                payload=session.to_dict(source_health=source_health),
             )
             session.transition_to(SessionState.FAILED)
             # Try to cleanup what was started
@@ -1586,10 +1591,11 @@ class SessionManager:
                         session.source_id,
                         details,
                     )
+                    source_health = self._source_registry.get_source_health(session.source_id)
                     self._event_bus.emit(
                         EventType.SESSION_FAILED,
                         session_id=session_id,
-                        payload=session.to_dict(),
+                        payload=session.to_dict(source_health=source_health),
                     )
                     session.transition_to(SessionState.FAILED)
                     await self.stop_session(session_id)
@@ -1678,10 +1684,11 @@ class SessionManager:
             if session.state != SessionState.FAILED:
                 return False
 
+        source_health = self._source_registry.get_source_health(session.source_id)
         self._event_bus.emit(
             EventType.SESSION_STOPPING,
             session_id=session_id,
-            payload=session.to_dict(),
+            payload=session.to_dict(source_health=source_health),
         )
 
         monitor_task = self._session_monitors.pop(session_id, None)
@@ -1722,10 +1729,11 @@ class SessionManager:
                 self._stream_publisher.unregister_pipeline(session.session_id)
 
         session.transition_to(SessionState.STOPPED)
+        source_health = self._source_registry.get_source_health(session.source_id)
         self._event_bus.emit(
             EventType.SESSION_STOPPED,
             session_id=session_id,
-            payload=session.to_dict(),
+            payload=session.to_dict(source_health=source_health),
         )
         return True
 
@@ -1749,6 +1757,8 @@ class SessionManager:
         if not session:
             raise ValueError(f"Session {session_id} not found")
 
+        source_health = self._source_registry.get_source_health(session.source_id)
+
         if session.state == SessionState.DEGRADED and session.media_reason in {
             "transport_heartbeat_lost",
             "client_detached_while_session_open",
@@ -1756,11 +1766,19 @@ class SessionManager:
         }:
             mode = "replay" if session.media_reason == "client_detached_while_session_open" else "swap"
             self._schedule_media_plane_heal(session_id, mode, session.media_reason, force=True)
-            self._event_bus.emit(EventType.HEAL_ATTEMPTED, session_id=session_id)
+            self._event_bus.emit(
+                EventType.HEAL_ATTEMPTED,
+                session_id=session_id,
+                payload={"mode": mode, "reason": session.media_reason, "source_health": source_health.model_dump() if source_health else None},
+            )
             return
 
         session.transition_to(SessionState.HEALING)
-        self._event_bus.emit(EventType.HEAL_ATTEMPTED, session_id=session_id)
+        self._event_bus.emit(
+            EventType.HEAL_ATTEMPTED,
+            session_id=session_id,
+            payload={"mode": "full_recovery", "source_health": source_health.model_dump() if source_health else None},
+        )
 
         try:
             # 1. Re-heal the target
@@ -1771,13 +1789,21 @@ class SessionManager:
 
             # 2. Transition back to PLAYING
             session.transition_to(SessionState.PLAYING)
-            self._event_bus.emit(EventType.HEAL_SUCCEEDED, session_id=session_id)
+            self._event_bus.emit(
+                EventType.HEAL_SUCCEEDED,
+                session_id=session_id,
+                payload={"mode": "full_recovery", "source_health": source_health.model_dump() if source_health else None},
+            )
         except Exception as e:
             session.transition_to(SessionState.FAILED)
             self._event_bus.emit(
                 EventType.HEAL_FAILED,
                 session_id=session_id,
-                payload={"error": str(e)},
+                payload={
+                    "error": str(e),
+                    "mode": "full_recovery",
+                    "source_health": source_health.model_dump() if source_health else None,
+                },
             )
 
     def terminate(self, session_id: str) -> None:
