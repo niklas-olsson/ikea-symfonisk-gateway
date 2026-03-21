@@ -52,7 +52,9 @@ class _BlueZAdapterController(Protocol):
 
     async def disconnect_device(self, device_path: str) -> bool: ...
 
-    async def remove_device(self, device_path: str) -> None: ...
+    async def remove_device(self, device_path: str) -> bool: ...
+
+    async def set_device_trusted(self, device_path: str, trusted: bool) -> bool: ...
 
 
 class _PairingWindowManager(Protocol):
@@ -151,7 +153,11 @@ class LinuxBluetoothAdapter(IngressAdapter):
         for mac in macs_to_connect:
             device_path = self._adapter_controller.get_device_path(mac)
             logger.info(f"Attempting auto-reconnect to {mac} ({device_path})")
-            success = await self._adapter_controller.connect_device(device_path)
+            try:
+                success = await self._adapter_controller.connect_device(device_path)
+            except Exception as e:
+                logger.error(f"Auto-reconnect failed for {mac} due to error: {e}")
+                continue
             if success:
                 logger.info(f"Successfully auto-reconnected to {mac}")
             else:
@@ -419,6 +425,13 @@ class LinuxBluetoothAdapter(IngressAdapter):
         if shutil.which("pw-cli"):
             backend_type = "PipeWire"
 
+        # Check for audio backend utilities
+        if backend_type == "PulseAudio" and not shutil.which("pactl"):
+            errors.append("missing_pactl")
+        elif backend_type == "PipeWire" and not (shutil.which("pactl") or shutil.which("pw-link")):
+            # PipeWire can use pactl (compat) or its own tools
+            errors.append("missing_audio_tools")
+
         return {
             "adapter_id": self.id(),
             "properties": props,
@@ -459,7 +472,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
         return await self._adapter_controller.set_pairable(enabled)
 
     def trust_device(self, mac: str, alias: str | None = None) -> None:
-        """Add device to trusted store."""
+        """Add device to trusted store and notify BlueZ."""
         metadata: dict[str, Any] = {}
         try:
             metadata = {"timestamp": asyncio.get_event_loop().time()}
@@ -467,13 +480,26 @@ class LinuxBluetoothAdapter(IngressAdapter):
             metadata = {"timestamp": 0}
         if alias:
             metadata["alias"] = alias
+
         self._store.trust_device(mac, metadata)
+
+        # Also attempt to set Trusted=True on the BlueZ device
+        if self._adapter_controller:
+            device_path = self._adapter_controller.get_device_path(mac)
+            asyncio.create_task(self._adapter_controller.set_device_trusted(device_path, True))
+
         if self._event_bus:
             self._event_bus.emit(EventType.BLUETOOTH_DEVICE_TRUSTED, payload={"mac": mac, "alias": alias})
 
     def forget_device(self, mac: str) -> None:
-        """Remove device from trusted store."""
+        """Remove device from trusted store and notify BlueZ."""
         self._store.forget_device(mac)
+
+        # Also attempt to set Trusted=False on the BlueZ device
+        if self._adapter_controller:
+            device_path = self._adapter_controller.get_device_path(mac)
+            asyncio.create_task(self._adapter_controller.set_device_trusted(device_path, False))
+
         if self._event_bus:
             self._event_bus.emit(EventType.BLUETOOTH_DEVICE_UNTRUSTED, payload={"mac": mac})
 
@@ -537,7 +563,12 @@ class LinuxBluetoothAdapter(IngressAdapter):
         """Remove (unpair) and forget a Bluetooth device."""
         if self._adapter_controller is not None:
             device_path = self._adapter_controller.get_device_path(mac)
-            await self._adapter_controller.remove_device(device_path)
+            try:
+                await self._adapter_controller.remove_device(device_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove device {mac} from BlueZ: {e}")
+
+        # Always ensure it is removed from our store even if BlueZ remove fails
         self.forget_device(mac)
         return True
 

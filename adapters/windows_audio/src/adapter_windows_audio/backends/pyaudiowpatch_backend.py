@@ -274,7 +274,7 @@ class PyAudioWPatchBackend:
                 loopback_supported=True,
                 default_output_detected=False,
                 code="windows_loopback_device_not_found",
-                message="The default Windows output device was not found for loopback capture.",
+                message="The default Windows output device was not found for loopback capture. Ensure a playback device is enabled.",
             )
 
         return BackendProbeResult(

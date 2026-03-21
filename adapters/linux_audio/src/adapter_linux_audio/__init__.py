@@ -4,8 +4,14 @@ Captures system audio from default output using PulseAudio or ALSA.
 Emits canonical PCM 48kHz stereo frames.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from bridge_core.core.event_bus import EventBus
 
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
@@ -25,7 +31,8 @@ logger = logging.getLogger(__name__)
 class LinuxAudioAdapter(IngressAdapter):
     """Adapter for capturing system audio on Linux."""
 
-    def __init__(self) -> None:
+    def __init__(self, event_bus: "EventBus" | None = None) -> None:
+        self._event_bus = event_bus
         self._session_id: str | None = None
         self._running = False
         self._process: asyncio.subprocess.Process | None = None
@@ -67,11 +74,11 @@ class LinuxAudioAdapter(IngressAdapter):
 
                 line_str = line.decode().strip()
                 if "Event 'new'" in line_str or "Event 'remove'" in line_str:
-                    # In a fully integrated system we would emit this to the core
-                    # For now we log it. The interface requires capabilities reporting
-                    # supports_hotplug_events=True, and implies an eventual callback or polling
-                    # from the core.
                     logger.debug(f"Audio source changed: {line_str}")
+                    if self._event_bus:
+                        from bridge_core.core.event_bus import EventType
+
+                        self._event_bus.emit(EventType.TOPOLOGY_CHANGED, payload={"adapter_id": self.id()})
 
         except asyncio.CancelledError:
             if process:
@@ -101,12 +108,11 @@ class LinuxAudioAdapter(IngressAdapter):
         )
 
     def list_sources(self) -> list[SourceDescriptor]:
-        # Simple static return for now, but will make it dynamic using pactl/arecord
+        """Enumerate available PulseAudio and ALSA sources."""
         sources = []
-
-        # Try to discover PulseAudio sinks
         import subprocess
 
+        # 1. Try to discover PulseAudio sources
         try:
             result = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, check=True)
             for line in result.stdout.strip().split("\n"):
@@ -115,14 +121,15 @@ class LinuxAudioAdapter(IngressAdapter):
                 parts = line.split("\t")
                 if len(parts) >= 2:
                     source_id = parts[1]
-                    display_name = f"PulseAudio: {source_id}"
-                    source_type = SourceType.SYSTEM_AUDIO
 
                     if "monitor" in source_id:
-                        display_name = f"System Audio ({source_id})"
+                        # Monitor sources are used for system audio capture
+                        clean_name = source_id.replace(".monitor", "").replace("alsa_output.", "")
+                        display_name = f"System Audio (Monitor of {clean_name})"
                         source_type = SourceType.SYSTEM_AUDIO
-                    elif "alsa_input" in source_id:
-                        display_name = f"Microphone/Line-In ({source_id})"
+                    else:
+                        clean_name = source_id.replace("alsa_input.", "")
+                        display_name = f"Microphone ({clean_name})"
                         source_type = SourceType.MICROPHONE
 
                     sources.append(
@@ -139,34 +146,38 @@ class LinuxAudioAdapter(IngressAdapter):
                         )
                     )
         except (subprocess.SubprocessError, FileNotFoundError):
-            # Fallback to ALSA if pactl fails or not found
-            try:
-                result = subprocess.run(["arecord", "-l"], capture_output=True, text=True, check=True)
-                for line in result.stdout.split("\n"):
-                    if line.startswith("card "):
-                        # e.g. card 0: PCH [HDA Intel PCH], device 0: ALC294 Analog [ALC294 Analog]
-                        # Extract card number and device number to form plughw:X,Y
-                        parts = line.split(",")
-                        card_str = parts[0].split(":")[0].replace("card ", "").strip()
-                        dev_str = parts[1].split(":")[0].replace(" device ", "").strip()
-                        source_id = f"plughw:{card_str},{dev_str}"
-                        display_name = f"ALSA: {parts[0].split(':')[1].strip()}"
+            logger.debug("PulseAudio discovery (pactl) failed or not available.")
 
-                        sources.append(
-                            SourceDescriptor(
-                                source_id=source_id,
-                                source_type=SourceType.MICROPHONE,  # hard to know, assume Input
-                                display_name=display_name,
-                                platform="linux",
-                                capabilities=SourceCapabilities(
-                                    sample_rates=[48000],
-                                    channels=[2],
-                                    bit_depths=[16],
-                                ),
-                            )
+        # 2. Try to discover ALSA sources
+        try:
+            result = subprocess.run(["arecord", "-l"], capture_output=True, text=True, check=True)
+            for line in result.stdout.split("\n"):
+                if line.startswith("card "):
+                    # e.g. card 0: PCH [HDA Intel PCH], device 0: ALC294 Analog [ALC294 Analog]
+                    # Extract card number and device number to form plughw:X,Y
+                    parts = line.split(",")
+                    if len(parts) < 2:
+                        continue
+                    card_str = parts[0].split(":")[0].replace("card ", "").strip()
+                    dev_str = parts[1].split(":")[0].replace(" device ", "").strip()
+                    source_id = f"plughw:{card_str},{dev_str}"
+                    display_name = f"ALSA: {parts[0].split(':')[1].strip()} (Device {dev_str})"
+
+                    sources.append(
+                        SourceDescriptor(
+                            source_id=source_id,
+                            source_type=SourceType.MICROPHONE,  # ALSA arecord sources are typically inputs
+                            display_name=display_name,
+                            platform="linux",
+                            capabilities=SourceCapabilities(
+                                sample_rates=[48000],
+                                channels=[2],
+                                bit_depths=[16],
+                            ),
                         )
-            except (subprocess.SubprocessError, FileNotFoundError):
-                pass
+                    )
+        except (subprocess.SubprocessError, FileNotFoundError):
+            logger.debug("ALSA discovery (arecord) failed or not available.")
 
         # If nothing found, provide a fallback default
         if not sources:
@@ -200,10 +211,6 @@ class LinuxAudioAdapter(IngressAdapter):
         return PrepareResult(success=False, source_id=source_id, error=f"Source {source_id} not found in system")
 
     def start(self, source_id: str, frame_sink: FrameSink) -> StartResult:
-        self._session_id = f"sess_{id(self)}"
-        self._frame_sink = frame_sink
-        self._running = True
-
         import shutil
 
         backend = "unknown"
@@ -211,6 +218,16 @@ class LinuxAudioAdapter(IngressAdapter):
             backend = "parec"
         elif shutil.which("arecord"):
             backend = "arecord"
+        else:
+            return StartResult(
+                success=False,
+                code="linux_audio_backend_missing",
+                message="Neither 'parec' nor 'arecord' was found in the system PATH. Cannot capture audio.",
+            )
+
+        self._session_id = f"sess_{id(self)}"
+        self._frame_sink = frame_sink
+        self._running = True
 
         self._capture_task = asyncio.create_task(self._capture_loop(source_id))
         return StartResult(success=True, session_id=self._session_id, backend=backend)

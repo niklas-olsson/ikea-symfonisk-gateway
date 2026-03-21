@@ -80,7 +80,7 @@ def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventB
     normalized_platform = (host_platform or platform.system()).lower()
 
     if normalized_platform == "linux":
-        linux_audio_adapter = LinuxAudioAdapter()
+        linux_audio_adapter = LinuxAudioAdapter(event_bus)
         source_registry.register_adapter(
             adapter_id=linux_audio_adapter.id(),
             platform=linux_audio_adapter.platform(),
