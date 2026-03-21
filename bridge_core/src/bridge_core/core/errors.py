@@ -10,6 +10,7 @@ class SessionError(BaseModel):
     message: str
     subsystem: str
     action: str
+    details: dict[str, object] | None = None
 
 
 # Error categories
@@ -21,9 +22,11 @@ FRAME_INGEST_FAILED = "frame_ingest_failed"
 SOURCE_ADAPTER_PLATFORM_MISMATCH = "source_adapter_platform_mismatch"
 
 # Windows-specific errors
-WINDOWS_LOOPBACK_NOT_SUPPORTED = "windows_loopback_not_supported"
+WINDOWS_LOOPBACK_BACKEND_MISSING = "windows_loopback_backend_missing"
+WINDOWS_LOOPBACK_PROBE_FAILED = "windows_loopback_probe_failed"
 WINDOWS_LOOPBACK_START_FAILED = "windows_loopback_start_failed"
-WINDOWS_OUTPUT_DEVICE_NOT_FOUND = "windows_output_device_not_found"
+WINDOWS_LOOPBACK_DEVICE_NOT_FOUND = "windows_loopback_device_not_found"
+WINDOWS_LOOPBACK_CAPTURE_STALLED = "windows_loopback_capture_stalled"
 WINDOWS_OUTPUT_DEVICE_ACCESS_DENIED = "windows_output_device_access_denied"
 WINDOWS_OUTPUT_DEVICE_SILENT = "windows_output_device_silent"
 WINDOWS_AUDIO_LIBRARY_MISCONFIGURED = "windows_audio_library_misconfigured"
@@ -59,20 +62,30 @@ ERROR_DETAILS = {
         "subsystem": "source_registry",
         "action": "Check source registration and adapter selection logic.",
     },
-    WINDOWS_LOOPBACK_NOT_SUPPORTED: {
-        "message": "Windows system audio capture requires wasapi_loopback or similar Windows-native backend",
+    WINDOWS_LOOPBACK_BACKEND_MISSING: {
+        "message": "No Windows loopback-capable backend is installed.",
         "subsystem": "source",
-        "action": "Ensure you are on Windows 10 or later and your audio driver supports loopback.",
+        "action": "Install the supported Windows system-audio backend and restart the bridge.",
+    },
+    WINDOWS_LOOPBACK_PROBE_FAILED: {
+        "message": "The Windows loopback backend could not initialize the default output device.",
+        "subsystem": "source",
+        "action": "Check the default Windows playback device and backend logs, then restart the bridge.",
     },
     WINDOWS_LOOPBACK_START_FAILED: {
         "message": "Failed to start Windows loopback capture.",
         "subsystem": "source",
         "action": "Check if another application has exclusive control of the audio device.",
     },
-    WINDOWS_OUTPUT_DEVICE_NOT_FOUND: {
-        "message": "The specified Windows output device was not found.",
+    WINDOWS_LOOPBACK_DEVICE_NOT_FOUND: {
+        "message": "The default Windows output device was not found for loopback capture.",
         "subsystem": "source",
         "action": "Verify the device is connected and visible in Windows Sound Settings.",
+    },
+    WINDOWS_LOOPBACK_CAPTURE_STALLED: {
+        "message": "Windows loopback capture started but did not establish an active stream.",
+        "subsystem": "source",
+        "action": "Start audio playback on the default Windows output device and check adapter logs for backend errors.",
     },
     WINDOWS_OUTPUT_DEVICE_ACCESS_DENIED: {
         "message": "Access to the Windows output device was denied.",
@@ -92,9 +105,9 @@ ERROR_DETAILS = {
 }
 
 
-def create_session_error(code: str, custom_message: str | None = None) -> SessionError:
+def create_session_error(code: str, custom_message: str | None = None, details: dict[str, object] | None = None) -> SessionError:
     """Create a SessionError instance from a code."""
-    details = ERROR_DETAILS.get(
+    error_details = ERROR_DETAILS.get(
         code,
         {
             "message": custom_message or "An unknown error occurred.",
@@ -104,7 +117,8 @@ def create_session_error(code: str, custom_message: str | None = None) -> Sessio
     )
     return SessionError(
         code=code,
-        message=custom_message or details["message"],
-        subsystem=details["subsystem"],
-        action=details["action"],
+        message=custom_message or error_details["message"],
+        subsystem=error_details["subsystem"],
+        action=error_details["action"],
+        details=details,
     )

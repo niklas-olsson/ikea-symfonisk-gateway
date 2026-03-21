@@ -38,9 +38,7 @@ async def test_register_adapter_async(registry: SourceRegistry, event_bus: Event
         )
     ]
 
-    registry.register_adapter(
-        adapter_id="test_adapter", platform="test", version="1.0.0", capabilities=capabilities, sources=sources
-    )
+    registry.register_adapter(adapter_id="test_adapter", platform="test", version="1.0.0", capabilities=capabilities, sources=sources)
 
     e1 = await asyncio.wait_for(queue.get(), timeout=1.0)
     e2 = await asyncio.wait_for(queue.get(), timeout=1.0)
@@ -323,6 +321,29 @@ async def test_overlapping_local_source_ids_are_canonicalized_per_adapter(regist
     assert linux_source is not None
     assert linux_source.adapter_id == "linux-audio-adapter"
     assert linux_source.local_source_id == "default"
+
+
+@pytest.mark.asyncio
+async def test_system_output_uses_system_slug(registry: SourceRegistry) -> None:
+    registry.register_adapter(
+        adapter_id="windows-audio-adapter",
+        platform="windows",
+        version="1.0.0",
+        capabilities=AdapterCapabilities(supports_system_audio=True),
+        sources=[
+            SourceDescriptor(
+                source_id="default",
+                source_type=SourceType.SYSTEM_OUTPUT,
+                display_name="Windows Default Output",
+                platform="windows",
+                capabilities=SourceCapabilities(),
+            )
+        ],
+    )
+
+    source = registry.get_source("windows-audio-adapter:system:default")
+    assert source is not None
+    assert source.source_type == SourceType.SYSTEM_OUTPUT
 
 
 @pytest.mark.asyncio
