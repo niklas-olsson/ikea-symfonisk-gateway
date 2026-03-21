@@ -35,27 +35,27 @@ ERROR_DETAILS = {
     MEDIA_ENGINE_NOT_FOUND: {
         "message": "FFmpeg executable not found or not executable.",
         "subsystem": "media_engine",
-        "action": "Install FFmpeg and ensure it's in your PATH or configure 'ffmpeg_path'.",
+        "action": "Install FFmpeg using your system's package manager (e.g., 'sudo apt install ffmpeg' or 'brew install ffmpeg') and ensure it is in your system PATH.",
     },
     PIPELINE_START_FAILED: {
         "message": "Failed to initialize the audio processing pipeline.",
         "subsystem": "pipeline",
-        "action": "Check system logs for FFmpeg process errors.",
+        "action": "Check if FFmpeg is installed correctly and has permission to run. If the problem persists, check the bridge logs for the specific FFmpeg command failure.",
     },
     RENDERER_PLAYBACK_FAILED: {
         "message": "The speaker failed to start playing the stream.",
         "subsystem": "renderer",
-        "action": "Ensure the speaker is reachable and supports the selected stream profile.",
+        "action": "Verify that your SYMFONISK or Sonos speaker is powered on, connected to the network, and visible in the official Sonos app. Try restarting the speaker if it remains unresponsive.",
     },
     SOURCE_START_FAILED: {
         "message": "Failed to capture audio from the source.",
         "subsystem": "source",
-        "action": "Verify source hardware connection and permissions.",
+        "action": "Check your audio hardware connections. If using a system audio capture, ensure no other application has exclusive control of the audio device and that the bridge has necessary OS-level permissions.",
     },
     FRAME_INGEST_FAILED: {
         "message": "Session started but no audio data was received from the source.",
         "subsystem": "pipeline",
-        "action": "Check source signal and adapter logs.",
+        "action": "Ensure that audio is actually playing on your source device. For Bluetooth, verify the device is actively streaming audio to the bridge.",
     },
     SOURCE_ADAPTER_PLATFORM_MISMATCH: {
         "message": "Source platform does not match adapter platform.",

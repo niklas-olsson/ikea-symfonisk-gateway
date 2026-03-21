@@ -43,6 +43,7 @@ class SessionListResponse(BaseModel):
 async def create_session(request: Request, body: CreateSessionRequest) -> SessionResponse:
     """Create a new playback session."""
     manager: SessionManager = request.app.state.session_manager
+    source_registry = request.app.state.source_registry
     try:
         session = manager.create(
             source_id=body.source_id,
@@ -50,7 +51,8 @@ async def create_session(request: Request, body: CreateSessionRequest) -> Sessio
             stream_profile=body.stream_profile,
             auto_heal=body.auto_heal,
         )
-        return SessionResponse(**session.to_dict())
+        source_health = source_registry.get_source_health(session.source_id)
+        return SessionResponse(**session.to_dict(source_health=source_health))
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -62,7 +64,8 @@ async def create_session(request: Request, body: CreateSessionRequest) -> Sessio
 async def list_sessions(request: Request) -> SessionListResponse:
     """List all known sessions."""
     manager: SessionManager = request.app.state.session_manager
-    sessions = [SessionResponse(**s.to_dict()) for s in manager.list()]
+    source_registry = request.app.state.source_registry
+    sessions = [SessionResponse(**s.to_dict(source_health=source_registry.get_source_health(s.source_id))) for s in manager.list()]
     return SessionListResponse(sessions=sessions)
 
 
@@ -70,13 +73,15 @@ async def list_sessions(request: Request) -> SessionListResponse:
 async def get_session(request: Request, session_id: str) -> SessionResponse:
     """Get session details."""
     manager: SessionManager = request.app.state.session_manager
+    source_registry = request.app.state.source_registry
     session = manager.get(session_id)
     if not session:
         raise HTTPException(
             status_code=404,
             detail={"code": "SESSION_NOT_FOUND", "message": f"Session {session_id} not found"},
         )
-    return SessionResponse(**session.to_dict())
+    source_health = source_registry.get_source_health(session.source_id)
+    return SessionResponse(**session.to_dict(source_health=source_health))
 
 
 @router.post("/{session_id}/start", responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
