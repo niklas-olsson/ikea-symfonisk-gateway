@@ -142,6 +142,26 @@ The Docker image exposes:
 - `8732` — REST API
 - `8080` — Audio stream
 
+#### Persistent Storage
+To persist Bluetooth pairings and 'Trusted/Preferred' settings, you must mount a local directory to `/app/config`:
+```yaml
+volumes:
+  - ./config:/app/config
+```
+
+#### Bluetooth Requirements
+Running the Bluetooth adapter inside Docker requires access to the host's BlueZ stack and specific capabilities:
+```yaml
+cap_add:
+  - NET_ADMIN
+  - SYS_ADMIN
+devices:
+  - /dev/bus/usb:/dev/bus/usb
+volumes:
+  - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+  - /var/lib/bluetooth:/var/lib/bluetooth
+```
+
 ### Option C: Docker (Manual)
 
 ```bash
@@ -241,7 +261,7 @@ ADAPTER_LINUX_AUDIO_SOURCE=<pulse-source-name>
 
 ### Linux Bluetooth Adapter
 
-For streaming audio via Bluetooth (e.g., from a phone or computer):
+For streaming audio via Bluetooth (e.g., from a phone or turntable):
 
 ```bash
 # Install dependencies
@@ -260,11 +280,11 @@ bluetoothctl
 [bluetooth]# trust XX:XX:XX:XX:XX:XX
 ```
 
-Configure in your `.env`:
-
-```bash
-ADAPTER_LINUX_BLUETOOTH_DEVICE=<bluetooth-device-mac>
-```
+#### Auto-Play & Persistence
+The gateway can automatically start playing audio when a trusted device connects.
+1.  **Trust the device**: In the Web UI, go to the Bluetooth settings and mark the device as **Trusted**.
+2.  **Pre-select the target**: Mark the device as **Preferred** if you want it to automatically start a session to your primary speaker on connection.
+3.  **Persistence**: These settings are saved to `/app/config/bluetooth_trusted_devices.json`. Ensure this path is persistent (see [Docker](#docker) section).
 
 ---
 
