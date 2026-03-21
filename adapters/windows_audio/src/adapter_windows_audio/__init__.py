@@ -8,9 +8,12 @@ import logging
 import platform
 import sys
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import sounddevice as sd
 
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
