@@ -13,12 +13,12 @@ services:
       - BRIDGE_API_PORT=8732
       - BRIDGE_STREAM_PORT=8080
       - LOG_LEVEL=INFO
-      - XDG_RUNTIME_DIR=/run/user/1000
-      - PULSE_SERVER=unix:/run/user/1000/pulse/native
+      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/1000}
+      - PULSE_SERVER=unix:${XDG_RUNTIME_DIR:-/run/user/1000}/pulse/native
     volumes:
       - ./config:/app/config
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
-      - /run/user/1000/pipewire-0:/run/user/1000/pipewire-0
-      - /run/user/1000/pulse:/run/user/1000/pulse
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/pipewire-0:${XDG_RUNTIME_DIR:-/run/user/1000}/pipewire-0
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/pulse:${XDG_RUNTIME_DIR:-/run/user/1000}/pulse
       - /var/lib/bluetooth:/var/lib/bluetooth
     restart: unless-stopped
