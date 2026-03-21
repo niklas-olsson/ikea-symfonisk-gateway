@@ -159,6 +159,16 @@ class SourceRegistry:
         """Get the latest health status for a source."""
         return self._source_health.get(source_id)
 
+    def probe_source_health(self, source_id: str) -> HealthResult | None:
+        """Probes source health and updates the registry."""
+        adapter_info = self._get_adapter_info_for_source(source_id)
+        if not adapter_info or not adapter_info.adapter:
+            return None
+
+        health = adapter_info.adapter.probe_health(source_id)
+        self.update_source_health(source_id, health)
+        return health
+
     def get_adapter(self, adapter_id: str) -> AdapterInfo | None:
         """Get adapter info."""
         return self._adapters.get(adapter_id)

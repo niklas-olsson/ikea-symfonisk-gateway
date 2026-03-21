@@ -1,30 +1,25 @@
 import sys
 from unittest.mock import MagicMock, patch
 
-# Mock sounddevice BEFORE importing the adapter
 mock_sd = MagicMock()
 sys.modules["sounddevice"] = mock_sd
 
-import adapter_windows_audio  # noqa: E402
 import numpy as np  # noqa: E402
-
-adapter_windows_audio.sd = mock_sd  # Force it just in case
-
 from adapter_windows_audio import WindowsAudioAdapter  # noqa: E402
 from ingress_sdk.types import SourceType  # noqa: E402
 
 
-def test_adapter_id():
+def test_adapter_id() -> None:
     adapter = WindowsAudioAdapter()
     assert adapter.id() == "windows-audio-adapter"
 
 
-def test_adapter_platform():
+def test_adapter_platform() -> None:
     adapter = WindowsAudioAdapter()
     assert adapter.platform() == "windows"
 
 
-def test_adapter_capabilities():
+def test_adapter_capabilities() -> None:
     adapter = WindowsAudioAdapter()
     caps = adapter.capabilities()
     assert caps.supports_system_audio is True
@@ -34,18 +29,14 @@ def test_adapter_capabilities():
 
 @patch("platform.system")
 @patch("adapter_windows_audio._get_sd")
-def test_list_sources_windows(mock_get_sd, mock_platform):
+def test_list_sources_windows(mock_get_sd: MagicMock, mock_platform: MagicMock) -> None:
     mock_platform.return_value = "Windows"
-    mock_sd = MagicMock()
-    mock_get_sd.return_value = mock_sd
+    local_mock_sd = MagicMock()
+    mock_get_sd.return_value = local_mock_sd
 
-    # Mock WASAPI host API
-    mock_sd.query_hostapis.return_value = [{"name": "MME"}, {"name": "Windows WASAPI"}, {"name": "DirectSound"}]
+    local_mock_sd.query_hostapis.return_value = [{"name": "MME"}, {"name": "Windows WASAPI"}, {"name": "DirectSound"}]
 
-    # Mock devices
-    # Render endpoints have max_output_channels > 0
-    # Capture endpoints have max_input_channels > 0
-    mock_sd.query_devices.return_value = [
+    local_mock_sd.query_devices.return_value = [
         {"name": "Speakers (Realtek)", "hostapi": 1, "max_input_channels": 0, "max_output_channels": 2, "default_samplerate": 48000.0},
         {"name": "Microphone (Realtek)", "hostapi": 1, "max_input_channels": 1, "max_output_channels": 0, "default_samplerate": 44100.0},
         {"name": "Other device", "hostapi": 0, "max_input_channels": 2, "max_output_channels": 0, "default_samplerate": 48000.0},
@@ -54,7 +45,6 @@ def test_list_sources_windows(mock_get_sd, mock_platform):
     adapter = WindowsAudioAdapter()
     sources = adapter.list_sources()
 
-    # Should have Default System Sound windows + 2 discovered WASAPI devices
     assert len(sources) == 3
     assert sources[0].display_name == "Default System Sound windows"
     assert sources[0].source_type == SourceType.SYSTEM_AUDIO
@@ -67,67 +57,62 @@ def test_list_sources_windows(mock_get_sd, mock_platform):
 
 
 @patch("platform.system")
-def test_list_sources_non_windows(mock_platform):
+def test_list_sources_non_windows(mock_platform: MagicMock) -> None:
     mock_platform.return_value = "Linux"
     adapter = WindowsAudioAdapter()
     sources = adapter.list_sources()
-    # Should still have the "Default" entry
     assert len(sources) == 1
     assert sources[0].display_name == "Default System Sound windows"
 
 
 @patch("platform.system")
 @patch("adapter_windows_audio._get_sd")
-def test_start_stop_session(mock_get_sd, mock_platform):
+def test_start_stop_session(mock_get_sd: MagicMock, mock_platform: MagicMock) -> None:
     mock_platform.return_value = "Windows"
-    mock_sd = MagicMock()
-    mock_get_sd.return_value = mock_sd
+    local_mock_sd = MagicMock()
+    mock_get_sd.return_value = local_mock_sd
 
     adapter = WindowsAudioAdapter()
     frame_sink = MagicMock()
 
-    # Start with default (which is system output, so should use loopback)
     result = adapter.start("default", frame_sink)
     assert result.success is True
     assert result.session_id is not None
     assert adapter._running is True
-    mock_sd.WasapiSettings.assert_called_once_with(loopback=True)
+    local_mock_sd.WasapiSettings.assert_called_once_with(loopback=True)
 
-    # Stop
     adapter.stop(result.session_id)
     assert adapter._running is False
     assert adapter._session_id is None
 
 
-def test_audio_callback():
+def test_audio_callback() -> None:
     adapter = WindowsAudioAdapter()
     frame_sink = MagicMock()
     adapter._frame_sink = frame_sink
     adapter._running = True
 
-    # 10ms of 48kHz stereo 16-bit PCM = 480 frames
     indata = np.zeros((480, 2), dtype="int16")
     adapter._audio_callback(indata, 480, None, None)
 
     frame_sink.on_frame.assert_called_once()
     args, _ = frame_sink.on_frame.call_args
-    assert len(args[0]) == 480 * 2 * 2  # bytes
-    assert args[1] == 0  # pts_ns
-    assert args[2] == 10000000  # duration_ns (10ms)
+    assert len(args[0]) == 480 * 2 * 2
+    assert args[1] == 0
+    assert args[2] == 10000000
 
 
-def test_audio_callback_mono():
+def test_audio_callback_mono() -> None:
     adapter = WindowsAudioAdapter()
     frame_sink = MagicMock()
     adapter._frame_sink = frame_sink
     adapter._running = True
 
-    # 10ms of 48kHz mono 16-bit PCM = 480 frames
     indata = np.zeros((480, 1), dtype="int16")
     adapter._audio_callback(indata, 480, None, None)
 
     frame_sink.on_frame.assert_called_once()
     args, _ = frame_sink.on_frame.call_args
-    assert len(args[0]) == 480 * 2 * 2  # bytes (normalized to stereo)
-    assert args[1] == 0  # pts_ns
-    assert args[2] == 10000000  # duration_ns (10ms)
+    assert len(args[0]) == 480 * 2 * 2
+    assert args[1] == 0
+    assert args[2] == 10000000

@@ -19,6 +19,14 @@ RENDERER_PLAYBACK_FAILED = "renderer_playback_failed"
 SOURCE_START_FAILED = "source_start_failed"
 FRAME_INGEST_FAILED = "frame_ingest_failed"
 
+# Windows-specific errors
+WINDOWS_LOOPBACK_NOT_SUPPORTED = "windows_loopback_not_supported"
+WINDOWS_LOOPBACK_START_FAILED = "windows_loopback_start_failed"
+WINDOWS_OUTPUT_DEVICE_NOT_FOUND = "windows_output_device_not_found"
+WINDOWS_OUTPUT_DEVICE_ACCESS_DENIED = "windows_output_device_access_denied"
+WINDOWS_OUTPUT_DEVICE_SILENT = "windows_output_device_silent"
+WINDOWS_AUDIO_LIBRARY_MISCONFIGURED = "windows_audio_library_misconfigured"
+
 ERROR_DETAILS = {
     MEDIA_ENGINE_NOT_FOUND: {
         "message": "FFmpeg executable not found or not executable.",
@@ -44,6 +52,36 @@ ERROR_DETAILS = {
         "message": "Session started but no audio data was received from the source.",
         "subsystem": "pipeline",
         "action": "Check source signal and adapter logs.",
+    },
+    WINDOWS_LOOPBACK_NOT_SUPPORTED: {
+        "message": "Windows WASAPI loopback is not supported on this device or version of Windows.",
+        "subsystem": "source",
+        "action": "Ensure you are on Windows 10 or later and your audio driver supports loopback.",
+    },
+    WINDOWS_LOOPBACK_START_FAILED: {
+        "message": "Failed to start Windows loopback capture.",
+        "subsystem": "source",
+        "action": "Check if another application has exclusive control of the audio device.",
+    },
+    WINDOWS_OUTPUT_DEVICE_NOT_FOUND: {
+        "message": "The specified Windows output device was not found.",
+        "subsystem": "source",
+        "action": "Verify the device is connected and visible in Windows Sound Settings.",
+    },
+    WINDOWS_OUTPUT_DEVICE_ACCESS_DENIED: {
+        "message": "Access to the Windows output device was denied.",
+        "subsystem": "source",
+        "action": "Check Windows Privacy settings for Microphone/Audio access and ensure the bridge has permission.",
+    },
+    WINDOWS_OUTPUT_DEVICE_SILENT: {
+        "message": "Windows loopback started successfully but no audio was detected.",
+        "subsystem": "source",
+        "action": "Ensure that some audio is actually playing on the selected output device.",
+    },
+    WINDOWS_AUDIO_LIBRARY_MISCONFIGURED: {
+        "message": "The Windows audio capture library (sounddevice/PortAudio) is misconfigured.",
+        "subsystem": "source",
+        "action": "Reinstall dependencies and ensure PortAudio is correctly installed.",
     },
 }
 

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:
-    import sounddevice as sd
+    import sounddevice as sd  # type: ignore[import-untyped]
 
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
@@ -30,7 +30,7 @@ from ingress_sdk.types import (
 logger = logging.getLogger(__name__)
 
 
-def _get_sd():
+def _get_sd() -> Any:
     """Helper to get sounddevice module, handled missing library on non-Windows."""
     try:
         import sounddevice as sd
@@ -50,6 +50,7 @@ class WindowsAudioAdapter(IngressAdapter):
         self._frame_sink: FrameSink | None = None
         self._start_time: float = 0
         self._samples_captured: int = 0
+        self._last_samples_captured: int = 0
         self._last_error: str | None = None
         self._dropped_frames: int = 0
 
@@ -114,7 +115,8 @@ class WindowsAudioAdapter(IngressAdapter):
                     continue
 
                 source_id = str(i)
-                display_name = dev["name"]
+                dev_name = dev["name"]
+                display_name = dev_name
 
                 # In sounddevice WASAPI, render endpoints (outputs) have max_output_channels > 0
                 # Capture endpoints (inputs) have max_input_channels > 0
@@ -171,19 +173,24 @@ class WindowsAudioAdapter(IngressAdapter):
         if platform.system() != "Windows":
             return PrepareResult(success=False, source_id=source_id, error="Not on Windows platform")
 
-        if source_id == "default":
-            return PrepareResult(success=True, source_id=source_id)
-
         sd = _get_sd()
         if sd is None:
-            return PrepareResult(success=False, source_id=source_id, error="sounddevice not available")
+            return PrepareResult(
+                success=False,
+                source_id=source_id,
+                error="sounddevice library or PortAudio missing",
+                code="windows_audio_library_misconfigured",
+            )
+
+        if source_id == "default":
+            return PrepareResult(success=True, source_id=source_id)
 
         try:
             device_index = int(source_id)
             sd.query_devices(device_index)
             return PrepareResult(success=True, source_id=source_id)
         except (ValueError, Exception) as e:
-            return PrepareResult(success=False, source_id=source_id, error=str(e))
+            return PrepareResult(success=False, source_id=source_id, error=str(e), code="windows_output_device_not_found")
 
     def start(self, source_id: str, frame_sink: FrameSink) -> StartResult:
         if self._running:
@@ -191,10 +198,27 @@ class WindowsAudioAdapter(IngressAdapter):
 
         sd = _get_sd()
         if sd is None:
-            return StartResult(success=False, message="sounddevice not available")
+            return StartResult(
+                success=False,
+                message="sounddevice library or PortAudio missing",
+                code="windows_audio_library_misconfigured",
+            )
 
         self._frame_sink = frame_sink
         self._session_id = f"win_sess_{int(time.time())}"
+
+        # Determine source type to decide on loopback
+        source_type = SourceType.SYSTEM_AUDIO
+        if source_id != "default":
+            try:
+                sources = self.list_sources()
+                matching = [s for s in sources if s.source_id == source_id]
+                if matching:
+                    source_type = matching[0].source_type
+                else:
+                    return StartResult(success=False, message=f"Source {source_id} not found", code="windows_output_device_not_found")
+            except Exception:
+                pass  # Fallback to SYSTEM_AUDIO if discovery fails
 
         try:
             device_index = None if source_id == "default" else int(source_id)
@@ -210,31 +234,47 @@ class WindowsAudioAdapter(IngressAdapter):
             extra_settings = None
             if is_loopback:
                 try:
-                    # Fix the 'unexpected keyword loopback' by ensuring we are using it correctly
-                    # In some sounddevice versions, loopback is a boolean in WasapiSettings
                     extra_settings = sd.WasapiSettings(loopback=True)
                 except (AttributeError, TypeError):
                     logger.warning("sd.WasapiSettings doesn't support loopback=True, attempting fallback")
-                    # Fallback to no settings or other discovery if needed
 
-            self._stream = sd.InputStream(
-                device=device_index,
-                channels=2,
-                samplerate=48000,
-                dtype="int16",
-                extra_settings=extra_settings,
-                callback=self._audio_callback,
-            )
-            self._stream.start()
+            try:
+                self._stream = sd.InputStream(
+                    device=device_index,
+                    channels=2,
+                    samplerate=48000,
+                    dtype="int16",
+                    extra_settings=extra_settings,
+                    callback=self._audio_callback,
+                )
+                self._stream.start()
+            except Exception as e:
+                err_msg = str(e).lower()
+                code = "source_start_failed"
+                if "invalid device" in err_msg or "device not found" in err_msg:
+                    code = "windows_output_device_not_found"
+                elif "access denied" in err_msg or "permission" in err_msg:
+                    code = "windows_output_device_access_denied"
+                elif source_type == SourceType.SYSTEM_AUDIO:
+                    if "not supported" in err_msg or "format" in err_msg:
+                        code = "windows_loopback_not_supported"
+                    else:
+                        code = "windows_loopback_start_failed"
+
+                logger.error(f"Failed to start Windows audio capture: {e}")
+                self._last_error = str(e)
+                return StartResult(success=False, message=str(e), code=code)
+
             self._running = True
             self._start_time = time.time()
             self._samples_captured = 0
+            self._last_samples_captured = 0
 
-            logger.info(f"Started Windows audio capture on device {source_id}")
+            logger.info(f"Started Windows audio capture on device {source_id} ({source_type})")
             return StartResult(success=True, session_id=self._session_id)
 
         except Exception as e:
-            logger.error(f"Failed to start Windows audio capture: {e}")
+            logger.error(f"Unexpected error starting Windows audio capture: {e}")
             self._last_error = str(e)
             return StartResult(success=False, message=str(e))
 
@@ -256,15 +296,19 @@ class WindowsAudioAdapter(IngressAdapter):
         logger.info(f"Stopped Windows audio session {session_id}")
 
     def probe_health(self, source_id: str) -> HealthResult:
+        # Check if samples are actually being captured to determine signal presence
+        signal_present = self._running and self._samples_captured > self._last_samples_captured
+        self._last_samples_captured = self._samples_captured
+
         return HealthResult(
             healthy=self._running and self._last_error is None,
             source_state="active" if self._running else "idle",
-            signal_present=self._running,
+            signal_present=signal_present,
             dropped_frames=self._dropped_frames,
             last_error=self._last_error,
         )
 
-    def start_pairing(self, timeout_seconds: int = 60) -> PairingResult:
+    def start_pairing(self, timeout_seconds: int = 60, candidate_mac: str | None = None) -> PairingResult:
         return PairingResult(success=False, error="Pairing not supported")
 
     def stop_pairing(self) -> PairingResult:

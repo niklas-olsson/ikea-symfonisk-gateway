@@ -66,7 +66,7 @@ async def test_startup_failed_media_engine_not_found(session_manager, mock_sourc
 @pytest.mark.asyncio
 async def test_startup_failed_source_prepare(session_manager, mock_source_registry):
     session = session_manager.create("source_1", "target_1")
-    mock_source_registry.prepare_source.return_value = MagicMock(success=False, error="Permission denied")
+    mock_source_registry.prepare_source.return_value = MagicMock(success=False, error="Permission denied", code=None)
 
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
         success = await session_manager.start_session(session.session_id)

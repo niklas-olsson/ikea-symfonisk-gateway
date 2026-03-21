@@ -16,6 +16,7 @@ from bridge_core.core.errors import (
     PIPELINE_START_FAILED,
     RENDERER_PLAYBACK_FAILED,
     SOURCE_START_FAILED,
+    WINDOWS_OUTPUT_DEVICE_SILENT,
     SessionError,
     create_session_error,
 )
@@ -272,7 +273,8 @@ class SessionManager:
                 prepare_res = self._source_registry.prepare_source(session.source_id)
                 if not prepare_res.success:
                     session.last_error = create_session_error(
-                        SOURCE_START_FAILED, f"Failed to prepare source: {prepare_res.error or prepare_res.message}"
+                        prepare_res.code or SOURCE_START_FAILED,
+                        f"Failed to prepare source: {prepare_res.error or prepare_res.message}",
                     )
                     raise RuntimeError(session.last_error.message)
             except Exception as e:
@@ -320,7 +322,9 @@ class SessionManager:
 
                 start_res = self._source_registry.start_source(session.source_id, frame_sink)
                 if not start_res.success:
-                    session.last_error = create_session_error(SOURCE_START_FAILED, f"Failed to start source: {start_res.message}")
+                    session.last_error = create_session_error(
+                        start_res.code or SOURCE_START_FAILED, f"Failed to start source: {start_res.message}"
+                    )
                     frame_sink.stop()
                     raise RuntimeError(session.last_error.message)
                 session.adapter_session_id = start_res.session_id
@@ -389,8 +393,22 @@ class SessionManager:
                 await asyncio.sleep(0.5)
 
             if not frames_ingested:
-                session.last_error = create_session_error(FRAME_INGEST_FAILED)
-                raise RuntimeError(session.last_error.message)
+                # Check if it's a Windows loopback source that is just silent
+                health = self._source_registry.probe_source_health(session.source_id)
+                source_desc = self._source_registry.get_source(session.source_id)
+                if (
+                    health
+                    and health.healthy
+                    and not health.signal_present
+                    and source_desc
+                    and source_desc.platform == "windows"
+                    and source_desc.source_type == "system_audio"
+                ):
+                    logger.warning(f"Session {session_id}: Source is healthy but silent. Proceeding anyway.")
+                    session.last_error = create_session_error(WINDOWS_OUTPUT_DEVICE_SILENT)
+                else:
+                    session.last_error = create_session_error(FRAME_INGEST_FAILED)
+                    raise RuntimeError(session.last_error.message)
 
             session.transition_to(SessionState.PLAYING)
             self._event_bus.emit(
