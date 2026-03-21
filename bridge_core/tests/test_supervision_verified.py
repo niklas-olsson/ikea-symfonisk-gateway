@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from bridge_core.core.event_bus import EventBus, EventType
-from bridge_core.core.session_manager import SessionManager, SessionState
+from bridge_core.core.session_manager import (
+    SessionManager,
+    SessionState,
+)
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
 from bridge_core.stream.pipeline import StreamPipeline
@@ -15,12 +18,14 @@ from bridge_core.stream.pipeline import StreamPipeline
 def event_bus() -> EventBus:
     return EventBus()
 
+
 @pytest.fixture
 def source_registry() -> MagicMock:
     registry = MagicMock(spec=SourceRegistry)
     registry.prepare_source.return_value = MagicMock(success=True)
     registry.start_source.return_value = MagicMock(success=True, session_id="adapter_sess_1")
     return registry
+
 
 @pytest.fixture
 def target_registry() -> MagicMock:
@@ -30,6 +35,7 @@ def target_registry() -> MagicMock:
     registry.stop_target = AsyncMock(return_value={"success": True})
     return registry
 
+
 @pytest.fixture
 def session_manager(event_bus, source_registry, target_registry) -> SessionManager:
     return SessionManager(
@@ -37,6 +43,7 @@ def session_manager(event_bus, source_registry, target_registry) -> SessionManag
         source_registry=source_registry,
         target_registry=target_registry,
     )
+
 
 @pytest.mark.asyncio
 async def test_supervised_push_frame_failure(session_manager, event_bus, caplog):
@@ -48,8 +55,8 @@ async def test_supervised_push_frame_failure(session_manager, event_bus, caplog)
     # Mock resolve_ffmpeg_path to avoid FFmpeg requirement
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
         # Mock pipeline and its start
-        with patch("bridge_core.core.session_manager.StreamPipeline") as MockPipeline:
-            pipeline = MockPipeline.return_value
+        with patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls:
+            pipeline = mock_pipeline_cls.return_value
             pipeline.start = AsyncMock()
             pipeline.stop = AsyncMock()
             pipeline.push_frame = AsyncMock(side_effect=RuntimeError("Push failed supervised!"))
@@ -80,6 +87,7 @@ async def test_supervised_push_frame_failure(session_manager, event_bus, caplog)
             # The session should be transitioned to FAILED
             assert session.state in [SessionState.FAILED, SessionState.STOPPING, SessionState.STOPPED]
 
+
 @pytest.mark.asyncio
 async def test_supervised_pipeline_task_failure(session_manager, event_bus, caplog):
     """
@@ -88,18 +96,18 @@ async def test_supervised_pipeline_task_failure(session_manager, event_bus, capl
     session = session_manager.create(source_id="src_1", target_id="tgt_1")
 
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
-        with patch("bridge_core.core.session_manager.StreamPipeline") as MockPipeline:
+        with patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls:
             pipeline_instance = MagicMock(spec=StreamPipeline)
-            MockPipeline.return_value = pipeline_instance
+            mock_pipeline_cls.return_value = pipeline_instance
             pipeline_instance.start = AsyncMock()
             pipeline_instance.stop = AsyncMock()
 
             await session_manager.start_session(session.session_id)
 
-            # Get the on_error callback that was passed to MockPipeline
-            # Ensure MockPipeline was called
-            assert MockPipeline.called
-            _, kwargs = MockPipeline.call_args
+            # Get the on_error callback that was passed to mock_pipeline_cls
+            # Ensure mock_pipeline_cls was called
+            assert mock_pipeline_cls.called
+            _, kwargs = mock_pipeline_cls.call_args
             on_error_cb = kwargs.get("on_error")
             assert on_error_cb is not None
 
@@ -122,6 +130,7 @@ async def test_supervised_pipeline_task_failure(session_manager, event_bus, capl
             assert found_event
             assert session.state in [SessionState.FAILED, SessionState.STOPPING, SessionState.STOPPED]
 
+
 @pytest.mark.asyncio
 async def test_adapter_on_error_propagation(session_manager, event_bus):
     """
@@ -130,8 +139,8 @@ async def test_adapter_on_error_propagation(session_manager, event_bus):
     session = session_manager.create(source_id="src_1", target_id="tgt_1")
 
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
-        with patch("bridge_core.core.session_manager.StreamPipeline") as MockPipeline:
-            pipeline = MockPipeline.return_value
+        with patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls:
+            pipeline = mock_pipeline_cls.return_value
             pipeline.start = AsyncMock()
             pipeline.stop = AsyncMock()
 
