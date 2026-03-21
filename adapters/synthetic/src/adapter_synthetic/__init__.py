@@ -163,6 +163,8 @@ class SyntheticAdapter(IngressAdapter):
                     except Exception as e:
                         logger.error(f"Error in frame sink: {e}")
                         self._dropped_frames += 1
+                        # If frame sink itself fails, we probably have a pipeline issue
+                        self._frame_sink.on_error(e)
 
                 frames_sent += 1
                 # Calculate when the next frame should be sent relative to the start
@@ -178,6 +180,8 @@ class SyntheticAdapter(IngressAdapter):
         except Exception as e:
             logger.error(f"Error in synthetic generation loop: {e}")
             self._source_state = "error"
+            if self._frame_sink:
+                self._frame_sink.on_error(e)
         finally:
             self._running = False
 
