@@ -32,6 +32,30 @@ class TargetDescriptor(ABC):
     @abstractmethod
     def coordinator_id(self) -> str: ...
 
+    @property
+    def is_preferred(self) -> bool:
+        return getattr(self, "_is_preferred", False)
+
+    @is_preferred.setter
+    def is_preferred(self, value: bool) -> None:
+        self._is_preferred = value
+
+    @property
+    def is_active(self) -> bool:
+        return getattr(self, "_is_active", False)
+
+    @is_active.setter
+    def is_active(self, value: bool) -> None:
+        self._is_active = value
+
+    @property
+    def is_available(self) -> bool:
+        return getattr(self, "_is_available", True)
+
+    @is_available.setter
+    def is_available(self, value: bool) -> None:
+        self._is_available = value
+
 
 class RendererAdapter(ABC):
     """Abstract base class for renderer adapters."""

@@ -13,8 +13,8 @@ router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
 
 class CreateSessionRequest(BaseModel):
-    source_id: str
-    target_id: str
+    source_id: str | None = None
+    target_id: str | None = None
     stream_profile: str = "mp3_48k_stereo_320"
     auto_heal: bool = True
 

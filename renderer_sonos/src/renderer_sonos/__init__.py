@@ -53,6 +53,30 @@ class SonosTargetDescriptor(TargetDescriptor):
     def coordinator_id(self) -> str:
         return self._coordinator_id
 
+    @property
+    def is_preferred(self) -> bool:
+        return getattr(self, "_is_preferred", False)
+
+    @is_preferred.setter
+    def is_preferred(self, value: bool) -> None:
+        self._is_preferred = value
+
+    @property
+    def is_active(self) -> bool:
+        return getattr(self, "_is_active", False)
+
+    @is_active.setter
+    def is_active(self, value: bool) -> None:
+        self._is_active = value
+
+    @property
+    def is_available(self) -> bool:
+        return getattr(self, "_is_available", True)
+
+    @is_available.setter
+    def is_available(self, value: bool) -> None:
+        self._is_available = value
+
 
 class SonosRendererAdapter(RendererAdapter):
     """Renderer adapter for Sonos/SYMFONISK speakers."""
@@ -169,13 +193,15 @@ class SonosRendererAdapter(RendererAdapter):
                     elif len(members) > 2:
                         target_type = "group"
 
-                    groups[coord_id] = SonosTargetDescriptor(
+                    t = SonosTargetDescriptor(
                         target_id=coord_id,
                         target_type=target_type,
                         display_name=coordinator.player_name,
                         members=members,
                         coordinator_id=coord_id,
                     )
+                    t.is_available = True
+                    groups[coord_id] = t
             except Exception as e:
                 logger.warning("Failed to process player %s during topology build: %s", player.uid, e)
                 continue

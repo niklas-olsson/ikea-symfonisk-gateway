@@ -28,6 +28,14 @@ async def list_sources(request: Request) -> SourceListResponse:
     return SourceListResponse(sources=sources)
 
 
+@router.post("/refresh")
+async def refresh_sources(request: Request) -> dict[str, Any]:
+    """Refresh sources from all registered adapters."""
+    registry: SourceRegistry = request.app.state.source_registry
+    registry.refresh_sources()
+    return {"success": True}
+
+
 @router.get("/{source_id}", responses={404: {"model": ErrorResponse}})
 async def get_source(request: Request, source_id: str) -> dict[str, Any]:
     """Get details for a specific source."""
