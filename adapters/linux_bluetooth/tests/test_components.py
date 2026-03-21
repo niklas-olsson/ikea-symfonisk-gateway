@@ -7,7 +7,7 @@ import pytest
 from adapter_linux_bluetooth.dbus_adapter import BlueZAdapterController
 from adapter_linux_bluetooth.store import TrustedDeviceStore
 from adapter_linux_bluetooth.window import PairingWindowManager
-from bridge_core.core.event_bus import EventBus, EventType
+from bridge_core.core.event_bus import EventBus
 
 
 @pytest.fixture
@@ -53,6 +53,7 @@ async def test_adapter_controller_properties():
 
         # Mock call_get_all
         from dbus_fast import Variant
+
         mock_iface.call_get_all.return_value = {
             "Powered": Variant("b", True),
             "Alias": Variant("s", "Bridge"),
@@ -64,9 +65,7 @@ async def test_adapter_controller_properties():
 
         # Test setting property
         await controller.set_powered(False)
-        mock_iface.call_set.assert_called_with(
-            "org.bluez.Adapter1", "Powered", pytest.approx(Variant("b", False))
-        )
+        mock_iface.call_set.assert_called_with("org.bluez.Adapter1", "Powered", pytest.approx(Variant("b", False)))
 
 
 @pytest.mark.asyncio
@@ -84,7 +83,7 @@ async def test_pairing_window_auto_close_and_trust(store):
     # Mock DBus MessageBus and agent registration
     with (
         patch("adapter_linux_bluetooth.window.MessageBus") as mock_bus_cls,
-        patch("adapter_linux_bluetooth.window.register_agent", new_callable=AsyncMock) as mock_reg,
+        patch("adapter_linux_bluetooth.window.register_agent", new_callable=AsyncMock),
         patch("adapter_linux_bluetooth.window.unregister_agent", new_callable=AsyncMock) as mock_unreg,
     ):
         mock_bus = MagicMock()
@@ -122,7 +121,7 @@ async def test_pairing_window_timeout(store):
 
     with (
         patch("adapter_linux_bluetooth.window.MessageBus") as mock_bus_cls,
-        patch("adapter_linux_bluetooth.window.register_agent", new_callable=AsyncMock) as mock_reg,
+        patch("adapter_linux_bluetooth.window.register_agent", new_callable=AsyncMock),
         patch("adapter_linux_bluetooth.window.unregister_agent", new_callable=AsyncMock) as mock_unreg,
     ):
         mock_bus = MagicMock()

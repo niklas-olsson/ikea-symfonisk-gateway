@@ -5,7 +5,7 @@ import os
 import shutil
 from typing import Any
 
-from dbus_fast import Variant
+from dbus_fast import BusType, Variant
 from dbus_fast.aio import MessageBus
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class BlueZAdapterController:
     async def _get_bus(self) -> MessageBus:
         """Get or create the system message bus."""
         if self._bus is None or not self._bus.connected:
-            self._bus = await MessageBus(bus_type=0).connect()  # System bus
+            self._bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
         return self._bus
 
     async def get_properties(self) -> dict[str, Any]:

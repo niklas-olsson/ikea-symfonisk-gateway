@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Any
 
+from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
 
 from bridge_core.core.event_bus import EventBus, EventType
@@ -76,16 +77,17 @@ class PairingWindowManager:
                 pass
             self._pairing_task = None
 
+        # self._is_open is set to False in _run_window finally block or manually
         self._is_open = False
 
-        if self.event_bus:
-            self.event_bus.emit(EventType.BLUETOOTH_PAIRING_WINDOW_CLOSED)
+        # Note: Event emission moved to _run_window finally to avoid double emission
+        # and ensure it's emitted even on timeout/cancellation.
 
         return True
 
     async def _run_window(self, timeout: int, candidate_mac: str | None) -> None:
         """Async loop for the pairing window."""
-        bus = await MessageBus(bus_type=0).connect()
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
         self._agent = PairingAgent(self.agent_path)
         self._agent.candidate_mac = candidate_mac
         self._agent.on_pairing_completed = self._handle_pairing_completed

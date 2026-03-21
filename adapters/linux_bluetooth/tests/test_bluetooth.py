@@ -43,7 +43,7 @@ async def test_list_sources_success(adapter: LinuxBluetoothAdapter) -> None:
 async def test_start_pairing_success(adapter: LinuxBluetoothAdapter) -> None:
     with (
         patch("shutil.which", return_value="/usr/bin/bluetoothctl"),
-        patch("subprocess.run") as mock_run,
+        patch("subprocess.run"),
     ):
         result = adapter.start_pairing(timeout_seconds=1)
 
@@ -58,7 +58,7 @@ async def test_start_pairing_success(adapter: LinuxBluetoothAdapter) -> None:
 async def test_stop_pairing(adapter: LinuxBluetoothAdapter) -> None:
     with (
         patch("shutil.which", return_value="/usr/bin/bluetoothctl"),
-        patch("subprocess.run") as mock_run,
+        patch("subprocess.run"),
     ):
         result = adapter.stop_pairing()
 

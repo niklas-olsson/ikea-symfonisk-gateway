@@ -7,6 +7,12 @@ from typing import Any
 from dbus_fast.aio import MessageBus
 from dbus_fast.service import ServiceInterface, dbus_method
 
+# Define D-Bus signature placeholders for runtime and type checking
+o = "o"
+s = "s"
+u = "u"
+q = "q"
+
 logger = logging.getLogger(__name__)
 
 BLUEZ_SERVICE = "org.bluez"
@@ -28,25 +34,25 @@ class PairingAgent(ServiceInterface):
         logger.info("Pairing agent released")
 
     @dbus_method()
-    def RequestPinCode(self, device: "o") -> "s":  # noqa: N802
+    def RequestPinCode(self, device: o) -> s:  # noqa: N802
         logger.info(f"RequestPinCode for {device}")
         return "0000"
 
     @dbus_method()
-    def DisplayPinCode(self, device: "o", pincode: "s"):  # noqa: N802
+    def DisplayPinCode(self, device: o, pincode: s):  # noqa: N802
         logger.info(f"DisplayPinCode for {device}: {pincode}")
 
     @dbus_method()
-    def RequestPasskey(self, device: "o") -> "u":  # noqa: N802
+    def RequestPasskey(self, device: o) -> u:  # noqa: N802
         logger.info(f"RequestPasskey for {device}")
         return 0
 
     @dbus_method()
-    def DisplayPasskey(self, device: "o", passkey: "u", entered: "q"):  # noqa: N802
+    def DisplayPasskey(self, device: o, passkey: u, entered: q):  # noqa: N802
         logger.info(f"DisplayPasskey for {device}: {passkey}")
 
     @dbus_method()
-    def RequestConfirmation(self, device: "o", passkey: "u"):  # noqa: N802
+    def RequestConfirmation(self, device: o, passkey: u):  # noqa: N802
         logger.info(f"RequestConfirmation for {device}, passkey {passkey}")
         # headless: auto-accept if MAC matches or no filter
         if self._should_accept(device):
@@ -57,7 +63,7 @@ class PairingAgent(ServiceInterface):
             raise Exception("Pairing rejected: device not candidate")
 
     @dbus_method()
-    def RequestAuthorization(self, device: "o"):  # noqa: N802
+    def RequestAuthorization(self, device: o):  # noqa: N802
         logger.info(f"RequestAuthorization for {device}")
         if self._should_accept(device):
             self._notify_completed(device, True)
@@ -67,7 +73,7 @@ class PairingAgent(ServiceInterface):
             raise Exception("Authorization rejected")
 
     @dbus_method()
-    def AuthorizeService(self, device: "o", uuid: "s"):  # noqa: N802
+    def AuthorizeService(self, device: o, uuid: s):  # noqa: N802
         logger.info(f"AuthorizeService for {device}, UUID {uuid}")
         if self._should_accept(device):
             return

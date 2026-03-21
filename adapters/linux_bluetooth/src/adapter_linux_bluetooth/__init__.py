@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from typing import Any
 
-from bridge_core.core.event_bus import EventBus
+from bridge_core.core.event_bus import EventBus, EventType
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
@@ -44,6 +44,12 @@ class LinuxBluetoothAdapter(IngressAdapter):
         self._store = TrustedDeviceStore()
         self._adapter_controller = BlueZAdapterController()
         self._pairing_window = PairingWindowManager(self._adapter_controller, self._store, event_bus)
+
+        self._status_monitoring_task: asyncio.Task[None] | None = None
+        self._last_status: dict[str, Any] = {}
+
+        if self._event_bus:
+            self._status_monitoring_task = asyncio.create_task(self._monitor_status())
 
     def id(self) -> str:
         return "linux-bluetooth-adapter"
@@ -219,11 +225,11 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     pass
                 self._process = None
 
-    def start_pairing(self, timeout_seconds: int = 90) -> PairingResult:
+    def start_pairing(self, timeout_seconds: int = 90, candidate_mac: str | None = None) -> PairingResult:
         """Start adapter pairing mode via Window Manager."""
         # Use a background task because start_pairing is sync in the SDK
         # but our window manager is async.
-        asyncio.create_task(self._pairing_window.open_window(timeout_seconds))
+        asyncio.create_task(self._pairing_window.open_window(timeout_seconds, candidate_mac=candidate_mac))
         return PairingResult(success=True, message=f"Pairing window opened for {timeout_seconds}s")
 
     def stop_pairing(self) -> PairingResult:
@@ -267,3 +273,21 @@ class LinuxBluetoothAdapter(IngressAdapter):
     def forget_device(self, mac: str) -> None:
         """Remove device from trusted store."""
         self._store.forget_device(mac)
+
+    async def _monitor_status(self) -> None:
+        """Periodically check adapter status and emit events on change."""
+        try:
+            while True:
+                status = await self.get_adapter_status()
+                if status != self._last_status:
+                    if self._event_bus:
+                        self._event_bus.emit(
+                            EventType.BLUETOOTH_ADAPTER_STATUS_CHANGED,
+                            payload=status,
+                        )
+                    self._last_status = status
+                await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error monitoring Bluetooth status: {e}")

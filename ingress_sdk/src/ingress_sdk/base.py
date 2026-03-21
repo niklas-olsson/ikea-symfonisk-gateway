@@ -72,7 +72,7 @@ class IngressAdapter(ABC):
         ...
 
     @abstractmethod
-    def start_pairing(self, timeout_seconds: int = 60) -> PairingResult:
+    def start_pairing(self, timeout_seconds: int = 60, candidate_mac: str | None = None) -> PairingResult:
         """Start adapter pairing mode (if supported)."""
         ...
 

@@ -41,7 +41,7 @@ async def list_adapters(request: Request) -> AdapterListResponse:
 async def start_pairing(request: Request, adapter_id: str, body: PairingRequest) -> dict[str, Any]:
     """Start pairing mode on an adapter."""
     registry: SourceRegistry = request.app.state.source_registry
-    result = registry.start_pairing(adapter_id, body.timeout_seconds)
+    result = registry.start_pairing(adapter_id, body.timeout_seconds, candidate_mac=body.candidate_mac)
     if not result.success:
         code = "ADAPTER_NOT_FOUND" if "not found" in (result.error or "").lower() else "PAIRING_FAILED"
         raise HTTPException(

@@ -41,7 +41,7 @@ class TrustedDeviceStore:
             return
 
         try:
-            with open(self.storage_path, "r") as f:
+            with open(self.storage_path) as f:
                 self._data.update(json.load(f))
         except Exception as e:
             logger.error(f"Failed to load trusted devices from {self.storage_path}: {e}")

@@ -193,7 +193,7 @@ class SourceRegistry:
         if adapter_info and adapter_info.adapter:
             adapter_info.adapter.stop(adapter_session_id)
 
-    def start_pairing(self, adapter_id: str, timeout_seconds: int = 60) -> PairingResult:
+    def start_pairing(self, adapter_id: str, timeout_seconds: int = 60, candidate_mac: str | None = None) -> PairingResult:
         """Start pairing mode on an adapter."""
         adapter_info = self.get_adapter(adapter_id)
         if not adapter_info:
@@ -205,7 +205,7 @@ class SourceRegistry:
         if not adapter_info.capabilities.supports_pairing:
             return PairingResult(success=False, error=f"Adapter {adapter_id} does not support pairing")
 
-        return adapter_info.adapter.start_pairing(timeout_seconds)
+        return adapter_info.adapter.start_pairing(timeout_seconds, candidate_mac=candidate_mac)
 
     def stop_pairing(self, adapter_id: str) -> PairingResult:
         """Stop pairing mode on an adapter."""
