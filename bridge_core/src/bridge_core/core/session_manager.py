@@ -15,6 +15,7 @@ from bridge_core.core.errors import (
     MEDIA_ENGINE_NOT_FOUND,
     PIPELINE_START_FAILED,
     RENDERER_PLAYBACK_FAILED,
+    SOURCE_ADAPTER_PLATFORM_MISMATCH,
     SOURCE_START_FAILED,
     WINDOWS_OUTPUT_DEVICE_SILENT,
     SessionError,
@@ -272,7 +273,7 @@ class SessionManager:
             try:
                 prepare_res = self._source_registry.prepare_source(session.source_id)
                 if not prepare_res.success:
-                    if prepare_res.code == "source_adapter_platform_mismatch":
+                    if prepare_res.code == SOURCE_ADAPTER_PLATFORM_MISMATCH:
                         session.last_error = create_session_error(
                             prepare_res.code,
                             prepare_res.message,
@@ -331,7 +332,7 @@ class SessionManager:
 
                 start_res = self._source_registry.start_source(session.source_id, frame_sink)
                 if not start_res.success:
-                    if start_res.code == "source_adapter_platform_mismatch":
+                    if start_res.code == SOURCE_ADAPTER_PLATFORM_MISMATCH:
                         session.last_error = create_session_error(
                             start_res.code,
                             start_res.message,

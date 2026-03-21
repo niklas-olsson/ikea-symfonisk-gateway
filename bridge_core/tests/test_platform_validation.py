@@ -147,7 +147,7 @@ async def test_platform_any_works(session_manager: SessionManager, source_regist
     sm.resolve_ffmpeg_path = MagicMock(return_value="/usr/bin/ffmpeg")
 
     # 3. Create and start session
-    session = session_manager.create(source_id="any_source", target_id="target1")
+    _ = session_manager.create(source_id="any_source", target_id="target1")
 
     # We mock more things to let start_session succeed until frame ingestion check
     session_manager._stream_publisher = MagicMock()

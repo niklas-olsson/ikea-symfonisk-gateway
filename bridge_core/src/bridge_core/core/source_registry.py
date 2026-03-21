@@ -12,6 +12,7 @@ from ingress_sdk.types import (
     StartResult,
 )
 
+from bridge_core.core.errors import SOURCE_ADAPTER_PLATFORM_MISMATCH
 from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
 
 
@@ -233,7 +234,7 @@ class SourceRegistry:
             return PrepareResult(
                 success=False,
                 source_id=source_id,
-                code="source_adapter_platform_mismatch",
+                code=SOURCE_ADAPTER_PLATFORM_MISMATCH,
                 message=error_msg or "Platform mismatch",
             )
 
@@ -261,7 +262,7 @@ class SourceRegistry:
         if not is_valid:
             return StartResult(
                 success=False,
-                code="source_adapter_platform_mismatch",
+                code=SOURCE_ADAPTER_PLATFORM_MISMATCH,
                 message=error_msg or "Platform mismatch",
             )
 

@@ -23,11 +23,11 @@ class SourceCapabilities(BaseModel):
 
 class SourceDescriptor(BaseModel):
     source_id: str
-    adapter_id: str | None = None
     source_type: SourceType
     display_name: str
     platform: str
     capabilities: SourceCapabilities
+    adapter_id: str | None = None
     metadata: dict[str, Any] = {}
 
 
