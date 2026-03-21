@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Linux Bluetooth (BlueALSA) ingress adapter"
 requires-python = ">=3.12"
 dependencies = [
+    "dbus-fast>=4.0.0",
     "ingress-sdk",
 ]
 

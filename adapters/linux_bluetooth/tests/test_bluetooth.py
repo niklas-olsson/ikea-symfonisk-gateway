@@ -48,8 +48,7 @@ async def test_start_pairing_success(adapter: LinuxBluetoothAdapter) -> None:
         result = adapter.start_pairing(timeout_seconds=1)
 
         assert result.success is True
-        assert "Pairing mode enabled" in result.message
-        assert mock_run.call_count == 3  # power, pairable, discoverable
+        assert "Pairing window opened" in result.message
 
         # Cleanup pairing task
         adapter.stop_pairing()
@@ -64,8 +63,7 @@ async def test_stop_pairing(adapter: LinuxBluetoothAdapter) -> None:
         result = adapter.stop_pairing()
 
         assert result.success is True
-        assert "Pairing mode disabled" in result.message
-        assert mock_run.call_count == 2  # pairable off, discoverable off
+        assert "Pairing window closed" in result.message
 
 
 @pytest.mark.asyncio

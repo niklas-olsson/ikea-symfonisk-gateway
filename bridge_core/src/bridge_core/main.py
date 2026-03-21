@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     # Register Linux Bluetooth adapter
-    linux_bluetooth_adapter = LinuxBluetoothAdapter()
+    linux_bluetooth_adapter = LinuxBluetoothAdapter(event_bus)
     source_registry.register_adapter(
         adapter_id=linux_bluetooth_adapter.id(),
         platform=linux_bluetooth_adapter.platform(),

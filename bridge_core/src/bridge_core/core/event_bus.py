@@ -32,6 +32,10 @@ class EventType(str, Enum):
     ADAPTER_REGISTERED = "adapter.registered"
     ADAPTER_UNREGISTERED = "adapter.unregistered"
     CONFIG_CHANGED = "config.changed"
+    BLUETOOTH_PAIRING_WINDOW_OPENED = "bluetooth.pairing_window.opened"
+    BLUETOOTH_PAIRING_WINDOW_CLOSED = "bluetooth.pairing_window.closed"
+    BLUETOOTH_DEVICE_PAIRED = "bluetooth.device.paired"
+    BLUETOOTH_DEVICE_PAIRING_REJECTED = "bluetooth.device.pairing_rejected"
 
 
 class Severity(str, Enum):
