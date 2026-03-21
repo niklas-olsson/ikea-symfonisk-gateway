@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 mock_sd = MagicMock()
 sys.modules["sounddevice"] = mock_sd
 
-import numpy as np
-from adapter_windows_audio import WindowsAudioAdapter
+import numpy as np  # noqa: E402
+from adapter_windows_audio import WindowsAudioAdapter  # noqa: E402
 
 
 def test_adapter_id():

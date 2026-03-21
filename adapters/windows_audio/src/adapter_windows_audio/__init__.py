@@ -4,7 +4,6 @@ Captures system audio using Windows WASAPI loopback via sounddevice.
 Emits canonical PCM 48kHz stereo frames.
 """
 
-import asyncio
 import logging
 import platform
 import time
