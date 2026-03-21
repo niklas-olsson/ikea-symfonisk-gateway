@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class LinuxAudioAdapter(IngressAdapter):
     """Adapter for capturing system audio on Linux."""
 
-    def __init__(self, event_bus: "EventBus" | None = None) -> None:
+    def __init__(self, event_bus: EventBus | None = None) -> None:
         self._event_bus = event_bus
         self._session_id: str | None = None
         self._running = False
