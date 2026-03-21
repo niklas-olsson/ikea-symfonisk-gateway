@@ -275,20 +275,22 @@ ADAPTER_LINUX_BLUETOOTH_DEVICE=<bluetooth-device-mac>
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/` | Service info |
-| `GET` | `/api/health` | Health check |
-| `GET` | `/api/sources` | List available sources |
-| `GET` | `/api/targets` | List available targets |
-| `POST` | `/api/sessions` | Create a session (source → target) |
-| `GET` | `/api/sessions` | List active sessions |
-| `DELETE` | `/api/sessions/{id}` | End a session |
-| `GET` | `/api/events` | SSE stream for events |
+| `GET` | `/health` | Health check |
+| `GET` | `/v1/sources` | List available sources |
+| `GET` | `/v1/targets` | List available targets |
+| `POST` | `/v1/sessions` | Create a session (source → target) |
+| `GET` | `/v1/sessions` | List active sessions |
+| `POST` | `/v1/sessions/{id}/stop` | End a session |
+| `GET` | `/v1/events` | SSE stream for events |
 
 ### Example: Create a Session
 
 ```bash
-curl -X POST http://localhost:8732/api/sessions \
+SOURCE_ID=$(curl -s http://localhost:8732/v1/sources | jq -r '.sources[0].source_id')
+
+curl -X POST http://localhost:8732/v1/sessions \
   -H "Content-Type: application/json" \
-  -d '{"source_id": "synthetic", "target_id": "sonos://Kitchen"}'
+  -d "{\"source_id\": \"${SOURCE_ID}\", \"target_id\": \"sonos://Kitchen\"}"
 ```
 
 ### Authentication
@@ -296,7 +298,7 @@ curl -X POST http://localhost:8732/api/sessions \
 When `BRIDGE_AUTH_TOKEN` is set, include it in requests:
 
 ```bash
-curl -H "Authorization: Bearer <TOKEN>" http://localhost:8732/api/sources
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:8732/v1/sources
 ```
 
 ---

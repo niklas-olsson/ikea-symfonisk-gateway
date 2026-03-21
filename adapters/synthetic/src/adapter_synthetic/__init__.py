@@ -34,14 +34,13 @@ class SyntheticAdapter(IngressAdapter):
     """Test adapter that generates synthetic audio."""
 
     def __init__(self) -> None:
-        self._adapter_id = f"synthetic-{uuid4().hex[:8]}"
         self._session_id: str | None = None
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._frame_sink: FrameSink | None = None
         self._mode: SyntheticMode = SyntheticMode.SINE_WAVE
         self._sample_index = 0
-        self._source_id = f"synthetic:{uuid4().hex[:8]}"
+        self._source_id = "default"
         self._source_state = "idle"
         self._dropped_frames = 0
 
@@ -52,7 +51,7 @@ class SyntheticAdapter(IngressAdapter):
         self._pink_key = 0
 
     def id(self) -> str:
-        return self._adapter_id
+        return "synthetic-adapter"
 
     def platform(self) -> str:
         return "any"

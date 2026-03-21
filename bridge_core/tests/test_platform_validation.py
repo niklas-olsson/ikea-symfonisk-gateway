@@ -43,78 +43,33 @@ def session_manager(event_bus: EventBus, source_registry: SourceRegistry, target
 
 @pytest.mark.asyncio
 async def test_platform_mismatch_fails(session_manager: SessionManager, source_registry: SourceRegistry) -> None:
-    # 1. Register a Windows adapter
-    win_adapter = MagicMock()
-    source_registry.register_adapter(
-        adapter_id="win_adapter",
-        platform="windows",
-        version="1.0.0",
-        capabilities=AdapterCapabilities(supports_system_audio=True),
-        sources=[
-            SourceDescriptor(
-                source_id="win_source",
-                source_type=SourceType.SYSTEM_AUDIO,
-                display_name="Windows Audio",
-                platform="windows",
-                capabilities=SourceCapabilities(),
-            )
-        ],
-        adapter_instance=win_adapter,
-    )
-
-    # 2. Register a Linux adapter
     linux_adapter = MagicMock()
-    source_registry.register_adapter(
-        adapter_id="linux_adapter",
-        platform="linux",
-        version="1.0.0",
-        capabilities=AdapterCapabilities(supports_system_audio=True),
-        sources=[
-            SourceDescriptor(
-                source_id="linux_source",
-                source_type=SourceType.SYSTEM_AUDIO,
-                display_name="Linux Audio",
-                platform="linux",
-                capabilities=SourceCapabilities(),
-            )
-        ],
-        adapter_instance=linux_adapter,
-    )
+    with pytest.raises(ValueError, match="does not match source platform"):
+        source_registry.register_adapter(
+            adapter_id="mismatched_adapter",
+            platform="linux",
+            version="1.0.0",
+            capabilities=AdapterCapabilities(supports_system_audio=True),
+            sources=[
+                SourceDescriptor(
+                    source_id="mismatched_source",
+                    source_type=SourceType.SYSTEM_AUDIO,
+                    display_name="Mismatched Source",
+                    platform="windows",
+                    capabilities=SourceCapabilities(),
+                )
+            ],
+            adapter_instance=linux_adapter,
+        )
 
-    # 3. Create a session that tries to use Windows source with Linux adapter
-    # We need to manually manipulate the registry or simulate the situation.
-    # Actually, the registry knows which adapter owns which source.
-    # The mismatch we want to test is: a source labeled "windows" being handled by a "linux" adapter.
-    # In our current implementation, _get_adapter_info_for_source(source_id) returns the adapter that registered it.
-    # So if we want a mismatch, we need to register a "windows" source to a "linux" adapter.
-
-    source_registry.register_adapter(
-        adapter_id="mismatched_adapter",
-        platform="linux",
-        version="1.0.0",
-        capabilities=AdapterCapabilities(supports_system_audio=True),
-        sources=[
-            SourceDescriptor(
-                source_id="mismatched_source",
-                source_type=SourceType.SYSTEM_AUDIO,
-                display_name="Mismatched Source",
-                platform="windows",  # Label says Windows
-                capabilities=SourceCapabilities(),
-            )
-        ],
-        adapter_instance=linux_adapter, # Instance is Linux
-    )
-
-    # 4. Attempt to start session
-    session = session_manager.create(source_id="mismatched_source", target_id="target1")
+    session = session_manager.create(source_id="mismatched_adapter:system:mismatched_source", target_id="target1")
     success = await session_manager.start_session(session.session_id)
 
     assert not success
-    # The session might end up in STOPPED after cleanup in stop_session
     assert session.state in [SessionState.FAILED, SessionState.STOPPED]
     assert session.last_error is not None
-    assert session.last_error.code == "source_adapter_platform_mismatch"
-    assert "Windows source (mismatched_source) was bound to Linux audio adapter." in session.last_error.message
+    assert session.last_error.code == "source_start_failed"
+    assert "Source not found" in session.last_error.message
 
 
 @pytest.mark.asyncio
@@ -147,7 +102,7 @@ async def test_platform_any_works(session_manager: SessionManager, source_regist
     sm.resolve_ffmpeg_path = MagicMock(return_value="/usr/bin/ffmpeg")
 
     # 3. Create and start session
-    _ = session_manager.create(source_id="any_source", target_id="target1")
+    _ = session_manager.create(source_id="linux_adapter:synthetic:any_source", target_id="target1")
 
     # We mock more things to let start_session succeed until frame ingestion check
     session_manager._stream_publisher = MagicMock()
@@ -156,7 +111,7 @@ async def test_platform_any_works(session_manager: SessionManager, source_regist
     # Actually, we just care if it passes the platform validation.
     # platform validation is at the very beginning of prepare_source.
 
-    res = source_registry.prepare_source("any_source")
+    res = source_registry.prepare_source("linux_adapter:synthetic:any_source")
     assert res.success
     assert res.code != "source_adapter_platform_mismatch"
 
@@ -182,9 +137,66 @@ async def test_source_listing_includes_extra_fields(session_manager: SessionMana
     assert len(sources) == 1
     s = sources[0]
     assert s.adapter_id == "test_adapter"
+    assert s.local_source_id == "test_source"
     assert s.platform == "linux"
+    assert s.source_id == "test_adapter:system:test_source"
 
     # Verify it's in the to_dict/model_dump
     d = s.model_dump()
     assert d["adapter_id"] == "test_adapter"
+    assert d["local_source_id"] == "test_source"
     assert d["platform"] == "linux"
+
+
+@pytest.mark.asyncio
+async def test_overlapping_local_ids_route_to_correct_adapter(source_registry: SourceRegistry) -> None:
+    windows_adapter = MagicMock()
+    windows_adapter.prepare.return_value = MagicMock(success=True, source_id="default")
+    windows_adapter.start.return_value = MagicMock(success=True, session_id="win-session")
+
+    linux_adapter = MagicMock()
+    linux_adapter.prepare.return_value = MagicMock(success=True, source_id="default")
+    linux_adapter.start.return_value = MagicMock(success=True, session_id="linux-session")
+
+    source_registry.register_adapter(
+        adapter_id="windows-audio-adapter",
+        platform="windows",
+        version="1.0.0",
+        capabilities=AdapterCapabilities(supports_system_audio=True),
+        sources=[
+            SourceDescriptor(
+                source_id="default",
+                source_type=SourceType.SYSTEM_AUDIO,
+                display_name="Windows Default",
+                platform="windows",
+                capabilities=SourceCapabilities(),
+            )
+        ],
+        adapter_instance=windows_adapter,
+    )
+    source_registry.register_adapter(
+        adapter_id="linux-audio-adapter",
+        platform="linux",
+        version="1.0.0",
+        capabilities=AdapterCapabilities(supports_system_audio=True),
+        sources=[
+            SourceDescriptor(
+                source_id="default",
+                source_type=SourceType.SYSTEM_AUDIO,
+                display_name="Linux Default",
+                platform="linux",
+                capabilities=SourceCapabilities(),
+            )
+        ],
+        adapter_instance=linux_adapter,
+    )
+
+    source_registry.prepare_source("windows-audio-adapter:system:default")
+    source_registry.start_source("windows-audio-adapter:system:default", MagicMock())
+    source_registry.prepare_source("linux-audio-adapter:system:default")
+    source_registry.start_source("linux-audio-adapter:system:default", MagicMock())
+
+    windows_adapter.prepare.assert_called_once_with("default")
+    windows_adapter.start.assert_called_once()
+    linux_adapter.prepare.assert_called_once_with("default")
+    linux_adapter.start.assert_called_once()

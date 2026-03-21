@@ -21,13 +21,14 @@ class MockFrameSink:
 def test_adapter_instantiation() -> None:
     adapter = SyntheticAdapter()
     assert adapter.platform() == "any"
-    assert "synthetic-" in adapter.id()
+    assert adapter.id() == "synthetic-adapter"
 
 
 def test_list_sources() -> None:
     adapter = SyntheticAdapter()
     sources = adapter.list_sources()
     assert len(sources) == 1
+    assert sources[0].source_id == "default"
     assert sources[0].source_type == SourceType.SYNTHETIC_TEST_SOURCE
     assert "Synthetic" in sources[0].display_name
 
