@@ -65,11 +65,13 @@ class WindowsAudioAdapter(IngressAdapter):
         )
 
     def list_sources(self) -> list[SourceDescriptor]:
+        """Enumerate available audio sources on Windows.
+
+        Prioritizes WASAPI loopback (SYSTEM_AUDIO) followed by microphones and line-ins.
+        """
         if platform.system() != "Windows" or sd is None:
-            # If not on Windows, we can't really discover WASAPI devices
-            # But for the sake of the exercise, we return an empty list or a mock if in dev
             if platform.system() != "Windows":
-                logger.warning("WindowsAudioAdapter listed on non-Windows platform")
+                logger.debug("WindowsAudioAdapter listed on non-Windows platform")
             return []
 
         sources = []
@@ -83,39 +85,11 @@ class WindowsAudioAdapter(IngressAdapter):
                     wasapi_api_index = i
                     break
 
-            for i, dev in enumerate(devices):
-                # We are looking for WASAPI devices
-                if dev["hostapi"] != wasapi_api_index:
-                    continue
+            if wasapi_api_index == -1:
+                logger.warning("Windows WASAPI host API not found")
+                return []
 
-                source_id = str(i)
-                display_name = dev["name"]
-
-                # In WASAPI, loopback devices are often marked or can be inferred
-                # sounddevice usually shows them as separate devices if supported
-                if dev["max_input_channels"] > 0:
-                    source_type = SourceType.MICROPHONE
-                    if "loopback" in display_name.lower() or "what u hear" in display_name.lower():
-                        source_type = SourceType.SYSTEM_AUDIO
-
-                    sources.append(
-                        SourceDescriptor(
-                            source_id=source_id,
-                            source_type=source_type,
-                            display_name=display_name,
-                            platform="windows",
-                            capabilities=SourceCapabilities(
-                                sample_rates=[int(dev["default_samplerate"]), 48000],
-                                channels=[min(2, dev["max_input_channels"])],
-                                bit_depths=[16],
-                            ),
-                        )
-                    )
-        except Exception as e:
-            logger.error(f"Error listing Windows audio sources: {e}")
-
-        # If no loopback found but we are on Windows, provide a "Default" entry
-        if not sources and platform.system() == "Windows":
+            # Add explicit default system audio source
             sources.append(
                 SourceDescriptor(
                     source_id="default",
@@ -130,6 +104,62 @@ class WindowsAudioAdapter(IngressAdapter):
                 )
             )
 
+            for i, dev in enumerate(devices):
+                # Filter by WASAPI host API
+                if dev["hostapi"] != wasapi_api_index:
+                    continue
+
+                source_id = str(i)
+                base_name = dev["name"]
+
+                # Categorize based on channels
+                if dev["max_output_channels"] > 0:
+                    # Output devices can be used for loopback
+                    source_type = SourceType.SYSTEM_AUDIO
+                    display_name = f"[Output] {base_name}"
+                    channels = [min(2, dev["max_output_channels"])]
+                elif dev["max_input_channels"] > 0:
+                    # Input devices (microphones, line-in)
+                    if "line" in base_name.lower():
+                        source_type = SourceType.LINE_IN
+                    else:
+                        source_type = SourceType.MICROPHONE
+                    display_name = f"[Input] {base_name}"
+                    channels = [min(2, dev["max_input_channels"])]
+                else:
+                    continue
+
+                sources.append(
+                    SourceDescriptor(
+                        source_id=source_id,
+                        source_type=source_type,
+                        display_name=display_name,
+                        platform="windows",
+                        capabilities=SourceCapabilities(
+                            sample_rates=[int(dev["default_samplerate"]), 48000],
+                            channels=channels,
+                            bit_depths=[16],
+                        ),
+                    )
+                )
+
+        except Exception as e:
+            logger.error(f"Error listing Windows audio sources: {e}")
+
+        # Sort sources: SYSTEM_AUDIO first, then LINE_IN, then MICROPHONE
+        type_priority = {
+            SourceType.SYSTEM_AUDIO: 0,
+            SourceType.LINE_IN: 1,
+            SourceType.MICROPHONE: 2,
+        }
+
+        # Keep 'default' at the very top
+        def sort_key(s: SourceDescriptor):
+            if s.source_id == "default":
+                return (-1, "")
+            return (type_priority.get(s.source_type, 99), s.display_name)
+
+        sources.sort(key=sort_key)
         return sources
 
     def prepare(self, source_id: str) -> PrepareResult:
@@ -147,24 +177,69 @@ class WindowsAudioAdapter(IngressAdapter):
             return PrepareResult(success=False, source_id=source_id, error=str(e))
 
     def start(self, source_id: str, frame_sink: FrameSink) -> StartResult:
+        """Start capturing audio from the source.
+
+        If source_type is SYSTEM_AUDIO, uses WASAPI loopback.
+        """
         if self._running:
             return StartResult(success=False, message="Already running")
+
+        if platform.system() != "Windows" or sd is None:
+            return StartResult(success=False, message="WASAPI capture only available on Windows")
 
         self._frame_sink = frame_sink
         self._session_id = f"win_sess_{int(time.time())}"
 
         try:
-            device_index = None if source_id == "default" else int(source_id)
+            source_type = SourceType.MICROPHONE
+            device_index: int | None = None
+
+            if source_id == "default":
+                # Find the default WASAPI output device for loopback
+                try:
+                    # sd.default.device returns (input_index, output_index)
+                    device_index = sd.default.device[1]
+                    # Ensure it's a WASAPI device, otherwise loopback won't work
+                    dev_info = sd.query_devices(device_index)
+                    hostapis = sd.query_hostapis()
+                    if hostapis[dev_info["hostapi"]]["name"] != "Windows WASAPI":
+                        # Fallback: search for first WASAPI output device
+                        wasapi_idx = next((i for i, a in enumerate(hostapis) if a["name"] == "Windows WASAPI"), -1)
+                        if wasapi_idx != -1:
+                            device_index = next(
+                                (
+                                    i
+                                    for i, d in enumerate(sd.query_devices())
+                                    if d["hostapi"] == wasapi_idx and d["max_output_channels"] > 0
+                                ),
+                                device_index,
+                            )
+                except Exception as e:
+                    logger.debug(f"Failed to resolve default WASAPI device via sd.default: {e}")
+                    # Fallback to None (sounddevice default)
+                    device_index = None
+
+                source_type = SourceType.SYSTEM_AUDIO
+            else:
+                device_index = int(source_id)
+                dev_info = sd.query_devices(device_index)
+                if dev_info["max_output_channels"] > 0:
+                    source_type = SourceType.SYSTEM_AUDIO
 
             # WASAPI Loopback requires specific settings in sounddevice/PortAudio
-            # On Windows, we often need to use sd.WasapiSettings
             extra_settings = None
-            if platform.system() == "Windows":
+            if source_type == SourceType.SYSTEM_AUDIO:
                 try:
+                    # Robust initialization of WasapiSettings
                     extra_settings = sd.WasapiSettings(loopback=True)
-                except AttributeError:
-                    # Older sounddevice or non-Windows
-                    pass
+                except (AttributeError, TypeError) as e:
+                    logger.error(f"Failed to create WASAPI loopback settings: {e}")
+                    # Fallback or proceed without loopback (unlikely to work for output devices)
+
+            logger.info(
+                f"Starting Windows audio capture: source={source_id}, "
+                f"device={device_index}, loopback={source_type == SourceType.SYSTEM_AUDIO}"
+            )
 
             self._stream = sd.InputStream(
                 device=device_index,

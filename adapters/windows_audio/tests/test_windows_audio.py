@@ -7,6 +7,7 @@ sys.modules["sounddevice"] = mock_sd
 
 import numpy as np  # noqa: E402
 from adapter_windows_audio import WindowsAudioAdapter  # noqa: E402
+from ingress_sdk.types import SourceType  # noqa: E402
 
 
 def test_adapter_id():
@@ -38,17 +39,27 @@ def test_list_sources_windows(mock_query_hostapis, mock_query_devices, mock_plat
 
     # Mock devices
     mock_query_devices.return_value = [
-        {"name": "Speakers (Realtek)", "hostapi": 1, "max_input_channels": 2, "default_samplerate": 48000.0},
-        {"name": "Microphone (Realtek)", "hostapi": 1, "max_input_channels": 1, "default_samplerate": 44100.0},
-        {"name": "Other device", "hostapi": 0, "max_input_channels": 2, "default_samplerate": 48000.0},
+        {"name": "Speakers (Realtek)", "hostapi": 1, "max_input_channels": 0, "max_output_channels": 2, "default_samplerate": 48000.0},
+        {"name": "Microphone (Realtek)", "hostapi": 1, "max_input_channels": 1, "max_output_channels": 0, "default_samplerate": 44100.0},
+        {"name": "Line In (Realtek)", "hostapi": 1, "max_input_channels": 2, "max_output_channels": 0, "default_samplerate": 44100.0},
+        {"name": "Other device", "hostapi": 0, "max_input_channels": 2, "max_output_channels": 0, "default_samplerate": 48000.0},
     ]
 
     adapter = WindowsAudioAdapter()
     sources = adapter.list_sources()
 
-    assert len(sources) >= 2
-    assert any(s.display_name == "Speakers (Realtek)" for s in sources)
-    assert any(s.display_name == "Microphone (Realtek)" for s in sources)
+    assert len(sources) == 4  # Default + 3 WASAPI devices
+    assert sources[0].source_id == "default"
+    assert sources[0].source_type == SourceType.SYSTEM_AUDIO
+
+    assert sources[1].display_name == "[Output] Speakers (Realtek)"
+    assert sources[1].source_type == SourceType.SYSTEM_AUDIO
+
+    assert sources[2].display_name == "[Input] Line In (Realtek)"
+    assert sources[2].source_type == SourceType.LINE_IN
+
+    assert sources[3].display_name == "[Input] Microphone (Realtek)"
+    assert sources[3].source_type == SourceType.MICROPHONE
 
 
 @patch("platform.system")
@@ -61,16 +72,29 @@ def test_list_sources_non_windows(mock_platform):
 
 @patch("platform.system")
 @patch("sounddevice.InputStream")
-def test_start_stop_session(mock_input_stream, mock_platform):
+@patch("sounddevice.query_devices")
+@patch("sounddevice.query_hostapis")
+@patch("sounddevice.WasapiSettings")
+def test_start_stop_session(mock_wasapi_settings, mock_query_hostapis, mock_query_devices, mock_input_stream, mock_platform):
     mock_platform.return_value = "Windows"
+    mock_sd.default.device = [0, 0]
+    mock_query_hostapis.return_value = [{"name": "Windows WASAPI"}]
+    mock_query_devices.return_value = {"hostapi": 0, "max_output_channels": 2}
+
     adapter = WindowsAudioAdapter()
     frame_sink = MagicMock()
 
-    # Start
+    # Start loopback
     result = adapter.start("default", frame_sink)
     assert result.success is True
     assert result.session_id is not None
     assert adapter._running is True
+
+    # Verify WASAPI settings used
+    mock_wasapi_settings.assert_called_with(loopback=True)
+    mock_input_stream.assert_called()
+    _, kwargs = mock_input_stream.call_args
+    assert kwargs["extra_settings"] is not None
 
     # Stop
     adapter.stop(result.session_id)
