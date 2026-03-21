@@ -4,7 +4,7 @@ import logging
 import socket
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
 
 from bridge_core.stream.pipeline import StreamPipeline
@@ -33,25 +33,20 @@ class StreamPublisher:
 
         @self.app.get("/streams/{session_id}/live.{ext}")
         async def stream_audio(session_id: str, ext: str) -> StreamingResponse:
-            pipeline = self._pipelines.get(session_id)
-            if not pipeline:
-                raise HTTPException(status_code=404, detail="Stream session not found")
-
-            # Validate extension matches profile
-            expected_ext = self._get_extension(pipeline.profile_id)
-            if ext != expected_ext:
-                raise HTTPException(status_code=400, detail=f"Invalid extension for profile. Expected {expected_ext}")
-
-            media_type = self._get_media_type(ext)
+            pipeline, media_type, headers = self._resolve_stream(session_id, ext)
             return StreamingResponse(
                 pipeline.subscribe(),
                 media_type=media_type,
-                headers={
-                    "Cache-Control": "no-cache, no-store, must-revalidate",
-                    "Pragma": "no-cache",
-                    "Expires": "0",
-                    "Connection": "keep-alive",
-                },
+                headers=headers,
+            )
+
+        @self.app.head("/streams/{session_id}/live.{ext}")
+        async def head_stream_audio(session_id: str, ext: str) -> Response:
+            _, media_type, headers = self._resolve_stream(session_id, ext)
+            return Response(
+                content=None,
+                media_type=media_type,
+                headers=headers,
             )
 
         @self.app.get("/health")
@@ -116,3 +111,23 @@ class StreamPublisher:
         """Stop the stream server."""
         if hasattr(self, "_server"):
             self._server.should_exit = True
+
+    def _resolve_stream(self, session_id: str, ext: str) -> tuple[StreamPipeline, str, dict[str, str]]:
+        """Resolve a stream session and validate the extension."""
+        pipeline = self._pipelines.get(session_id)
+        if not pipeline:
+            raise HTTPException(status_code=404, detail="Stream session not found")
+
+        # Validate extension matches profile
+        expected_ext = self._get_extension(pipeline.profile_id)
+        if ext != expected_ext:
+            raise HTTPException(status_code=400, detail=f"Invalid extension for profile. Expected {expected_ext}")
+
+        media_type = self._get_media_type(ext)
+        headers = {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive",
+        }
+        return pipeline, media_type, headers
