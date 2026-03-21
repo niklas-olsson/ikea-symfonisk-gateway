@@ -8,6 +8,7 @@ from pathlib import Path
 from adapter_linux_audio import LinuxAudioAdapter
 from adapter_linux_bluetooth import LinuxBluetoothAdapter
 from adapter_synthetic import SyntheticAdapter
+from adapter_windows_audio import WindowsAudioAdapter
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -92,6 +93,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         capabilities=linux_bluetooth_adapter.capabilities(),
         sources=linux_bluetooth_adapter.list_sources(),
         adapter_instance=linux_bluetooth_adapter,
+    )
+
+    # Register Windows Audio adapter
+    windows_audio_adapter = WindowsAudioAdapter()
+    source_registry.register_adapter(
+        adapter_id=windows_audio_adapter.id(),
+        platform=windows_audio_adapter.platform(),
+        version="0.1.0",
+        capabilities=windows_audio_adapter.capabilities(),
+        sources=windows_audio_adapter.list_sources(),
+        adapter_instance=windows_audio_adapter,
     )
 
     # Start stream publisher in the background

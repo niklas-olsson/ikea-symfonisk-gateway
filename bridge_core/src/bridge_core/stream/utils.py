@@ -23,7 +23,7 @@ def resolve_ffmpeg_path(config_store: "ConfigStore | None" = None) -> str:
     """
     # 1. Check ConfigStore
     if config_store:
-        config_path = config_store.get("ffmpeg_path")
+        config_path: str | None = config_store.get("ffmpeg_path")
         if config_path:
             if os.path.isfile(config_path) and os.access(config_path, os.X_OK):
                 logger.debug(f"Resolved FFmpeg path from ConfigStore: {config_path}")

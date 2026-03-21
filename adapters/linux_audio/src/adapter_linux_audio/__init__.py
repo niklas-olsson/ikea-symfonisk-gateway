@@ -116,14 +116,14 @@ class LinuxAudioAdapter(IngressAdapter):
                 if len(parts) >= 2:
                     source_id = parts[1]
                     display_name = f"PulseAudio: {source_id}"
-                    source_type = SourceType.SYSTEM_AUDIO
+                    source_type = SourceType.SYSTEM_OUTPUT
 
                     if "monitor" in source_id:
                         display_name = f"System Audio ({source_id})"
-                        source_type = SourceType.SYSTEM_AUDIO
+                        source_type = SourceType.SYSTEM_OUTPUT
                     elif "alsa_input" in source_id:
                         display_name = f"Microphone/Line-In ({source_id})"
-                        source_type = SourceType.MICROPHONE
+                        source_type = SourceType.MICROPHONE_INPUT
 
                     sources.append(
                         SourceDescriptor(
@@ -155,7 +155,7 @@ class LinuxAudioAdapter(IngressAdapter):
                         sources.append(
                             SourceDescriptor(
                                 source_id=source_id,
-                                source_type=SourceType.LINE_IN,  # hard to know, assume Line-in
+                                source_type=SourceType.MICROPHONE_INPUT,  # hard to know, assume Input
                                 display_name=display_name,
                                 platform="linux",
                                 capabilities=SourceCapabilities(
@@ -173,7 +173,7 @@ class LinuxAudioAdapter(IngressAdapter):
             sources.append(
                 SourceDescriptor(
                     source_id="default",
-                    source_type=SourceType.SYSTEM_AUDIO,
+                    source_type=SourceType.SYSTEM_OUTPUT,
                     display_name="Default System Audio",
                     platform="linux",
                     capabilities=SourceCapabilities(

@@ -181,3 +181,24 @@ Do NOT add `__pycache__` removal to `.gitignore` changes - the damage is already
 ## Web UI Module
 
 The `ui_web/` directory contains the web UI package. See [ui_web/AGENTS.md](ui_web/AGENTS.md) for frontend design guidelines.
+
+## Session Startup Diagnostics
+
+The bridge provides structured error categorization during session startup to aid in troubleshooting.
+
+### Error Categories
+
+| Code | Subsystem | Description | Recommended Action |
+|------|-----------|-------------|--------------------|
+| `media_engine_not_found` | `media_engine` | FFmpeg executable not found. | Install FFmpeg and ensure it's in PATH or configure `ffmpeg_path`. |
+| `pipeline_start_failed` | `pipeline` | Audio pipeline (FFmpeg) failed to start. | Check system logs for FFmpeg process errors. |
+| `renderer_playback_failed` | `renderer` | Speaker failed to start playback. | Ensure speaker is reachable and supports the selected profile. |
+| `source_start_failed` | `source` | Failed to capture audio from source. | Verify hardware connection and permissions. |
+| `frame_ingest_failed` | `pipeline` | No audio data received from source. | Check source signal and adapter logs. |
+
+### Diagnostic Data Flow
+
+1.  `SessionManager` catches exceptions during startup.
+2.  Errors are mapped to `SessionError` objects and stored in `session.last_error`.
+3.  The `/v1/sessions` API returns `last_error` in the session response.
+4.  Structured events (`session.failed`, `renderer.playback.failed`) include the error details in their payloads.

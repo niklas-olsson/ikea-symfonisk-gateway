@@ -31,7 +31,7 @@ async def test_register_adapter_async(registry: SourceRegistry, event_bus: Event
     sources = [
         SourceDescriptor(
             source_id="test_source",
-            source_type=SourceType.SYSTEM_AUDIO,
+            source_type=SourceType.SYSTEM_OUTPUT,
             display_name="Test Source",
             platform="test",
             capabilities=SourceCapabilities(),
@@ -68,7 +68,7 @@ async def test_unregister_adapter_async(registry: SourceRegistry, event_bus: Eve
         sources=[
             SourceDescriptor(
                 source_id="test_source",
-                source_type=SourceType.SYSTEM_AUDIO,
+                source_type=SourceType.SYSTEM_OUTPUT,
                 display_name="Test Source",
                 platform="test",
                 capabilities=SourceCapabilities(),
@@ -103,7 +103,7 @@ async def test_update_source_health(registry: SourceRegistry, event_bus: EventBu
         sources=[
             SourceDescriptor(
                 source_id="test_source",
-                source_type=SourceType.SYSTEM_AUDIO,
+                source_type=SourceType.SYSTEM_OUTPUT,
                 display_name="Test Source",
                 platform="test",
                 capabilities=SourceCapabilities(),
@@ -154,7 +154,7 @@ async def test_update_adapter_sources_hotplug(registry: SourceRegistry, event_bu
         sources=[
             SourceDescriptor(
                 source_id="source1",
-                source_type=SourceType.SYSTEM_AUDIO,
+                source_type=SourceType.SYSTEM_OUTPUT,
                 display_name="Source 1",
                 platform="test",
                 capabilities=SourceCapabilities(),
@@ -169,7 +169,7 @@ async def test_update_adapter_sources_hotplug(registry: SourceRegistry, event_bu
     new_sources = [
         SourceDescriptor(
             source_id="source2",
-            source_type=SourceType.SYSTEM_AUDIO,
+            source_type=SourceType.SYSTEM_OUTPUT,
             display_name="Source 2",
             platform="test",
             capabilities=SourceCapabilities(),

@@ -3,7 +3,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class TrustedDeviceStore:
 
     def get_preferred_device(self) -> str | None:
         """Get the MAC of the preferred device."""
-        return self._data["preferred_device"]
+        return cast(str | None, self._data["preferred_device"])
 
     def set_preferred_device(self, mac: str | None) -> None:
         """Set the preferred device MAC."""
@@ -109,8 +109,8 @@ class TrustedDeviceStore:
 
     def list_trusted(self) -> dict[str, Any]:
         """List all trusted devices."""
-        return self._data["trusted_devices"]
+        return cast(dict[str, Any], self._data["trusted_devices"])
 
     def get_device_metadata(self, mac: str) -> dict[str, Any] | None:
         """Get metadata for a trusted device."""
-        return self._data["trusted_devices"].get(mac)
+        return cast(dict[str, Any] | None, self._data["trusted_devices"].get(mac))

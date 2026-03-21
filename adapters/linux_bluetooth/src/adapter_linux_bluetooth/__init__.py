@@ -47,6 +47,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
         self._status_monitoring_task: asyncio.Task[None] | None = None
         self._last_status: dict[str, Any] = {}
+        self._source_id_map: dict[str, str] = {}  # virtual_id -> pa_id
 
         if self._event_bus:
             self._status_monitoring_task = asyncio.create_task(self._monitor_status())
@@ -77,7 +78,13 @@ class LinuxBluetoothAdapter(IngressAdapter):
         if not shutil.which("pactl"):
             return sources
 
+        new_source_id_map: dict[str, str] = {}
+
         try:
+            backend_type = "PulseAudio"
+            if shutil.which("pw-cli"):
+                backend_type = "PipeWire"
+
             result = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
@@ -87,23 +94,26 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     continue
 
                 source_id = parts[1]
-                # Bluetooth sources in PulseAudio typically have "bluez" in the name
                 if "bluez" in source_id:
                     mac = source_id.replace("bluez_source.", "").replace(".a2dp_source", "").replace("_", ":")
-                    # Check if device is blocked
                     if self._store.is_blocked(mac):
                         logger.info(f"Ignoring blocked Bluetooth source: {source_id}")
                         continue
 
                     display_name = f"Bluetooth: {mac}"
-                    # Try to get alias from store if trusted
                     metadata = self._store.get_device_metadata(mac)
-                    if metadata and "alias" in metadata:
+                    if metadata is None:
+                        metadata = {}
+                    if "alias" in metadata:
                         display_name = f"Bluetooth: {metadata['alias']} ({mac})"
+
+                    virtual_id = f"bluetooth:{mac.lower()}"
+                    metadata["backend_type"] = backend_type
+                    metadata["pa_source_id"] = source_id
 
                     sources.append(
                         SourceDescriptor(
-                            source_id=source_id,
+                            source_id=virtual_id,
                             source_type=SourceType.BLUETOOTH_AUDIO,
                             display_name=display_name,
                             platform="linux",
@@ -112,8 +122,13 @@ class LinuxBluetoothAdapter(IngressAdapter):
                                 channels=[2],
                                 bit_depths=[16],
                             ),
+                            metadata=metadata,
                         )
                     )
+                    new_source_id_map[virtual_id] = source_id
+
+            self._source_id_map = new_source_id_map
+
         except (subprocess.SubprocessError, FileNotFoundError) as e:
             logger.error(f"Failed to list Bluetooth sources: {e}")
 
@@ -133,12 +148,14 @@ class LinuxBluetoothAdapter(IngressAdapter):
         if self._running:
             return StartResult(success=False, message="Already running")
 
+        pa_source_id = self._source_id_map.get(source_id, source_id)
+
         self._session_id = f"sess_{id(self)}"
         self._frame_sink = frame_sink
         self._running = True
-        self._capture_task = asyncio.create_task(self._capture_loop(source_id))
+        self._capture_task = asyncio.create_task(self._capture_loop(pa_source_id))
 
-        logger.info(f"Started Bluetooth capture from {source_id} (session: {self._session_id})")
+        logger.info(f"Started Bluetooth capture from {source_id} ({pa_source_id}) (session: {self._session_id})")
         return StartResult(success=True, session_id=self._session_id)
 
     def stop(self, session_id: str) -> None:
@@ -159,7 +176,6 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     def probe_health(self, source_id: str) -> HealthResult:
         """Probe the health of the Bluetooth source."""
-        # Simple health check based on whether the capture loop is running
         return HealthResult(
             healthy=self._running,
             source_state="active" if self._running else "idle",
@@ -227,8 +243,6 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     def start_pairing(self, timeout_seconds: int = 90, candidate_mac: str | None = None) -> PairingResult:
         """Start adapter pairing mode via Window Manager."""
-        # Use a background task because start_pairing is sync in the SDK
-        # but our window manager is async.
         asyncio.create_task(self._pairing_window.open_window(timeout_seconds, candidate_mac=candidate_mac))
         return PairingResult(success=True, message=f"Pairing window opened for {timeout_seconds}s")
 
@@ -265,7 +279,11 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     def trust_device(self, mac: str, alias: str | None = None) -> None:
         """Add device to trusted store."""
-        metadata = {"timestamp": asyncio.get_event_loop().time()}
+        metadata: dict[str, Any] = {}
+        try:
+            metadata = {"timestamp": asyncio.get_event_loop().time()}
+        except RuntimeError:
+            metadata = {"timestamp": 0}
         if alias:
             metadata["alias"] = alias
         self._store.trust_device(mac, metadata)

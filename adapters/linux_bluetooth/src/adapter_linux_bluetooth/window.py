@@ -2,12 +2,10 @@
 
 import asyncio
 import logging
-from typing import Any
-
-from dbus_fast import BusType
-from dbus_fast.aio import MessageBus
 
 from bridge_core.core.event_bus import EventBus, EventType
+from dbus_fast import BusType
+from dbus_fast.aio import MessageBus
 
 from .agent import PairingAgent, register_agent, unregister_agent
 from .dbus_adapter import BlueZAdapterController
@@ -109,7 +107,7 @@ class PairingWindowManager:
             try:
                 await asyncio.wait_for(self._completion_event.wait(), timeout=timeout)
                 logger.info("Pairing window completed successfully")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.info("Pairing window timed out")
 
         except asyncio.CancelledError:

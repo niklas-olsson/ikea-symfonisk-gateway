@@ -60,6 +60,9 @@ async def test_supervised_push_frame_failure(session_manager, event_bus, caplog)
             pipeline.start = AsyncMock()
             pipeline.stop = AsyncMock()
             pipeline.push_frame = AsyncMock(side_effect=RuntimeError("Push failed supervised!"))
+            # Mock jitter_buffer for frame ingestion verification
+            pipeline.jitter_buffer = MagicMock()
+            pipeline.jitter_buffer.size_ms = 10.0
 
             await session_manager.start_session(session.session_id)
             assert session.state == SessionState.PLAYING
@@ -101,6 +104,9 @@ async def test_supervised_pipeline_task_failure(session_manager, event_bus, capl
             mock_pipeline_cls.return_value = pipeline_instance
             pipeline_instance.start = AsyncMock()
             pipeline_instance.stop = AsyncMock()
+            # Mock jitter_buffer for frame ingestion verification
+            pipeline_instance.jitter_buffer = MagicMock()
+            pipeline_instance.jitter_buffer.size_ms = 10.0
 
             await session_manager.start_session(session.session_id)
 
@@ -143,6 +149,9 @@ async def test_adapter_on_error_propagation(session_manager, event_bus):
             pipeline = mock_pipeline_cls.return_value
             pipeline.start = AsyncMock()
             pipeline.stop = AsyncMock()
+            # Mock jitter_buffer for frame ingestion verification
+            pipeline.jitter_buffer = MagicMock()
+            pipeline.jitter_buffer.size_ms = 10.0
 
             await session_manager.start_session(session.session_id)
 

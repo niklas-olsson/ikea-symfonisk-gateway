@@ -37,7 +37,7 @@ class BlueZAdapterController:
             proxy_object = bus.get_proxy_object(BLUEZ_SERVICE, self.adapter_path, introspection)
             properties_iface = proxy_object.get_interface(PROPERTIES_INTERFACE)
 
-            all_props = await properties_iface.call_get_all(ADAPTER_INTERFACE)
+            all_props = await properties_iface.call_get_all(ADAPTER_INTERFACE)  # type: ignore[attr-defined]
             # Unwrap Variants
             return {k: v.value for k, v in all_props.items()}
         except Exception as e:
@@ -52,7 +52,7 @@ class BlueZAdapterController:
             proxy_object = bus.get_proxy_object(BLUEZ_SERVICE, self.adapter_path, introspection)
             properties_iface = proxy_object.get_interface(PROPERTIES_INTERFACE)
 
-            await properties_iface.call_set(ADAPTER_INTERFACE, name, Variant(signature, value))
+            await properties_iface.call_set(ADAPTER_INTERFACE, name, Variant(signature, value))  # type: ignore[attr-defined]
             return True
         except Exception as e:
             logger.error(f"Failed to set adapter property {name}: {e}")
@@ -112,6 +112,7 @@ class BlueZAdapterController:
         if shutil.which("rfkill"):
             try:
                 import subprocess
+
                 result = subprocess.run(["rfkill", "list", "bluetooth"], capture_output=True, text=True)
                 if "Soft blocked: yes" in result.stdout:
                     errors.append("adapter_soft_blocked")

@@ -5,6 +5,7 @@ members = [
     "adapters/synthetic",
     "adapters/linux_audio",
     "adapters/linux_bluetooth",
+    "adapters/windows_audio",
     "renderer_sonos",
     "ui_web",
     "integration_homeassistant",
@@ -16,6 +17,7 @@ ingress-sdk = { workspace = true }
 adapter-synthetic = { workspace = true }
 adapter-linux-audio = { workspace = true }
 adapter-linux-bluetooth = { workspace = true }
+adapter-windows-audio = { workspace = true }
 renderer-sonos = { workspace = true }
 shared = { workspace = true }
 
