@@ -1,6 +1,12 @@
 # IKEA Symfonisk Gateway
 
-Use your IKEA Symfonisk speakers as audio input targets for any source—turntables, game consoles, or anything with line-level or Bluetooth output.
+Stream supported audio sources to IKEA SYMFONISK and Sonos speakers through a Linux or Windows bridge device.
+
+Linux can capture local system audio and accept Bluetooth audio from supported devices such as phones and Bluetooth turntables. Windows currently captures system and app output from the host PC. The bridge relays that audio to speakers on the same local network.
+
+- Linux: system audio capture, Bluetooth audio ingest and pairing workflow, trusted-device reconnect path
+- Windows: system output capture only
+- Targets: Sonos and IKEA SYMFONISK speakers on the same LAN
 
 ## Quick Start
 

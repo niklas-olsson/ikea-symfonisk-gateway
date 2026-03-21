@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import asyncio
+import inspect
 import logging
 import platform
 from collections.abc import AsyncGenerator
@@ -40,6 +41,30 @@ from renderer_sonos import SonosRendererAdapter
 logger = logging.getLogger(__name__)
 
 
+def _schedule_adapter_startup(startup_result: object, adapter_name: str) -> asyncio.Future[object] | asyncio.Task[object] | None:
+    if startup_result is None:
+        return None
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.debug("Skipping %s startup scheduling because no running loop exists", adapter_name)
+        return None
+
+    if asyncio.isfuture(startup_result):
+        return startup_result
+
+    if inspect.iscoroutine(startup_result):
+        return loop.create_task(startup_result, name=f"{adapter_name}.startup")
+
+    logger.warning(
+        "Skipping %s startup scheduling because on_startup() returned non-coroutine %r",
+        adapter_name,
+        type(startup_result).__name__,
+    )
+    return None
+
+
 def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventBus, host_platform: str | None = None) -> None:
     """Register built-in ingress adapters for the current host platform."""
     synthetic_adapter = SyntheticAdapter()
@@ -74,8 +99,7 @@ def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventB
             sources=linux_bluetooth_adapter.list_sources(),
             adapter_instance=linux_bluetooth_adapter,
         )
-        # Start auto-reconnect routine in the background
-        asyncio.create_task(linux_bluetooth_adapter.on_startup())
+        _schedule_adapter_startup(linux_bluetooth_adapter.on_startup(), "linux_bluetooth_adapter")
         return
 
     if normalized_platform == "windows":
