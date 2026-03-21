@@ -703,6 +703,7 @@ class SessionManager:
         raise RuntimeError(session.last_error.message)
 
     def _is_windows_source_viable(self, health: Any) -> bool:
+        """Return true when Windows loopback startup is viable without requiring live signal."""
         if not health:
             return False
         if not health.healthy:
@@ -735,6 +736,8 @@ class SessionManager:
         activation_seen = startup_result == "active"
         activation_degraded_emitted = False
         transport_degraded_emitted = False
+        transport_miss_started_at: float | None = None
+        transport_recovery_started_at: float | None = None
 
         try:
             while True:
@@ -759,6 +762,10 @@ class SessionManager:
                 last_stdin_write_monotonic = diagnostics.get("last_stdin_write_monotonic")
                 silence_frames_written = int(diagnostics.get("silence_frames_written") or 0)
                 keepalive_active = bool(diagnostics.get("keepalive_active"))
+                active_client_count = int(diagnostics.get("active_client_count") or 0)
+                first_keepalive_encoded_output_after_session_start_ms = diagnostics.get(
+                    "first_keepalive_encoded_output_after_session_start_ms"
+                )
                 activation_seen = activation_seen or callback_count > 0 or frames_emitted > 0 or signal_present or real_frames_written > 0
 
                 elapsed_ms = (time.monotonic() - started_at) * 1000
@@ -775,6 +782,7 @@ class SessionManager:
                         "transport_alive": transport_alive,
                         "encoded_bytes_emitted_total": encoded_bytes_emitted_total,
                         "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
+                        "active_client_count": active_client_count,
                         "health": health.details if health else None,
                     }
                     logger.warning(
@@ -792,15 +800,23 @@ class SessionManager:
                     activation_degraded_emitted = True
 
                 stdout_silence_age_ms: float | None = None
+                now = time.monotonic()
                 if last_stdout_read_monotonic is not None:
-                    stdout_silence_age_ms = (time.monotonic() - last_stdout_read_monotonic) * 1000
+                    stdout_silence_age_ms = (now - last_stdout_read_monotonic) * 1000
                 elif elapsed_ms >= transport_heartbeat_window_ms:
                     stdout_silence_age_ms = elapsed_ms
 
+                if not transport_alive and stdout_silence_age_ms is not None and stdout_silence_age_ms >= transport_heartbeat_window_ms:
+                    if transport_miss_started_at is None:
+                        transport_miss_started_at = now
+                    transport_recovery_started_at = None
+                else:
+                    transport_miss_started_at = None
+
                 transport_should_degrade = (
                     session.state == SessionState.PLAYING
-                    and stdout_silence_age_ms is not None
-                    and stdout_silence_age_ms >= transport_heartbeat_window_ms
+                    and transport_miss_started_at is not None
+                    and (now - transport_miss_started_at) * 1000 >= transport_heartbeat_window_ms
                     and not transport_alive
                 )
                 if transport_should_degrade and not transport_degraded_emitted:
@@ -816,6 +832,10 @@ class SessionManager:
                         "real_frames_written": real_frames_written,
                         "silence_frames_written": silence_frames_written,
                         "runtime_mode": runtime_mode,
+                        "active_client_count": active_client_count,
+                        "last_client_fanout_monotonic": diagnostics.get("last_client_fanout_monotonic"),
+                        "last_client_attach_monotonic": diagnostics.get("last_client_attach_monotonic"),
+                        "last_client_detach_monotonic": diagnostics.get("last_client_detach_monotonic"),
                         "health": health.details if health else None,
                     }
                     logger.warning(
@@ -831,7 +851,19 @@ class SessionManager:
                     )
                     transport_degraded_emitted = True
 
-                if session.state == SessionState.DEGRADED and transport_alive and (real_frames_written > 0 or keepalive_active):
+                if session.state == SessionState.DEGRADED and transport_alive:
+                    if transport_recovery_started_at is None:
+                        transport_recovery_started_at = now
+                else:
+                    transport_recovery_started_at = None
+
+                if (
+                    session.state == SessionState.DEGRADED
+                    and transport_alive
+                    and transport_recovery_started_at is not None
+                    and (now - transport_recovery_started_at) * 1000 >= transport_heartbeat_window_ms
+                    and (real_frames_written > 0 or keepalive_active)
+                ):
                     session.transition_to(SessionState.PLAYING)
                     restored_state = "active" if real_frames_written > 0 else "idle"
                     details = {
@@ -843,9 +875,11 @@ class SessionManager:
                         "real_frames_written": real_frames_written,
                         "silence_frames_written": silence_frames_written,
                         "keepalive_to_first_real_frame_ms": diagnostics.get("keepalive_to_first_real_frame_ms"),
+                        "first_keepalive_encoded_output_after_session_start_ms": first_keepalive_encoded_output_after_session_start_ms,
                         "first_real_encoded_output_after_session_start_ms": diagnostics.get(
                             "first_real_encoded_output_after_session_start_ms"
                         ),
+                        "active_client_count": active_client_count,
                     }
                     logger.info(
                         "audio_transport_heartbeat_restored session_id=%s source_id=%s details=%s",
@@ -862,6 +896,7 @@ class SessionManager:
                         },
                     )
                     transport_degraded_emitted = False
+                    transport_miss_started_at = None
 
                 last_real_frame_age_ms = diagnostics.get("last_real_frame_age_ms")
                 if (

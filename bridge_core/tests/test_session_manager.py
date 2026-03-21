@@ -469,11 +469,16 @@ async def test_windows_silent_source_viability_allows_startup(
             "runtime_mode": "idle_pending_signal",
             "last_real_frame_age_ms": None,
             "keepalive_to_first_real_frame_ms": None,
+            "first_keepalive_encoded_output_after_session_start_ms": None,
             "transport_alive": False,
             "encoded_bytes_emitted_total": 0,
             "encoded_bytes_emitted_last_window": 0,
             "last_stdout_read_monotonic": None,
             "last_stdin_write_monotonic": None,
+            "active_client_count": 0,
+            "last_client_fanout_monotonic": None,
+            "last_client_attach_monotonic": None,
+            "last_client_detach_monotonic": None,
         }
 
         success = await manager.start_session(session.session_id)
@@ -595,11 +600,16 @@ async def test_silent_viability_startup_degrades_if_never_active(
             "runtime_mode": "idle_pending_signal",
             "last_real_frame_age_ms": None,
             "keepalive_to_first_real_frame_ms": None,
+            "first_keepalive_encoded_output_after_session_start_ms": None,
             "transport_alive": False,
             "encoded_bytes_emitted_total": 0,
             "encoded_bytes_emitted_last_window": 0,
             "last_stdout_read_monotonic": None,
             "last_stdin_write_monotonic": None,
+            "active_client_count": 0,
+            "last_client_fanout_monotonic": None,
+            "last_client_attach_monotonic": None,
+            "last_client_detach_monotonic": None,
         }
 
         success = await manager.start_session(session.session_id)
@@ -661,12 +671,18 @@ async def test_transport_heartbeat_loss_degrades_session(
         "runtime_mode": "active",
         "last_real_frame_age_ms": 5.0,
         "keepalive_to_first_real_frame_ms": None,
+        "first_keepalive_encoded_output_after_session_start_ms": None,
+        "first_real_encoded_output_after_session_start_ms": 20.0,
         "transport_alive": True,
         "encoded_bytes_emitted_total": 1024,
         "encoded_bytes_emitted_last_window": 512,
         "last_stdout_read_monotonic": 123.0,
         "last_stdin_write_monotonic": 123.0,
         "keepalive_active": False,
+        "active_client_count": 1,
+        "last_client_fanout_monotonic": 123.0,
+        "last_client_attach_monotonic": 120.0,
+        "last_client_detach_monotonic": None,
     }
     heartbeat_dead = {
         **heartbeat_ok,
@@ -684,11 +700,11 @@ async def test_transport_heartbeat_loss_degrades_session(
         mock_pipeline.stop = AsyncMock()
         mock_pipeline.jitter_buffer = MagicMock()
         mock_pipeline.jitter_buffer.size_ms = 0.0
-        mock_pipeline.get_diagnostics_snapshot.side_effect = [heartbeat_ok, heartbeat_dead, heartbeat_dead, heartbeat_dead]
+        mock_pipeline.get_diagnostics_snapshot.side_effect = [heartbeat_ok, heartbeat_dead, heartbeat_dead, heartbeat_dead, heartbeat_dead]
 
         success = await manager.start_session(session.session_id)
         assert success is True
-        await asyncio.sleep(0.6)
+        await asyncio.sleep(0.9)
 
     assert session.state == SessionState.DEGRADED
     await manager.stop_session(session.session_id)
@@ -745,6 +761,7 @@ async def test_transport_heartbeat_recovery_restores_playing(
         "runtime_mode": "active",
         "last_real_frame_age_ms": 5.0,
         "keepalive_to_first_real_frame_ms": None,
+        "first_keepalive_encoded_output_after_session_start_ms": None,
         "first_real_encoded_output_after_session_start_ms": 25.0,
         "transport_alive": False,
         "encoded_bytes_emitted_total": 1024,
@@ -752,6 +769,10 @@ async def test_transport_heartbeat_recovery_restores_playing(
         "last_stdout_read_monotonic": None,
         "last_stdin_write_monotonic": 123.0,
         "keepalive_active": False,
+        "active_client_count": 1,
+        "last_client_fanout_monotonic": 123.0,
+        "last_client_attach_monotonic": 120.0,
+        "last_client_detach_monotonic": None,
     }
     heartbeat_restored = {
         **heartbeat_dead,
@@ -769,11 +790,103 @@ async def test_transport_heartbeat_recovery_restores_playing(
         mock_pipeline.stop = AsyncMock()
         mock_pipeline.jitter_buffer = MagicMock()
         mock_pipeline.jitter_buffer.size_ms = 0.0
-        mock_pipeline.get_diagnostics_snapshot.side_effect = [heartbeat_dead, heartbeat_dead, heartbeat_restored, heartbeat_restored]
+        mock_pipeline.get_diagnostics_snapshot.side_effect = [
+            heartbeat_dead,
+            heartbeat_dead,
+            heartbeat_dead,
+            heartbeat_restored,
+            heartbeat_restored,
+            heartbeat_restored,
+            heartbeat_restored,
+        ]
 
         success = await manager.start_session(session.session_id)
         assert success is True
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(1.4)
+
+    assert session.state == SessionState.PLAYING
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_silence_keepalive_with_encoded_output_stays_playing(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=False,
+        source_state="healthy_but_idle",
+        last_error=None,
+        details={
+            "startup_substate": "healthy_but_idle",
+            "callback_count": 1,
+            "frames_emitted": 0,
+            "start_viability": {"stream_opened": True, "stream_started": True, "callback_registered": True},
+        },
+    )
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_transport_heartbeat_window_ms": 100,
+    }.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+
+    heartbeat_idle = {
+        "real_frames_written": 0,
+        "silence_frames_written": 8,
+        "runtime_mode": "healthy_but_idle",
+        "last_real_frame_age_ms": None,
+        "keepalive_to_first_real_frame_ms": None,
+        "first_keepalive_encoded_output_after_session_start_ms": 15.0,
+        "first_real_encoded_output_after_session_start_ms": None,
+        "transport_alive": True,
+        "encoded_bytes_emitted_total": 2048,
+        "encoded_bytes_emitted_last_window": 256,
+        "last_stdout_read_monotonic": 123.0,
+        "last_stdin_write_monotonic": 123.0,
+        "keepalive_active": True,
+        "active_client_count": 1,
+        "last_client_fanout_monotonic": 123.0,
+        "last_client_attach_monotonic": 120.0,
+        "last_client_detach_monotonic": None,
+    }
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        mock_pipeline.get_diagnostics_snapshot.return_value = heartbeat_idle
+
+        success = await manager.start_session(session.session_id)
+        assert success is True
+        await asyncio.sleep(0.9)
 
     assert session.state == SessionState.PLAYING
     await manager.stop_session(session.session_id)

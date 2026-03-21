@@ -169,6 +169,8 @@ class StreamPipeline:
         self._last_stdin_write_monotonic: float | None = None
         self._last_stdout_read_monotonic: float | None = None
         self._last_client_fanout_monotonic: float | None = None
+        self._last_client_attach_monotonic: float | None = None
+        self._last_client_detach_monotonic: float | None = None
         self._ffmpeg_stdin_write_errors = 0
         self._jitter_buffer_underrun_count = 0
         self._last_pacing_log_monotonic: float | None = None
@@ -180,7 +182,9 @@ class StreamPipeline:
         self._stdout_window_samples: deque[tuple[float, int]] = deque()
         self._first_encoded_output_monotonic: float | None = None
         self._first_real_encoded_output_monotonic: float | None = None
+        self._first_keepalive_encoded_output_monotonic: float | None = None
         self._awaiting_real_encoded_output = False
+        self._awaiting_keepalive_encoded_output = False
 
         self._pre_encoder_debug_writer: Any | None = None
         self._pre_encoder_debug_mode: str | None = None
@@ -339,6 +343,9 @@ class StreamPipeline:
                     if self._awaiting_real_encoded_output and self._first_real_encoded_output_monotonic is None:
                         self._first_real_encoded_output_monotonic = now
                         self._awaiting_real_encoded_output = False
+                    if self._awaiting_keepalive_encoded_output and self._first_keepalive_encoded_output_monotonic is None:
+                        self._first_keepalive_encoded_output_monotonic = now
+                        self._awaiting_keepalive_encoded_output = False
 
                     self._write_post_encoder_debug(data)
                     async with self._lock:
@@ -362,6 +369,7 @@ class StreamPipeline:
         queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)
         async with self._lock:
             self._clients.append(queue)
+            self._last_client_attach_monotonic = time.monotonic()
 
         try:
             while True:
@@ -370,6 +378,7 @@ class StreamPipeline:
         finally:
             async with self._lock:
                 self._clients.remove(queue)
+                self._last_client_detach_monotonic = time.monotonic()
 
     def get_diagnostics_snapshot(self) -> dict[str, Any]:
         """Return a diagnostic snapshot for logging and tests."""
@@ -395,11 +404,17 @@ class StreamPipeline:
             "last_stdin_write_monotonic": self._last_stdin_write_monotonic,
             "last_stdout_read_monotonic": self._last_stdout_read_monotonic,
             "last_client_fanout_monotonic": self._last_client_fanout_monotonic,
+            "last_client_attach_monotonic": self._last_client_attach_monotonic,
+            "last_client_detach_monotonic": self._last_client_detach_monotonic,
+            "active_client_count": len(self._clients),
             "encoded_bytes_emitted_total": self._encoded_bytes_emitted_total,
             "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
             "transport_alive": self._is_transport_alive(now, encoded_bytes_emitted_last_window),
             "first_encoded_output_after_session_start_ms": self._elapsed_since_start_ms(self._first_encoded_output_monotonic),
             "first_real_encoded_output_after_session_start_ms": self._elapsed_since_start_ms(self._first_real_encoded_output_monotonic),
+            "first_keepalive_encoded_output_after_session_start_ms": self._elapsed_since_start_ms(
+                self._first_keepalive_encoded_output_monotonic
+            ),
             "ffmpeg_input_format": {
                 **asdict(self._ffmpeg_input_format),
                 "samples_per_channel_per_frame": self._ffmpeg_input_format.samples_per_channel_per_frame,
@@ -491,6 +506,7 @@ class StreamPipeline:
         self._last_encoder_write_was_silence = is_silence
         if is_silence:
             self._silence_frames_written += 1
+            self._awaiting_keepalive_encoded_output = True
         else:
             self._real_frames_written += 1
             self._awaiting_real_encoded_output = True

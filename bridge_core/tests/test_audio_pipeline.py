@@ -217,6 +217,11 @@ async def test_pipeline_tracks_transport_heartbeat_from_stdout() -> None:
 
 @pytest.mark.asyncio
 async def test_pipeline_tracks_client_fanout_timestamp() -> None:
+    class DelayedStdout:
+        async def read(self, _: int) -> bytes:
+            await asyncio.sleep(0.02)
+            return b"encoded-data"
+
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
@@ -224,15 +229,24 @@ async def test_pipeline_tracks_client_fanout_timestamp() -> None:
         keepalive_frame_duration_ms=10,
     )
     mock_process = FakeProcess(stdout_chunks=[b"encoded-data"])
+    mock_process.stdout = DelayedStdout()
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_process):
         await pipeline.start()
         subscriber = pipeline.subscribe()
-        first_chunk = await asyncio.wait_for(anext(subscriber), timeout=1.0)
+        read_task = asyncio.create_task(anext(subscriber))
+        await asyncio.sleep(0.01)
+        attached_diagnostics = pipeline.get_diagnostics_snapshot()
+        assert attached_diagnostics["active_client_count"] == 1
+        assert attached_diagnostics["last_client_attach_monotonic"] is not None
+        first_chunk = await asyncio.wait_for(read_task, timeout=1.0)
         assert first_chunk == b"encoded-data"
         diagnostics = pipeline.get_diagnostics_snapshot()
         assert diagnostics["last_client_fanout_monotonic"] is not None
         await subscriber.aclose()
+        detached_diagnostics = pipeline.get_diagnostics_snapshot()
+        assert detached_diagnostics["active_client_count"] == 0
+        assert detached_diagnostics["last_client_detach_monotonic"] is not None
         await pipeline.stop()
 
 
