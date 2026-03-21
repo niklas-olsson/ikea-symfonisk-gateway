@@ -1,6 +1,9 @@
+import asyncio
+import logging
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from bridge_core.core.session_manager import SessionFrameSink
 from bridge_core.stream.pipeline import JitterBuffer, StreamPipeline
 from ingress_sdk.protocol import AudioFrame
 
@@ -48,3 +51,29 @@ async def test_stream_pipeline_lifecycle() -> None:
         await pipeline.stop()
         assert pipeline._active is False
         assert pipeline._process is None
+
+
+@pytest.mark.asyncio
+async def test_session_frame_sink_sequences_do_not_trigger_late_drops(caplog: pytest.LogCaptureFixture) -> None:
+    class PipelineStub:
+        def __init__(self) -> None:
+            self.jitter_buffer = JitterBuffer(target_ms=1)
+
+        async def push_frame(self, frame: AudioFrame) -> None:
+            await self.jitter_buffer.push(frame)
+
+    pipeline = PipelineStub()
+    sink = SessionFrameSink(pipeline)  # type: ignore[arg-type]
+    caplog.set_level(logging.WARNING)
+    sink.start()
+
+    sink.on_frame(b"frame1", 0, 1_000_000)
+    sink.on_frame(b"frame2", 1_000_000, 1_000_000)
+    sink.on_frame(b"frame3", 2_000_000, 1_000_000)
+
+    await asyncio.wait_for(sink._queue.join(), timeout=1.0)
+    sink.stop()
+
+    frames = [await pipeline.jitter_buffer.pop(), await pipeline.jitter_buffer.pop(), await pipeline.jitter_buffer.pop()]
+    assert [frame.sequence for frame in frames if frame is not None] == [0, 1, 2]
+    assert "Dropping late frame" not in caplog.text

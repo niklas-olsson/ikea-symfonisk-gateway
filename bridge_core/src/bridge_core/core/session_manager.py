@@ -120,6 +120,7 @@ class SessionFrameSink:
         self._queue: asyncio.Queue[AudioFrame] = asyncio.Queue(maxsize=100)
         self._task: asyncio.Task[None] | None = None
         self._active = False
+        self._next_sequence = 0
 
     def start(self) -> None:
         """Start the ingestion task."""
@@ -164,12 +165,13 @@ class SessionFrameSink:
 
         # Wrap in AudioFrame envelope as expected by the pipeline
         frame = AudioFrame(
-            sequence=0,  # Sequence handled by jitter buffer/adapter if needed
+            sequence=self._next_sequence,
             pts_ns=pts_ns,
             duration_ns=duration_ns,
             format={"sample_rate": 48000, "channels": 2, "bit_depth": 16},
             audio_data=data,
         )
+        self._next_sequence += 1
         # Push to queue (non-blocking)
         try:
             self._queue.put_nowait(frame)
@@ -468,53 +470,68 @@ class SessionManager:
 
     async def _verify_windows_source_startup(self, session_id: str, session: Session) -> str:
         verification_started_at = time.monotonic()
-        frames_ingested = False
+        observed_buffer_activity = False
+        last_health = None
+        last_health_details: dict[str, Any] = {}
         for _ in range(WINDOWS_STARTUP_GRACE_POLLS):
-            if session.pipeline and session.pipeline.jitter_buffer.size_ms > 0:
-                frames_ingested = True
-                break
+            jitter_buffer_size_ms = session.pipeline.jitter_buffer.size_ms if session.pipeline else 0.0
+            if jitter_buffer_size_ms > 0:
+                observed_buffer_activity = True
+
+            health = self._source_registry.probe_source_health(session.source_id)
+            last_health = health
+            health_details = health.details if health else {}
+            last_health_details = health_details
+
+            verification_result, verification_reason = self._classify_windows_verification_state(health)
+            if verification_result == "active":
+                self._log_windows_verification_result(
+                    session_id,
+                    "active",
+                    verification_started_at,
+                    health.source_state if health else "active",
+                    health_details,
+                    jitter_buffer_size_ms,
+                    observed_buffer_activity,
+                    success_reason=verification_reason,
+                )
+                return "active"
+
+            if verification_result == "healthy_but_idle":
+                source_binding = self._source_registry.resolve_source(session.source_id)
+                adapter_info = source_binding.adapter_info if source_binding else None
+                adapter_name = adapter_info.adapter.__class__.__name__ if adapter_info and adapter_info.adapter else "Unknown"
+                logger.warning(
+                    "Session %s: Windows source is healthy but idle. Proceeding anyway. adapter=%s details=%s",
+                    session_id,
+                    adapter_name,
+                    health_details,
+                )
+                self._log_windows_verification_result(
+                    session_id,
+                    "healthy_but_idle",
+                    verification_started_at,
+                    health.source_state if health else "healthy_but_idle",
+                    health_details,
+                    jitter_buffer_size_ms,
+                    observed_buffer_activity,
+                    success_reason=verification_reason,
+                )
+                session.last_error = create_session_error(WINDOWS_OUTPUT_DEVICE_SILENT, details=health_details)
+                return "healthy_but_idle"
+
             await asyncio.sleep(WINDOWS_STARTUP_GRACE_INTERVAL_SECONDS)
-        health = self._source_registry.probe_source_health(session.source_id)
+
+        health = last_health
         source_binding = self._source_registry.resolve_source(session.source_id)
-        source_desc = source_binding.source if source_binding else None
         adapter_info = source_binding.adapter_info if source_binding else None
         adapter_name = adapter_info.adapter.__class__.__name__ if adapter_info and adapter_info.adapter else "Unknown"
-        health_details = health.details if health else {}
+        health_details = health.details if health else last_health_details
+        jitter_buffer_size_ms = session.pipeline.jitter_buffer.size_ms if session.pipeline else 0.0
+        if jitter_buffer_size_ms > 0:
+            observed_buffer_activity = True
 
-        if frames_ingested:
-            self._log_windows_verification_result(
-                session_id,
-                "active",
-                verification_started_at,
-                health.source_state if health else "active",
-                health_details,
-            )
-            return "active"
-
-        if (
-            health
-            and health.healthy
-            and not health.signal_present
-            and health.source_state == "healthy_but_idle"
-            and source_desc
-            and source_desc.platform == "windows"
-            and source_desc.source_type == SourceType.SYSTEM_OUTPUT
-        ):
-            logger.warning(
-                "Session %s: Windows source is healthy but idle. Proceeding anyway. adapter=%s details=%s",
-                session_id,
-                adapter_name,
-                health_details,
-            )
-            self._log_windows_verification_result(
-                session_id,
-                "healthy_but_idle",
-                verification_started_at,
-                health.source_state,
-                health_details,
-            )
-            session.last_error = create_session_error(WINDOWS_OUTPUT_DEVICE_SILENT, details=health_details)
-            return "healthy_but_idle"
+        _, verification_reason = self._classify_windows_verification_state(health)
 
         logger.error(
             "Session %s: Windows source verification failed. adapter=%s state=%s healthy=%s signal_present=%s details=%s",
@@ -531,9 +548,45 @@ class SessionManager:
             verification_started_at,
             health.source_state if health else "unknown",
             health_details,
+            jitter_buffer_size_ms,
+            observed_buffer_activity,
+            failure_reason=verification_reason,
         )
         session.last_error = create_session_error(WINDOWS_LOOPBACK_CAPTURE_STALLED, details=health_details)
         raise RuntimeError(session.last_error.message)
+
+    def _classify_windows_verification_state(self, health: Any) -> tuple[str, str]:
+        if not health:
+            return ("stall", "missing_health")
+
+        details = health.details or {}
+        frames_emitted = int(details.get("frames_emitted") or 0)
+        callback_count = int(details.get("callback_count") or 0)
+
+        if health.healthy and health.source_state == "active":
+            return ("active", "backend_active_state")
+        if health.healthy and frames_emitted > 0:
+            return ("active", "frames_emitted")
+        if health.healthy and callback_count > 0 and health.signal_present:
+            return ("active", "callbacks_with_signal")
+
+        # The Windows loopback backend may remain callback-active during silence without emitting
+        # bridge frames for every callback. Require a healthy stream plus real callback activity,
+        # but do not require frames_emitted > 0 for the idle classification.
+        if health.healthy and health.source_state == "healthy_but_idle" and not health.signal_present and callback_count > 0:
+            return ("healthy_but_idle", "healthy_but_idle")
+
+        if health.source_state in {
+            "stream_started_no_callbacks",
+            "callbacks_active_no_samples",
+            "samples_received_no_frames_emitted",
+        }:
+            return ("stall", health.source_state)
+
+        if not health.healthy:
+            return ("stall", "unhealthy_backend")
+
+        return ("stall", health.source_state or "unknown")
 
     def _log_windows_verification_result(
         self,
@@ -542,9 +595,13 @@ class SessionManager:
         verification_started_at: float,
         startup_substate: str,
         details: dict[str, Any],
+        jitter_buffer_size_ms: float,
+        observed_buffer_activity: bool,
+        success_reason: str | None = None,
+        failure_reason: str | None = None,
     ) -> None:
         logger.info(
-            "Windows verification result: session_id=%s verification_result=%s elapsed_ms=%.1f startup_substate=%s callback_count=%s samples_received=%s frames_emitted=%s",
+            "Windows verification result: session_id=%s verification_result=%s elapsed_ms=%.1f startup_substate=%s callback_count=%s samples_received=%s frames_emitted=%s jitter_buffer_size_ms=%.1f observed_buffer_activity=%s verification_success_reason=%s verification_failure_reason=%s",
             session_id,
             verification_result,
             (time.monotonic() - verification_started_at) * 1000,
@@ -552,6 +609,10 @@ class SessionManager:
             details.get("callback_count"),
             details.get("samples_received"),
             details.get("frames_emitted"),
+            jitter_buffer_size_ms,
+            observed_buffer_activity,
+            success_reason,
+            failure_reason,
         )
 
     async def stop_session(self, session_id: str) -> bool:
