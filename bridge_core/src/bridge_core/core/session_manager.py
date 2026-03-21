@@ -31,6 +31,12 @@ from bridge_core.stream.utils import resolve_ffmpeg_path
 logger = logging.getLogger(__name__)
 WINDOWS_STARTUP_GRACE_POLLS = 10
 WINDOWS_STARTUP_GRACE_INTERVAL_SECONDS = 0.5
+AUDIO_KEEPALIVE_ENABLED_DEFAULT = True
+AUDIO_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 200
+AUDIO_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 20
+AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT = 5000
+AUDIO_DEBUG_CAPTURE_ENABLED_DEFAULT = False
+AUDIO_DEBUG_PACING_LOGS_ENABLED_DEFAULT = False
 
 
 class SessionState(str, Enum):
@@ -227,6 +233,52 @@ class SessionManager:
         # Trigger cleanup
         asyncio.create_task(self.stop_session(session_id))
 
+    def _get_bool_config(self, key: str, default: bool) -> bool:
+        if not self._config_store:
+            return default
+        value = self._config_store.get(key, default)
+        return value if isinstance(value, bool) else default
+
+    def _get_int_config(self, key: str, default: int) -> int:
+        if not self._config_store:
+            return default
+        value = self._config_store.get(key, default)
+        return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+    def _get_optional_str_config(self, key: str) -> str | None:
+        if not self._config_store:
+            return None
+        value = self._config_store.get(key, None)
+        return value if isinstance(value, str) and value else None
+
+    def _build_pipeline_kwargs(self, source_id: str) -> dict[str, Any]:
+        return {
+            "keepalive_enabled": self._get_bool_config("audio_keepalive_enabled", AUDIO_KEEPALIVE_ENABLED_DEFAULT),
+            "keepalive_idle_threshold_ms": self._get_int_config(
+                "audio_keepalive_idle_threshold_ms",
+                AUDIO_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT,
+            ),
+            "keepalive_frame_duration_ms": self._get_int_config(
+                "audio_keepalive_frame_duration_ms",
+                AUDIO_KEEPALIVE_FRAME_DURATION_MS_DEFAULT,
+            ),
+            "source_outage_grace_ms": self._get_int_config(
+                "audio_source_outage_grace_ms",
+                AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT,
+            ),
+            "debug_capture_enabled": self._get_bool_config(
+                "audio_debug_capture_enabled",
+                AUDIO_DEBUG_CAPTURE_ENABLED_DEFAULT,
+            ),
+            "debug_capture_pre_encoder_path": self._get_optional_str_config("audio_debug_capture_pre_encoder_path"),
+            "debug_capture_post_encoder_path": self._get_optional_str_config("audio_debug_capture_post_encoder_path"),
+            "debug_pacing_logs_enabled": self._get_bool_config(
+                "audio_debug_pacing_logs_enabled",
+                AUDIO_DEBUG_PACING_LOGS_ENABLED_DEFAULT,
+            ),
+            "source_health_provider": lambda sid=source_id: self._source_registry.probe_source_health(sid),
+        }
+
     def create(
         self,
         source_id: str,
@@ -311,6 +363,7 @@ class SessionManager:
                         session.stream_profile,
                         ffmpeg_path=ffmpeg_path,
                         on_error=lambda e: self._handle_session_error(session_id, e),
+                        **self._build_pipeline_kwargs(session.source_id),
                     )
 
                 if self._stream_publisher:

@@ -344,6 +344,61 @@ async def test_windows_source_verification_succeeds_without_jitter_buffer_activi
 
 
 @pytest.mark.asyncio
+async def test_session_manager_passes_pipeline_runtime_config(
+    event_bus: EventBus,
+    source_registry: MagicMock,
+    target_registry: MagicMock,
+    stream_publisher: MagicMock,
+) -> None:
+    config_store = MagicMock()
+    config_values = {
+        "audio_keepalive_enabled": True,
+        "audio_keepalive_idle_threshold_ms": 123,
+        "audio_keepalive_frame_duration_ms": 17,
+        "audio_source_outage_grace_ms": 4567,
+        "audio_debug_capture_enabled": True,
+        "audio_debug_capture_pre_encoder_path": "/tmp/pre.wav",
+        "audio_debug_capture_post_encoder_path": "/tmp/post.mp3",
+        "audio_debug_pacing_logs_enabled": True,
+    }
+    config_store.get.side_effect = lambda key, default=None: config_values.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="src_1", target_id="tgt_1")
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.push_frame = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 10.0
+
+        success = await manager.start_session(session.session_id)
+
+    assert success is True
+    _, kwargs = mock_pipeline_cls.call_args
+    assert kwargs["keepalive_enabled"] is True
+    assert kwargs["keepalive_idle_threshold_ms"] == 123
+    assert kwargs["keepalive_frame_duration_ms"] == 17
+    assert kwargs["source_outage_grace_ms"] == 4567
+    assert kwargs["debug_capture_enabled"] is True
+    assert kwargs["debug_capture_pre_encoder_path"] == "/tmp/pre.wav"
+    assert kwargs["debug_capture_post_encoder_path"] == "/tmp/post.mp3"
+    assert kwargs["debug_pacing_logs_enabled"] is True
+    assert callable(kwargs["source_health_provider"])
+
+
+@pytest.mark.asyncio
 async def test_session_frame_sink_assigns_monotonic_sequences() -> None:
     pipeline = MagicMock(spec=StreamPipeline)
     pushed_frames: list[AudioFrame] = []
