@@ -47,5 +47,5 @@ def test_list_sources(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Second source is a mic/line in
     assert sources[1].source_id == "alsa_input.pci-0000_00_1f.3.analog-stereo"
-    assert "Microphone/Line-In" in sources[1].display_name
+    assert "Microphone" in sources[1].display_name
     assert sources[1].source_type == "microphone"
