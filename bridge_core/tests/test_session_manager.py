@@ -66,6 +66,8 @@ def session_manager(
             session.pipeline.start = AsyncMock()
             session.pipeline.stop = AsyncMock()
             session.pipeline.push_frame = AsyncMock()
+            session.pipeline.jitter_buffer = MagicMock()
+            session.pipeline.jitter_buffer.size_ms = 10.0
         return await original_start_session(session_id)
 
     manager.start_session = mocked_start_session  # type: ignore[method-assign]

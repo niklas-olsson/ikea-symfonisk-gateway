@@ -10,6 +10,15 @@ from uuid import uuid4
 from ingress_sdk.protocol import AudioFrame
 
 from bridge_core.core.config_store import ConfigStore
+from bridge_core.core.errors import (
+    FRAME_INGEST_FAILED,
+    MEDIA_ENGINE_NOT_FOUND,
+    PIPELINE_START_FAILED,
+    RENDERER_PLAYBACK_FAILED,
+    SOURCE_START_FAILED,
+    SessionError,
+    create_session_error,
+)
 from bridge_core.core.event_bus import EventBus, EventType
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
@@ -54,6 +63,7 @@ class Session:
         self.started_at: float | None = None
         self.stopped_at: float | None = None
         self.pipeline: StreamPipeline | None = None
+        self.last_error: SessionError | None = None
 
     def transition_to(self, new_state: SessionState) -> None:
         """Transitions the session to a new state if valid."""
@@ -92,6 +102,7 @@ class Session:
             "created_at": self.created_at,
             "started_at": self.started_at,
             "stopped_at": self.stopped_at,
+            "last_error": self.last_error.model_dump() if self.last_error else None,
         }
 
 
@@ -181,49 +192,83 @@ class SessionManager:
 
         try:
             # 1. Prepare and start source
-            prepare_res = self._source_registry.prepare_source(session.source_id)
-            if not prepare_res.success:
-                raise RuntimeError(f"Failed to prepare source: {prepare_res.error or prepare_res.message}")
+            try:
+                prepare_res = self._source_registry.prepare_source(session.source_id)
+                if not prepare_res.success:
+                    session.last_error = create_session_error(
+                        SOURCE_START_FAILED, f"Failed to prepare source: {prepare_res.error or prepare_res.message}"
+                    )
+                    raise RuntimeError(session.last_error.message)
+            except Exception as e:
+                if not session.last_error:
+                    session.last_error = create_session_error(SOURCE_START_FAILED, str(e))
+                raise
 
             # 2. Setup pipeline and publisher
-            if session.pipeline is None:
-                ffmpeg_path = resolve_ffmpeg_path(self._config_store)
-                session.pipeline = StreamPipeline(session.session_id, session.stream_profile, ffmpeg_path=ffmpeg_path)
+            try:
+                if session.pipeline is None:
+                    try:
+                        ffmpeg_path = resolve_ffmpeg_path(self._config_store)
+                    except RuntimeError as e:
+                        session.last_error = create_session_error(MEDIA_ENGINE_NOT_FOUND, str(e))
+                        raise
 
-            if self._stream_publisher:
-                self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
-                session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
-                self._event_bus.emit(
-                    EventType.PUBLISHER_ACTIVE,
-                    session_id=session_id,
-                    payload={"stream_url": session.stream_url},
-                )
+                    session.pipeline = StreamPipeline(session.session_id, session.stream_profile, ffmpeg_path=ffmpeg_path)
+
+                if self._stream_publisher:
+                    self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
+                    session.stream_url = self._stream_publisher.get_stream_url(session.session_id, session.stream_profile)
+                    self._event_bus.emit(
+                        EventType.PUBLISHER_ACTIVE,
+                        session_id=session_id,
+                        payload={"stream_url": session.stream_url},
+                    )
+            except Exception as e:
+                if not session.last_error:
+                    session.last_error = create_session_error(PIPELINE_START_FAILED, str(e))
+                raise
 
             # 3. Start source with frame sink
-            frame_sink = SessionFrameSink(session.pipeline)
-            start_res = self._source_registry.start_source(session.source_id, frame_sink)
-            if not start_res.success:
-                raise RuntimeError(f"Failed to start source: {start_res.message}")
-            session.adapter_session_id = start_res.session_id
-            self._event_bus.emit(
-                EventType.SOURCE_STARTED,
-                session_id=session_id,
-                payload={"adapter_session_id": session.adapter_session_id},
-            )
+            try:
+                frame_sink = SessionFrameSink(session.pipeline)
+                start_res = self._source_registry.start_source(session.source_id, frame_sink)
+                if not start_res.success:
+                    session.last_error = create_session_error(SOURCE_START_FAILED, f"Failed to start source: {start_res.message}")
+                    raise RuntimeError(session.last_error.message)
+                session.adapter_session_id = start_res.session_id
+                self._event_bus.emit(
+                    EventType.SOURCE_STARTED,
+                    session_id=session_id,
+                    payload={"adapter_session_id": session.adapter_session_id},
+                )
+            except Exception as e:
+                if not session.last_error:
+                    session.last_error = create_session_error(SOURCE_START_FAILED, str(e))
+                raise
 
             # 4. Start pipeline
-            await session.pipeline.start()
+            try:
+                await session.pipeline.start()
+            except Exception as e:
+                session.last_error = create_session_error(PIPELINE_START_FAILED, str(e))
+                raise
 
             # 5. Prepare and start renderer
             try:
                 prep_target_res = await self._target_registry.prepare_target(session.target_id)
                 if not prep_target_res.get("success"):
-                    raise RuntimeError(f"Failed to prepare target: {prep_target_res.get('error')}")
+                    session.last_error = create_session_error(
+                        RENDERER_PLAYBACK_FAILED, f"Failed to prepare target: {prep_target_res.get('error')}"
+                    )
+                    raise RuntimeError(session.last_error.message)
 
                 if session.stream_url:
                     play_res = await self._target_registry.play_stream(session.target_id, session.stream_url)
                     if not play_res.get("success"):
-                        raise RuntimeError(f"Failed to start renderer playback: {play_res.get('error')}")
+                        session.last_error = create_session_error(
+                            RENDERER_PLAYBACK_FAILED, f"Failed to start renderer playback: {play_res.get('error')}"
+                        )
+                        raise RuntimeError(session.last_error.message)
 
                     self._event_bus.emit(
                         EventType.RENDERER_PLAYBACK_STARTED,
@@ -234,12 +279,30 @@ class SessionManager:
                         },
                     )
             except Exception as e:
+                if not session.last_error:
+                    session.last_error = create_session_error(RENDERER_PLAYBACK_FAILED, str(e))
                 self._event_bus.emit(
                     EventType.RENDERER_PLAYBACK_FAILED,
                     session_id=session_id,
-                    payload={"error": str(e)},
+                    payload={
+                        "error": str(e),
+                        "last_error": session.last_error.model_dump(),
+                        "target_id": session.target_id,
+                    },
                 )
                 raise
+
+            # 6. Verify frame ingestion
+            frames_ingested = False
+            for _ in range(6):  # 3 seconds, 500ms intervals
+                if session.pipeline and session.pipeline.jitter_buffer.size_ms > 0:
+                    frames_ingested = True
+                    break
+                await asyncio.sleep(0.5)
+
+            if not frames_ingested:
+                session.last_error = create_session_error(FRAME_INGEST_FAILED)
+                raise RuntimeError(session.last_error.message)
 
             session.transition_to(SessionState.PLAYING)
             self._event_bus.emit(
@@ -251,10 +314,13 @@ class SessionManager:
 
         except Exception as e:
             logger.exception(f"Error starting session {session_id}: {e}")
+            if not session.last_error:
+                session.last_error = create_session_error("session_start_failed", str(e))
+
             self._event_bus.emit(
                 EventType.SESSION_FAILED,
                 session_id=session_id,
-                payload={"error": str(e)},
+                payload=session.to_dict(),
             )
             session.transition_to(SessionState.FAILED)
             # Try to cleanup what was started
