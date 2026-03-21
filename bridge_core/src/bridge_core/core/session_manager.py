@@ -55,6 +55,8 @@ AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 750
 AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT = 750
 AUDIO_STABLE_PRIMARY_DETACH_GRACE_MS_DEFAULT = 10000
 AUDIO_EXPERIMENTAL_PRIMARY_DETACH_GRACE_MS_DEFAULT = 5000
+AUDIO_STABLE_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT = False
+AUDIO_EXPERIMENTAL_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT = True
 AUDIO_AUX_CLIENT_QUEUE_BYTES_DEFAULT = 131072
 AUDIO_AUX_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 750
 AUDIO_AUX_CLIENT_MAX_BACKLOG_MS_DEFAULT = 1500
@@ -573,7 +575,9 @@ class SessionManager:
             ),
             "primary_health_require_yield_progress": self._get_bool_config(
                 "audio_primary_health_require_yield_progress",
-                AUDIO_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT,
+                AUDIO_EXPERIMENTAL_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT
+                if profile == "experimental"
+                else AUDIO_STABLE_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT,
             ),
             "debug_capture_enabled": self._get_bool_config(
                 "audio_debug_capture_enabled",
@@ -1433,7 +1437,13 @@ class SessionManager:
                     if session.auto_heal:
                         self._schedule_media_plane_heal(session_id, "swap", "transport_heartbeat_lost")
 
-                if session.primary_established and not self._primary_attach_grace_open(session) and encoder_alive and not delivery_alive:
+                if (
+                    session.effective_delivery_profile == "experimental"
+                    and session.primary_established
+                    and not self._primary_attach_grace_open(session)
+                    and encoder_alive
+                    and not delivery_alive
+                ):
                     if session.primary_detach_started_at is None:
                         session.primary_detach_started_at = now
                         session.primary_detach_grace_deadline_monotonic = now + (primary_detach_grace_ms / 1000)
