@@ -29,14 +29,19 @@ from bridge_core.stream.pipeline import StreamPipeline
 from bridge_core.stream.utils import resolve_ffmpeg_path
 
 logger = logging.getLogger(__name__)
-WINDOWS_STARTUP_GRACE_POLLS = 10
-WINDOWS_STARTUP_GRACE_INTERVAL_SECONDS = 0.5
 AUDIO_KEEPALIVE_ENABLED_DEFAULT = True
-AUDIO_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 200
-AUDIO_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 20
+AUDIO_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 100
+AUDIO_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 10
 AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT = 5000
+AUDIO_LIVE_JITTER_TARGET_MS_DEFAULT = 60
+AUDIO_LIVE_STARTUP_ALLOW_SILENT_SOURCE_DEFAULT = True
+AUDIO_LIVE_STARTUP_VIABILITY_TIMEOUT_MS_DEFAULT = 1000
 AUDIO_DEBUG_CAPTURE_ENABLED_DEFAULT = False
 AUDIO_DEBUG_PACING_LOGS_ENABLED_DEFAULT = False
+COMPAT_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 200
+COMPAT_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 20
+COMPAT_JITTER_TARGET_MS_DEFAULT = 250
+WINDOWS_SOURCE_ACTIVITY_WATCHDOG_MS_DEFAULT = 15000
 
 
 class SessionState(str, Enum):
@@ -83,7 +88,7 @@ class Session:
             SessionState.PREPARING: [SessionState.READY, SessionState.STOPPING, SessionState.FAILED],
             SessionState.READY: [SessionState.STARTING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.STARTING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.FAILED],
-            SessionState.PLAYING: [SessionState.HEALING, SessionState.STOPPING, SessionState.FAILED],
+            SessionState.PLAYING: [SessionState.HEALING, SessionState.DEGRADED, SessionState.STOPPING, SessionState.FAILED],
             SessionState.HEALING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.DEGRADED, SessionState.FAILED],
             SessionState.DEGRADED: [SessionState.PLAYING, SessionState.HEALING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.STOPPING: [SessionState.STOPPED, SessionState.FAILED],
@@ -209,6 +214,7 @@ class SessionManager:
         self._stream_publisher = stream_publisher
         self._config_store = config_store
         self._frame_sinks: dict[str, SessionFrameSink] = {}
+        self._session_monitors: dict[str, asyncio.Task[None]] = {}
 
     def _handle_session_error(self, session_id: str, error: Exception) -> None:
         """Central error handler for session-related task failures."""
@@ -251,20 +257,30 @@ class SessionManager:
         value = self._config_store.get(key, None)
         return value if isinstance(value, str) and value else None
 
+    def _is_windows_system_output_source(self, source_id: str) -> bool:
+        source_binding = self._source_registry.resolve_source(source_id)
+        source = source_binding.source if source_binding else None
+        return bool(source and source.platform == "windows" and source.source_type == SourceType.SYSTEM_OUTPUT)
+
     def _build_pipeline_kwargs(self, source_id: str) -> dict[str, Any]:
+        is_windows_live_source = self._is_windows_system_output_source(source_id)
         return {
             "keepalive_enabled": self._get_bool_config("audio_keepalive_enabled", AUDIO_KEEPALIVE_ENABLED_DEFAULT),
             "keepalive_idle_threshold_ms": self._get_int_config(
                 "audio_keepalive_idle_threshold_ms",
-                AUDIO_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT,
+                AUDIO_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT if is_windows_live_source else COMPAT_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT,
             ),
             "keepalive_frame_duration_ms": self._get_int_config(
                 "audio_keepalive_frame_duration_ms",
-                AUDIO_KEEPALIVE_FRAME_DURATION_MS_DEFAULT,
+                AUDIO_KEEPALIVE_FRAME_DURATION_MS_DEFAULT if is_windows_live_source else COMPAT_KEEPALIVE_FRAME_DURATION_MS_DEFAULT,
             ),
             "source_outage_grace_ms": self._get_int_config(
                 "audio_source_outage_grace_ms",
                 AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT,
+            ),
+            "live_jitter_target_ms": self._get_int_config(
+                "audio_live_jitter_target_ms",
+                AUDIO_LIVE_JITTER_TARGET_MS_DEFAULT if is_windows_live_source else COMPAT_JITTER_TARGET_MS_DEFAULT,
             ),
             "debug_capture_enabled": self._get_bool_config(
                 "audio_debug_capture_enabled",
@@ -276,7 +292,6 @@ class SessionManager:
                 "audio_debug_pacing_logs_enabled",
                 AUDIO_DEBUG_PACING_LOGS_ENABLED_DEFAULT,
             ),
-            "source_health_provider": lambda sid=source_id: self._source_registry.probe_source_health(sid),
         }
 
     def create(
@@ -504,6 +519,7 @@ class SessionManager:
                 session_id=session_id,
                 payload=session.to_dict(),
             )
+            self._start_session_monitor(session_id, source_desc, verification_result if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT else None)
             return True
 
         except Exception as e:
@@ -526,7 +542,17 @@ class SessionManager:
         observed_buffer_activity = False
         last_health = None
         last_health_details: dict[str, Any] = {}
-        for _ in range(WINDOWS_STARTUP_GRACE_POLLS):
+        allow_silent_source = self._get_bool_config(
+            "audio_live_startup_allow_silent_source",
+            AUDIO_LIVE_STARTUP_ALLOW_SILENT_SOURCE_DEFAULT,
+        )
+        viability_timeout_ms = self._get_int_config(
+            "audio_live_startup_viability_timeout_ms",
+            AUDIO_LIVE_STARTUP_VIABILITY_TIMEOUT_MS_DEFAULT,
+        )
+        poll_interval_seconds = 0.1
+        deadline = verification_started_at + (viability_timeout_ms / 1000)
+        while time.monotonic() < deadline:
             jitter_buffer_size_ms = session.pipeline.jitter_buffer.size_ms if session.pipeline else 0.0
             if jitter_buffer_size_ms > 0:
                 observed_buffer_activity = True
@@ -538,6 +564,18 @@ class SessionManager:
 
             verification_result, verification_reason = self._classify_windows_verification_state(health)
             if verification_result == "active":
+                logger.info(
+                    "audio_startup_active session_id=%s source_id=%s elapsed_source_start_ms=%.1f elapsed_session_start_ms=%.1f callback_count=%s frames_emitted=%s jitter_buffer_size_ms=%.1f health=%s reason=%s",
+                    session_id,
+                    session.source_id,
+                    (time.monotonic() - verification_started_at) * 1000,
+                    (time.monotonic() - verification_started_at) * 1000,
+                    health_details.get("callback_count"),
+                    health_details.get("frames_emitted"),
+                    jitter_buffer_size_ms,
+                    health_details,
+                    verification_reason,
+                )
                 self._log_windows_verification_result(
                     session_id,
                     "active",
@@ -560,6 +598,18 @@ class SessionManager:
                     adapter_name,
                     health_details,
                 )
+                logger.info(
+                    "audio_startup_idle session_id=%s source_id=%s elapsed_source_start_ms=%.1f elapsed_session_start_ms=%.1f callback_count=%s frames_emitted=%s jitter_buffer_size_ms=%.1f health=%s reason=%s",
+                    session_id,
+                    session.source_id,
+                    (time.monotonic() - verification_started_at) * 1000,
+                    (time.monotonic() - verification_started_at) * 1000,
+                    health_details.get("callback_count"),
+                    health_details.get("frames_emitted"),
+                    jitter_buffer_size_ms,
+                    health_details,
+                    verification_reason,
+                )
                 self._log_windows_verification_result(
                     session_id,
                     "healthy_but_idle",
@@ -573,7 +623,31 @@ class SessionManager:
                 session.last_error = create_session_error(WINDOWS_OUTPUT_DEVICE_SILENT, details=health_details)
                 return "healthy_but_idle"
 
-            await asyncio.sleep(WINDOWS_STARTUP_GRACE_INTERVAL_SECONDS)
+            if allow_silent_source and self._is_windows_source_viable(health):
+                logger.info(
+                    "audio_startup_viable_silent session_id=%s source_id=%s elapsed_source_start_ms=%.1f elapsed_session_start_ms=%.1f callback_count=%s frames_emitted=%s jitter_buffer_size_ms=%.1f health=%s",
+                    session_id,
+                    session.source_id,
+                    (time.monotonic() - verification_started_at) * 1000,
+                    (time.monotonic() - verification_started_at) * 1000,
+                    health_details.get("callback_count"),
+                    health_details.get("frames_emitted"),
+                    jitter_buffer_size_ms,
+                    health_details,
+                )
+                self._log_windows_verification_result(
+                    session_id,
+                    "idle_pending_signal",
+                    verification_started_at,
+                    health.source_state if health else "idle_pending_signal",
+                    health_details,
+                    jitter_buffer_size_ms,
+                    observed_buffer_activity,
+                    success_reason="viable_silent_source",
+                )
+                return "idle_pending_signal"
+
+            await asyncio.sleep(poll_interval_seconds)
 
         health = last_health
         source_binding = self._source_registry.resolve_source(session.source_id)
@@ -595,6 +669,18 @@ class SessionManager:
             health.signal_present if health else None,
             health_details,
         )
+        logger.error(
+            "audio_startup_failed session_id=%s source_id=%s elapsed_source_start_ms=%.1f elapsed_session_start_ms=%.1f callback_count=%s frames_emitted=%s jitter_buffer_size_ms=%.1f health=%s failure_reason=%s",
+            session_id,
+            session.source_id,
+            (time.monotonic() - verification_started_at) * 1000,
+            (time.monotonic() - verification_started_at) * 1000,
+            health_details.get("callback_count"),
+            health_details.get("frames_emitted"),
+            jitter_buffer_size_ms,
+            health_details,
+            verification_reason,
+        )
         self._log_windows_verification_result(
             session_id,
             "stall",
@@ -607,6 +693,132 @@ class SessionManager:
         )
         session.last_error = create_session_error(WINDOWS_LOOPBACK_CAPTURE_STALLED, details=health_details)
         raise RuntimeError(session.last_error.message)
+
+    def _is_windows_source_viable(self, health: Any) -> bool:
+        if not health:
+            return False
+        if not health.healthy:
+            return False
+        details = health.details or {}
+        viability = details.get("start_viability")
+        if not isinstance(viability, dict):
+            return False
+        stream_opened = bool(viability.get("stream_opened"))
+        stream_started = bool(viability.get("stream_started"))
+        fatal_error = bool(health.last_error)
+        return stream_opened and stream_started and not fatal_error
+
+    def _start_session_monitor(self, session_id: str, source_desc: Any, startup_result: str | None) -> None:
+        if not source_desc or source_desc.platform != "windows" or source_desc.source_type != SourceType.SYSTEM_OUTPUT:
+            return
+        existing = self._session_monitors.pop(session_id, None)
+        if existing:
+            existing.cancel()
+        self._session_monitors[session_id] = asyncio.create_task(self._monitor_windows_live_session(session_id, startup_result or "active"))
+
+    async def _monitor_windows_live_session(self, session_id: str, startup_result: str) -> None:
+        activation_watchdog_ms = WINDOWS_SOURCE_ACTIVITY_WATCHDOG_MS_DEFAULT
+        source_outage_grace_ms = self._get_int_config("audio_source_outage_grace_ms", AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT)
+        started_at = time.monotonic()
+        activation_seen = startup_result == "active"
+        degraded_emitted = False
+
+        try:
+            while True:
+                await asyncio.sleep(0.5)
+                session = self.get(session_id)
+                if not session or session.state in {SessionState.STOPPED, SessionState.STOPPING, SessionState.FAILED}:
+                    return
+                if not session.pipeline:
+                    continue
+
+                health = self._source_registry.probe_source_health(session.source_id)
+                diagnostics = session.pipeline.get_diagnostics_snapshot()
+                callback_count = int((health.details or {}).get("callback_count") or 0) if health else 0
+                frames_emitted = int((health.details or {}).get("frames_emitted") or 0) if health else 0
+                signal_present = bool(health.signal_present) if health else False
+                real_frames_written = int(diagnostics.get("real_frames_written") or 0)
+                runtime_mode = diagnostics.get("runtime_mode")
+                activation_seen = activation_seen or callback_count > 0 or frames_emitted > 0 or signal_present or real_frames_written > 0
+
+                elapsed_ms = (time.monotonic() - started_at) * 1000
+                if startup_result == "idle_pending_signal" and not activation_seen and elapsed_ms >= activation_watchdog_ms and not degraded_emitted:
+                    if session.state == SessionState.PLAYING:
+                        session.transition_to(SessionState.DEGRADED)
+                    details = {
+                        "watchdog_ms": activation_watchdog_ms,
+                        "startup_result": startup_result,
+                        "callback_count": callback_count,
+                        "frames_emitted": frames_emitted,
+                        "real_frames_written": real_frames_written,
+                        "runtime_mode": runtime_mode,
+                        "health": health.details if health else None,
+                    }
+                    logger.warning(
+                        "audio_source_activity_watchdog_degraded session_id=%s source_id=%s elapsed_ms=%.1f details=%s",
+                        session_id,
+                        session.source_id,
+                        elapsed_ms,
+                        details,
+                    )
+                    self._event_bus.emit(
+                        EventType.SOURCE_STATE_CHANGED,
+                        session_id=session_id,
+                        payload={"state": "degraded_no_source_activity_yet", "details": details},
+                    )
+                    degraded_emitted = True
+
+                if degraded_emitted and activation_seen and session.state == SessionState.DEGRADED:
+                    session.transition_to(SessionState.PLAYING)
+                    self._event_bus.emit(
+                        EventType.SOURCE_STATE_CHANGED,
+                        session_id=session_id,
+                        payload={
+                            "state": "active",
+                            "details": {
+                                "callback_count": callback_count,
+                                "frames_emitted": frames_emitted,
+                                "real_frames_written": real_frames_written,
+                                "keepalive_to_first_real_frame_ms": diagnostics.get("keepalive_to_first_real_frame_ms"),
+                            },
+                        },
+                    )
+
+                last_real_frame_age_ms = diagnostics.get("last_real_frame_age_ms")
+                if (
+                    activation_seen
+                    and isinstance(last_real_frame_age_ms, (int, float))
+                    and last_real_frame_age_ms >= source_outage_grace_ms
+                    and health is not None
+                    and not health.healthy
+                ):
+                    details = {
+                        "source_outage_grace_ms": source_outage_grace_ms,
+                        "last_real_frame_age_ms": last_real_frame_age_ms,
+                        "runtime_mode": runtime_mode,
+                        "health": health.details,
+                    }
+                    session.last_error = create_session_error(
+                        SOURCE_START_FAILED,
+                        "Windows source outage grace exceeded after startup.",
+                        details=details,
+                    )
+                    logger.error(
+                        "audio_pipeline_starvation_warning session_id=%s source_id=%s details=%s",
+                        session_id,
+                        session.source_id,
+                        details,
+                    )
+                    self._event_bus.emit(
+                        EventType.SESSION_FAILED,
+                        session_id=session_id,
+                        payload=session.to_dict(),
+                    )
+                    session.transition_to(SessionState.FAILED)
+                    await self.stop_session(session_id)
+                    return
+        except asyncio.CancelledError:
+            return
 
     def _classify_windows_verification_state(self, health: Any) -> tuple[str, str]:
         if not health:
@@ -694,6 +906,10 @@ class SessionManager:
             session_id=session_id,
             payload=session.to_dict(),
         )
+
+        monitor_task = self._session_monitors.pop(session_id, None)
+        if monitor_task:
+            monitor_task.cancel()
 
         # 1. Stop renderer
         try:

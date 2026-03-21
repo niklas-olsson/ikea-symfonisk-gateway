@@ -8,7 +8,6 @@ import pytest
 from bridge_core.core.session_manager import SessionFrameSink
 from bridge_core.stream.pipeline import JitterBuffer, StreamPipeline
 from ingress_sdk.protocol import AudioFrame
-from ingress_sdk.types import HealthResult
 
 
 class FakeStdin:
@@ -80,6 +79,9 @@ async def test_stream_pipeline_lifecycle() -> None:
         await pipeline.stop()
         assert pipeline._active is False
         assert pipeline._process is None
+        diagnostics = pipeline.get_diagnostics_snapshot()
+        assert diagnostics["live_jitter_target_ms"] == 250
+        assert diagnostics["ffmpeg_input_format"]["frame_duration_ms"] == 20
 
 
 @pytest.mark.asyncio
@@ -110,14 +112,12 @@ async def test_session_frame_sink_sequences_do_not_trigger_late_drops(caplog: py
 
 @pytest.mark.asyncio
 async def test_pipeline_injects_silence_for_healthy_idle() -> None:
-    health = HealthResult(healthy=True, source_state="healthy_but_idle", signal_present=False)
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
         keepalive_idle_threshold_ms=10,
         keepalive_frame_duration_ms=10,
         source_outage_grace_ms=100,
-        source_health_provider=lambda: health,
     )
     mock_process = FakeProcess()
 
@@ -134,14 +134,12 @@ async def test_pipeline_injects_silence_for_healthy_idle() -> None:
 
 @pytest.mark.asyncio
 async def test_pipeline_resumes_real_frames_after_keepalive() -> None:
-    current_health = HealthResult(healthy=True, source_state="healthy_but_idle", signal_present=False)
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
         keepalive_idle_threshold_ms=10,
         keepalive_frame_duration_ms=10,
         source_outage_grace_ms=100,
-        source_health_provider=lambda: current_health,
     )
     pipeline.jitter_buffer.target_ms = 10
     mock_process = FakeProcess()
@@ -149,7 +147,6 @@ async def test_pipeline_resumes_real_frames_after_keepalive() -> None:
     with patch("asyncio.create_subprocess_exec", return_value=mock_process):
         await pipeline.start()
         await asyncio.sleep(0.03)
-        current_health = HealthResult(healthy=True, source_state="active", signal_present=True)
         diagnostics = pipeline.get_diagnostics_snapshot()
         real_frame = AudioFrame(
             sequence=0,
@@ -167,39 +164,34 @@ async def test_pipeline_resumes_real_frames_after_keepalive() -> None:
     assert updated["real_frames_written"] > 0
     assert real_frame.audio_data in mock_process.stdin.writes
     assert updated["encoder_write_count"] >= updated["real_frames_written"] + updated["silence_frames_written"]
+    assert updated["keepalive_to_first_real_frame_ms"] is not None
 
 
 @pytest.mark.asyncio
-async def test_pipeline_fails_after_source_outage_grace_expires() -> None:
-    errors: list[Exception] = []
+async def test_pipeline_continues_keepalive_without_source_failure_policy() -> None:
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
         keepalive_idle_threshold_ms=10,
         keepalive_frame_duration_ms=10,
         source_outage_grace_ms=30,
-        source_health_provider=lambda: None,
-        on_error=errors.append,
     )
     mock_process = FakeProcess()
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_process):
         await pipeline.start()
-        for _ in range(10):
-            if errors:
-                break
-            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.08)
         await pipeline.stop()
 
-    assert errors
-    assert "outage grace exceeded" in str(errors[0]).lower()
+    diagnostics = pipeline.get_diagnostics_snapshot()
+    assert diagnostics["silence_frames_written"] > 0
+    assert diagnostics["source_outage_active"] is False
 
 
 @pytest.mark.asyncio
 async def test_pipeline_debug_capture_writes_pre_and_post_encoder_files(tmp_path: Path) -> None:
     pre_path = tmp_path / "pre.wav"
     post_path = tmp_path / "post.mp3"
-    health = HealthResult(healthy=True, source_state="healthy_but_idle", signal_present=False)
     pipeline = StreamPipeline(
         "test_sess",
         "mp3_48k_stereo_320",
@@ -209,7 +201,6 @@ async def test_pipeline_debug_capture_writes_pre_and_post_encoder_files(tmp_path
         debug_capture_enabled=True,
         debug_capture_pre_encoder_path=str(pre_path),
         debug_capture_post_encoder_path=str(post_path),
-        source_health_provider=lambda: health,
     )
     mock_process = FakeProcess(stdout_chunks=[b"encoded-data"])
 

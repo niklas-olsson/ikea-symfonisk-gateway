@@ -356,6 +356,7 @@ async def test_session_manager_passes_pipeline_runtime_config(
         "audio_keepalive_idle_threshold_ms": 123,
         "audio_keepalive_frame_duration_ms": 17,
         "audio_source_outage_grace_ms": 4567,
+        "audio_live_jitter_target_ms": 61,
         "audio_debug_capture_enabled": True,
         "audio_debug_capture_pre_encoder_path": "/tmp/pre.wav",
         "audio_debug_capture_post_encoder_path": "/tmp/post.mp3",
@@ -391,11 +392,207 @@ async def test_session_manager_passes_pipeline_runtime_config(
     assert kwargs["keepalive_idle_threshold_ms"] == 123
     assert kwargs["keepalive_frame_duration_ms"] == 17
     assert kwargs["source_outage_grace_ms"] == 4567
+    assert kwargs["live_jitter_target_ms"] == 61
     assert kwargs["debug_capture_enabled"] is True
     assert kwargs["debug_capture_pre_encoder_path"] == "/tmp/pre.wav"
     assert kwargs["debug_capture_post_encoder_path"] == "/tmp/post.mp3"
     assert kwargs["debug_pacing_logs_enabled"] is True
-    assert callable(kwargs["source_health_provider"])
+    assert "source_health_provider" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_windows_silent_source_viability_allows_startup(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=False,
+        source_state="stream_started_no_callbacks",
+        last_error=None,
+        details={
+            "startup_substate": "stream_started_no_callbacks",
+            "callback_count": 0,
+            "frames_emitted": 0,
+            "start_viability": {
+                "stream_opened": True,
+                "stream_started": True,
+                "callback_registered": True,
+            },
+        },
+    )
+
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_live_startup_allow_silent_source": True,
+        "audio_live_startup_viability_timeout_ms": 1000,
+    }.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+        patch("asyncio.sleep", return_value=None),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        mock_pipeline.get_diagnostics_snapshot.return_value = {
+            "real_frames_written": 0,
+            "runtime_mode": "idle_pending_signal",
+            "last_real_frame_age_ms": None,
+            "keepalive_to_first_real_frame_ms": None,
+        }
+
+        success = await manager.start_session(session.session_id)
+
+    assert success is True
+    assert session.state == SessionState.PLAYING
+    target_registry.prepare_target.assert_awaited_once()
+    target_registry.play_stream.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runtime_config_only_uses_live_defaults_for_windows_system_output(
+    event_bus: EventBus,
+    source_registry: MagicMock,
+    target_registry: MagicMock,
+    stream_publisher: MagicMock,
+) -> None:
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="src_1",
+            source_type=SourceType.SYNTHETIC_TEST_SOURCE,
+            display_name="Synthetic",
+            platform="linux",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: default
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="src_1", target_id="tgt_1")
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.push_frame = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 10.0
+
+        success = await manager.start_session(session.session_id)
+
+    assert success is True
+    _, kwargs = mock_pipeline_cls.call_args
+    assert kwargs["keepalive_idle_threshold_ms"] == 200
+    assert kwargs["keepalive_frame_duration_ms"] == 20
+    assert kwargs["live_jitter_target_ms"] == 250
+
+
+@pytest.mark.asyncio
+async def test_silent_viability_startup_degrades_if_never_active(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=False,
+        source_state="stream_started_no_callbacks",
+        last_error=None,
+        details={
+            "startup_substate": "stream_started_no_callbacks",
+            "callback_count": 0,
+            "frames_emitted": 0,
+            "start_viability": {"stream_opened": True, "stream_started": True, "callback_registered": True},
+        },
+    )
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {
+        "audio_live_startup_allow_silent_source": True,
+        "audio_live_startup_viability_timeout_ms": 1000,
+    }.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+        patch("bridge_core.core.session_manager.WINDOWS_SOURCE_ACTIVITY_WATCHDOG_MS_DEFAULT", 10),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        mock_pipeline.get_diagnostics_snapshot.return_value = {
+            "real_frames_written": 0,
+            "runtime_mode": "idle_pending_signal",
+            "last_real_frame_age_ms": None,
+            "keepalive_to_first_real_frame_ms": None,
+        }
+
+        success = await manager.start_session(session.session_id)
+        assert success is True
+        await asyncio.sleep(1.2)
+
+    assert session.state == SessionState.DEGRADED
+    await manager.stop_session(session.session_id)
 
 
 @pytest.mark.asyncio
