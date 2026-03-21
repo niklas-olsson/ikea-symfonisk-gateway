@@ -4,9 +4,9 @@ import asyncio
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass
+from contextlib import suppress
 from enum import Enum
-from typing import Any, Literal
+from typing import Any
 from uuid import uuid4
 
 from ingress_sdk.protocol import AudioFrame
@@ -28,38 +28,22 @@ from bridge_core.core.event_bus import EventBus, EventType
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
 from bridge_core.stream.pipeline import StreamPipeline
+from bridge_core.stream.profiles import (
+    AUDIO_AUX_CLIENT_MAX_BACKLOG_MS_DEFAULT,
+    AUDIO_AUX_CLIENT_OVERFLOW_GRACE_MS_DEFAULT,
+    AUDIO_AUX_CLIENT_QUEUE_BYTES_DEFAULT,
+    AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT,
+    DELIVERY_PROFILE_DEFAULTS,
+    DeliveryProfile,
+    DeliveryProfileDefaults,
+)
 from bridge_core.stream.utils import resolve_ffmpeg_path
 
 logger = logging.getLogger(__name__)
-AUDIO_STABLE_KEEPALIVE_ENABLED_DEFAULT = False
-AUDIO_EXPERIMENTAL_KEEPALIVE_ENABLED_DEFAULT = True
-AUDIO_STABLE_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 200
-AUDIO_STABLE_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 20
-AUDIO_EXPERIMENTAL_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT = 100
-AUDIO_EXPERIMENTAL_KEEPALIVE_FRAME_DURATION_MS_DEFAULT = 10
-AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT = 5000
-AUDIO_STABLE_LIVE_JITTER_TARGET_MS_DEFAULT = 250
-AUDIO_EXPERIMENTAL_LIVE_JITTER_TARGET_MS_DEFAULT = 60
 AUDIO_LIVE_STARTUP_ALLOW_SILENT_SOURCE_DEFAULT = True
 AUDIO_LIVE_STARTUP_VIABILITY_TIMEOUT_MS_DEFAULT = 1000
 AUDIO_DELIVERY_PROFILE_DEFAULT = "stable"
 AUDIO_AUTO_HEAL_DELIVERY_ENABLED_DEFAULT = True
-AUDIO_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT = True
-AUDIO_STABLE_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT = 1000
-AUDIO_EXPERIMENTAL_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT = 750
-AUDIO_STABLE_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT = 262144
-AUDIO_STABLE_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 1500
-AUDIO_STABLE_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT = 1500
-AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT = 131072
-AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 750
-AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT = 750
-AUDIO_STABLE_PRIMARY_DETACH_GRACE_MS_DEFAULT = 10000
-AUDIO_EXPERIMENTAL_PRIMARY_DETACH_GRACE_MS_DEFAULT = 5000
-AUDIO_STABLE_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT = False
-AUDIO_EXPERIMENTAL_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT = True
-AUDIO_AUX_CLIENT_QUEUE_BYTES_DEFAULT = 131072
-AUDIO_AUX_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 750
-AUDIO_AUX_CLIENT_MAX_BACKLOG_MS_DEFAULT = 1500
 AUDIO_PRIMARY_ATTACH_GRACE_MS_DEFAULT = 5000
 AUDIO_CLIENT_QUEUE_BYTES_DEFAULT = 131072
 AUDIO_CLIENT_OVERFLOW_GRACE_MS_DEFAULT = 750
@@ -67,20 +51,6 @@ AUDIO_CLIENT_MAX_BACKLOG_MS_DEFAULT = 1500
 AUDIO_DEBUG_CAPTURE_ENABLED_DEFAULT = False
 AUDIO_DEBUG_PACING_LOGS_ENABLED_DEFAULT = False
 WINDOWS_SOURCE_ACTIVITY_WATCHDOG_MS_DEFAULT = 15000
-DeliveryProfile = Literal["stable", "experimental"]
-
-
-@dataclass(frozen=True)
-class DeliveryProfileDefaults:
-    delivery_profile: DeliveryProfile
-    keepalive_idle_threshold_ms: int
-    keepalive_frame_duration_ms: int
-    live_jitter_target_ms: int
-    transport_heartbeat_window_ms: int
-    primary_client_queue_bytes: int
-    primary_client_overflow_grace_ms: int
-    primary_client_max_backlog_ms: int
-    primary_detach_grace_ms: int
 
 
 class SessionState(str, Enum):
@@ -231,6 +201,9 @@ class Session:
                 "primary_detach_events_total": self.primary_detach_events_total,
                 "primary_detach_grace_recoveries_total": self.primary_detach_grace_recoveries_total,
                 "primary_detach_escalations_total": self.primary_detach_escalations_total,
+                "primary_detach_grace_deadline_age_ms": (now - self.primary_detach_grace_deadline_monotonic) * 1000
+                if isinstance(self.primary_detach_grace_deadline_monotonic, (int, float))
+                else None,
                 "last_stdout_read_age_ms": (now - last_stdout_read_monotonic) * 1000
                 if isinstance(last_stdout_read_monotonic, (int, float))
                 else None,
@@ -253,6 +226,7 @@ class Session:
                 if isinstance(last_primary_yield_monotonic, (int, float))
                 else None,
                 "keepalive_active": bool(diagnostics.get("keepalive_active", False)),
+                "jitter_buffer_size_ms": float(diagnostics.get("jitter_buffer_size_ms") or 0.0),
             },
         }
 
@@ -275,11 +249,13 @@ class SessionFrameSink:
         self._task = asyncio.create_task(self._ingestion_loop())
         self._task.add_done_callback(self._handle_task_done)
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """Stop the ingestion task."""
         self._active = False
         if self._task:
             self._task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._task
             self._task = None
 
     def _handle_task_done(self, task: asyncio.Task[None]) -> None:
@@ -382,6 +358,18 @@ class SessionManager:
         # Trigger cleanup
         asyncio.create_task(self.stop_session(session_id))
 
+    async def _cancel_and_drain(self, task: asyncio.Task[Any] | None) -> None:
+        """Cancel and await a task, suppressing cancellation errors."""
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, RuntimeError):
+            # In tests, a mock side_effect exhaustion may raise RuntimeError
+            # wrapping a StopIteration. We suppress this to allow clean teardown.
+            pass
+
     def _get_bool_config(self, key: str, default: bool) -> bool:
         if not self._config_store:
             return default
@@ -438,29 +426,7 @@ class SessionManager:
         return self._get_delivery_profile_overrides().get(source_id, self._get_delivery_profile())
 
     def _resolve_delivery_profile_defaults(self, profile: DeliveryProfile) -> DeliveryProfileDefaults:
-        if profile == "experimental":
-            return DeliveryProfileDefaults(
-                delivery_profile=profile,
-                keepalive_idle_threshold_ms=AUDIO_EXPERIMENTAL_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT,
-                keepalive_frame_duration_ms=AUDIO_EXPERIMENTAL_KEEPALIVE_FRAME_DURATION_MS_DEFAULT,
-                live_jitter_target_ms=AUDIO_EXPERIMENTAL_LIVE_JITTER_TARGET_MS_DEFAULT,
-                transport_heartbeat_window_ms=AUDIO_EXPERIMENTAL_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT,
-                primary_client_queue_bytes=AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT,
-                primary_client_overflow_grace_ms=AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT,
-                primary_client_max_backlog_ms=AUDIO_EXPERIMENTAL_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT,
-                primary_detach_grace_ms=AUDIO_EXPERIMENTAL_PRIMARY_DETACH_GRACE_MS_DEFAULT,
-            )
-        return DeliveryProfileDefaults(
-            delivery_profile=profile,
-            keepalive_idle_threshold_ms=AUDIO_STABLE_KEEPALIVE_IDLE_THRESHOLD_MS_DEFAULT,
-            keepalive_frame_duration_ms=AUDIO_STABLE_KEEPALIVE_FRAME_DURATION_MS_DEFAULT,
-            live_jitter_target_ms=AUDIO_STABLE_LIVE_JITTER_TARGET_MS_DEFAULT,
-            transport_heartbeat_window_ms=AUDIO_STABLE_TRANSPORT_HEARTBEAT_WINDOW_MS_DEFAULT,
-            primary_client_queue_bytes=AUDIO_STABLE_PRIMARY_CLIENT_QUEUE_BYTES_DEFAULT,
-            primary_client_overflow_grace_ms=AUDIO_STABLE_PRIMARY_CLIENT_OVERFLOW_GRACE_MS_DEFAULT,
-            primary_client_max_backlog_ms=AUDIO_STABLE_PRIMARY_CLIENT_MAX_BACKLOG_MS_DEFAULT,
-            primary_detach_grace_ms=AUDIO_STABLE_PRIMARY_DETACH_GRACE_MS_DEFAULT,
-        )
+        return DELIVERY_PROFILE_DEFAULTS[profile]
 
     def _resolve_profile_int_override(
         self,
@@ -512,7 +478,7 @@ class SessionManager:
                 profile,
                 "keepalive_enabled",
                 "audio_keepalive_enabled",
-                AUDIO_EXPERIMENTAL_KEEPALIVE_ENABLED_DEFAULT if profile == "experimental" else AUDIO_STABLE_KEEPALIVE_ENABLED_DEFAULT,
+                defaults.keepalive_enabled,
             ),
             "keepalive_idle_threshold_ms": self._resolve_profile_int_override(
                 profile,
@@ -573,11 +539,11 @@ class SessionManager:
                 "audio_aux_client_max_backlog_ms",
                 AUDIO_AUX_CLIENT_MAX_BACKLOG_MS_DEFAULT,
             ),
-            "primary_health_require_yield_progress": self._get_bool_config(
+            "primary_health_require_yield_progress": self._resolve_profile_bool_override(
+                profile,
+                "primary_health_require_yield_progress",
                 "audio_primary_health_require_yield_progress",
-                AUDIO_EXPERIMENTAL_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT
-                if profile == "experimental"
-                else AUDIO_STABLE_PRIMARY_HEALTH_REQUIRE_YIELD_PROGRESS_DEFAULT,
+                defaults.primary_health_require_yield_progress,
             ),
             "debug_capture_enabled": self._get_bool_config(
                 "audio_debug_capture_enabled",
@@ -959,7 +925,7 @@ class SessionManager:
                         session.last_error = create_session_error(
                             start_res.code or SOURCE_START_FAILED, f"Failed to start source: {start_res.message}"
                         )
-                    frame_sink.stop()
+                    await frame_sink.stop()
                     raise RuntimeError(session.last_error.message)
 
                 # Diagnostic logging
@@ -1705,10 +1671,10 @@ class SessionManager:
 
         monitor_task = self._session_monitors.pop(session_id, None)
         if monitor_task:
-            monitor_task.cancel()
+            await self._cancel_and_drain(monitor_task)
         heal_task = self._session_heals.pop(session_id, None)
         if heal_task:
-            heal_task.cancel()
+            await self._cancel_and_drain(heal_task)
         self._clear_primary_detach_state(session)
 
         # 1. Stop renderer
@@ -1724,7 +1690,7 @@ class SessionManager:
 
         # 2. Stop source and frame sink
         if session_id in self._frame_sinks:
-            self._frame_sinks[session_id].stop()
+            await self._frame_sinks[session_id].stop()
             del self._frame_sinks[session_id]
 
         if session.adapter_session_id:
