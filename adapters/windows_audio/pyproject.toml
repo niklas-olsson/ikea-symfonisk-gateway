@@ -5,8 +5,8 @@ description = "Windows audio (WASAPI loopback) ingress adapter"
 requires-python = ">=3.12"
 dependencies = [
     "ingress-sdk",
-    "sounddevice",
     "numpy",
+    "PyAudioWPatch; platform_system == 'Windows'",
 ]
 
 [project.optional-dependencies]

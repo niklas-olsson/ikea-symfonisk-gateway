@@ -1,36 +1,31 @@
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-# Mock sounddevice BEFORE importing the adapter
-mock_sd = MagicMock()
-sys.modules["sounddevice"] = mock_sd
-
-from adapter_windows_audio import WindowsAudioAdapter  # noqa: E402
+from adapter_windows_audio.backends import PyAudioWPatchBackend
 
 
 def test_probe_health_signal_presence() -> None:
-    adapter = WindowsAudioAdapter()
-    adapter._running = True
+    fake_module = MagicMock()
+    fake_module.PyAudio.return_value.get_default_wasapi_loopback.return_value = {"index": 1}
+    backend = PyAudioWPatchBackend(backend_module=fake_module)
+    backend._running = True
 
-    health1 = adapter.probe_health("default")
+    health1 = backend.probe_health("default")
     assert health1.signal_present is False
 
-    adapter._samples_captured = 1000
-    health2 = adapter.probe_health("default")
+    backend._samples_captured = 1000
+    health2 = backend.probe_health("default")
     assert health2.signal_present is True
 
-    health3 = adapter.probe_health("default")
+    health3 = backend.probe_health("default")
     assert health3.signal_present is False
 
-    adapter._samples_captured = 2000
-    health4 = adapter.probe_health("default")
-    assert health4.signal_present is True
 
+def test_prepare_probe_failure() -> None:
+    fake_module = MagicMock()
+    fake_module.PyAudio.return_value.get_default_wasapi_loopback.side_effect = RuntimeError("probe failed")
+    backend = PyAudioWPatchBackend(backend_module=fake_module)
 
-def test_prepare_library_misconfigured() -> None:
-    with patch("adapter_windows_audio._get_sd", return_value=None):
-        with patch("platform.system", return_value="Windows"):
-            adapter = WindowsAudioAdapter()
-            res = adapter.prepare("default")
-            assert res.success is False
-            assert res.code == "windows_audio_library_misconfigured"
+    res = backend.prepare("default")
+
+    assert res.success is False
+    assert res.code == "windows_loopback_probe_failed"

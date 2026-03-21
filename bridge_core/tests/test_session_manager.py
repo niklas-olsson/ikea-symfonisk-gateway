@@ -168,6 +168,7 @@ async def test_event_emission(session_manager: SessionManager, event_bus: EventB
     event = await asyncio.wait_for(queue.get(), timeout=1.0)
     assert event.type == EventType.SOURCE_STARTED
     assert "adapter_session_id" in event.payload
+    assert event.payload["backend"] is None
 
     # Check RENDERER_PLAYBACK_STARTED event
     event = await asyncio.wait_for(queue.get(), timeout=1.0)

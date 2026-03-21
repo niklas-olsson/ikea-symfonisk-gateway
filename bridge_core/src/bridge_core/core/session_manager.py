@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from ingress_sdk.protocol import AudioFrame
+from ingress_sdk.types import SourceType
 
 from bridge_core.core.config_store import ConfigStore
 from bridge_core.core.errors import (
@@ -17,6 +18,7 @@ from bridge_core.core.errors import (
     RENDERER_PLAYBACK_FAILED,
     SOURCE_ADAPTER_PLATFORM_MISMATCH,
     SOURCE_START_FAILED,
+    WINDOWS_LOOPBACK_CAPTURE_STALLED,
     WINDOWS_OUTPUT_DEVICE_SILENT,
     SessionError,
     create_session_error,
@@ -359,7 +361,7 @@ class SessionManager:
                 self._event_bus.emit(
                     EventType.SOURCE_STARTED,
                     session_id=session_id,
-                    payload={"adapter_session_id": session.adapter_session_id},
+                    payload={"adapter_session_id": session.adapter_session_id, "backend": start_res.backend},
                 )
             except Exception as e:
                 if not session.last_error:
@@ -434,7 +436,7 @@ class SessionManager:
                     and not health.signal_present
                     and source_desc
                     and source_desc.platform == "windows"
-                    and source_desc.source_type == "system_audio"
+                    and source_desc.source_type == SourceType.SYSTEM_OUTPUT
                 ):
                     logger.warning(f"Session {session_id}: Source is healthy but silent. Proceeding anyway. (adapter: {adapter_name})")
                     session.last_error = create_session_error(WINDOWS_OUTPUT_DEVICE_SILENT)
@@ -442,7 +444,10 @@ class SessionManager:
                     logger.error(
                         f"Session {session_id}: Failed to ingest frames from source {session.source_id} using adapter {adapter_name}"
                     )
-                    session.last_error = create_session_error(FRAME_INGEST_FAILED)
+                    if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT:
+                        session.last_error = create_session_error(WINDOWS_LOOPBACK_CAPTURE_STALLED)
+                    else:
+                        session.last_error = create_session_error(FRAME_INGEST_FAILED)
                     raise RuntimeError(session.last_error.message)
 
             session.transition_to(SessionState.PLAYING)

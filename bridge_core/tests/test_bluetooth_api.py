@@ -22,6 +22,7 @@ from ingress_sdk.types import (  # noqa: E402
 def mock_bluetooth_adapter():
     adapter = MagicMock()
     adapter.id.return_value = "linux-bluetooth-adapter"
+    adapter.platform.return_value = "linux"
     adapter.get_adapter_status = AsyncMock(
         return_value={
             "healthy": True,

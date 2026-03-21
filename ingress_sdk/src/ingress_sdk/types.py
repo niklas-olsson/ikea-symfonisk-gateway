@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 class SourceType(str, Enum):
     SYSTEM_AUDIO = "system_audio"
+    SYSTEM_OUTPUT = "system_output"
     BLUETOOTH_AUDIO = "bluetooth_audio"
     LINE_IN = "line_in"
     MICROPHONE = "microphone"
