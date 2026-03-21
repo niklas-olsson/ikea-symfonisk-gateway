@@ -76,9 +76,10 @@ class JitterBuffer:
 class StreamPipeline:
     """Active audio pipeline for a session using FFmpeg for encoding."""
 
-    def __init__(self, session_id: str, profile_id: str):
+    def __init__(self, session_id: str, profile_id: str, ffmpeg_path: str = "ffmpeg"):
         self.session_id = session_id
         self.profile_id = profile_id
+        self.ffmpeg_path = ffmpeg_path
         self.profile = STREAM_PROFILES[profile_id]
         self.jitter_buffer = JitterBuffer()
         self._process: asyncio.subprocess.Process | None = None
@@ -126,7 +127,7 @@ class StreamPipeline:
         """Generate the FFmpeg command based on the profile."""
         # Input format is always canonical 48kHz 16-bit stereo PCM
         args = [
-            "ffmpeg",
+            self.ffmpeg_path,
             "-f",
             "s16le",
             "-ar",
