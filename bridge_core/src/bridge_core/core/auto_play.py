@@ -33,7 +33,7 @@ class AutoPlayController:
         if not source_id:
             logger.error("BLUETOOTH_SOURCE_AVAILABLE event missing source_id payload")
             return
-            
+
         # Give SourceRegistry a moment to process the concurrent TOPOLOGY_CHANGED event
         # and look for the canonical source ID that match this local source ID
         canonical_source_id = None

@@ -135,12 +135,12 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
         trusted = self._store.list_trusted()
         preferred_mac = self._store.get_preferred_device()
-        
+
         # Prioritize preferred device
         macs_to_connect = []
         if preferred_mac and preferred_mac in trusted:
             macs_to_connect.append(preferred_mac)
-        
+
         for mac in trusted:
             if mac != preferred_mac:
                 macs_to_connect.append(mac)
@@ -182,7 +182,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 parts = line.split("\t")
                 if len(parts) < 2:
                     continue
-                
+
                 source_id = parts[1]
                 if "bluez" in source_id:
                     mac = source_id.replace("bluez_source.", "").replace(".a2dp_source", "").replace("_", ":")
@@ -206,7 +206,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     continue
 
                 virtual_id = f"bluetooth:{mac.lower()}"
-                
+
                 # If we already have this virtual_id, prefer the direct source over the default monitor fallback
                 if virtual_id in new_source_id_map and new_source_id_map[virtual_id] != default_source:
                     continue
@@ -358,7 +358,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 except Exception as e:
                     logger.error(f"Error reading from parec: {e}")
                     break
-            
+
             stderr_task.cancel()
 
         except asyncio.CancelledError:
