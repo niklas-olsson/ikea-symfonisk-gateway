@@ -131,7 +131,7 @@ class TargetRegistry:
             else:
                 # Target missing from discovery
                 last_seen = self._target_last_seen.get(tid, 0)
-                if now - last_seen > 300: # 5 minutes stale cleanup
+                if now - last_seen > 300:  # 5 minutes stale cleanup
                     logger.info("Removing stale target %s", tid)
                     self._target_last_seen.pop(tid, None)
                     changed = True
@@ -166,7 +166,7 @@ class TargetRegistry:
         if self._session_manager:
             active_target_ids = {
                 sess.target_id for sess in self._session_manager.list()
-                if str(sess.state) in ("playing", "starting", "preparing", "healing", "degraded")
+                if sess.state.value in ("playing", "starting", "preparing", "healing", "degraded")
             }
 
         results = []

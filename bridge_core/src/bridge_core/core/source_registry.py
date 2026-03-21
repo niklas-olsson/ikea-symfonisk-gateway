@@ -11,7 +11,9 @@ from ingress_sdk.types import (
     HealthResult,
     PairingResult,
     PrepareResult,
+    SourceCapabilities,
     SourceDescriptor,
+    SourceType,
     StartResult,
 )
 
@@ -241,7 +243,7 @@ class SourceRegistry:
         if self._session_manager:
             active_source_ids = {
                 sess.source_id for sess in self._session_manager.list()
-                if str(sess.state) in ("playing", "starting", "preparing", "healing", "degraded")
+                if sess.state.value in ("playing", "starting", "preparing", "healing", "degraded")
             }
 
         results = []
@@ -255,14 +257,13 @@ class SourceRegistry:
         # If the preferred source is missing, add a stub for it
         if preferred_id and preferred_id not in self._sources:
             # We don't have the full descriptor, but we can provide the ID and a hint
-            # In a more advanced version, we might have cached the last known descriptor
             results.append(
                 SourceDescriptor(
                     source_id=preferred_id,
-                    source_type="system_audio",  # Placeholder
+                    source_type=SourceType.SYSTEM_AUDIO,
                     display_name=f"Missing Preferred Source ({preferred_id})",
                     platform="any",
-                    capabilities={"sample_rates": [48000], "channels": [2], "bit_depths": [16]},
+                    capabilities=SourceCapabilities(sample_rates=[48000], channels=[2], bit_depths=[16]),
                     is_preferred=True,
                     is_active=False,
                     is_available=False,
