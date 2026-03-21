@@ -188,9 +188,7 @@ class SessionManager:
             # 2. Setup pipeline and publisher
             if session.pipeline is None:
                 ffmpeg_path = resolve_ffmpeg_path(self._config_store)
-                session.pipeline = StreamPipeline(
-                    session.session_id, session.stream_profile, ffmpeg_path=ffmpeg_path
-                )
+                session.pipeline = StreamPipeline(session.session_id, session.stream_profile, ffmpeg_path=ffmpeg_path)
 
             if self._stream_publisher:
                 self._stream_publisher.register_pipeline(session.session_id, session.pipeline)

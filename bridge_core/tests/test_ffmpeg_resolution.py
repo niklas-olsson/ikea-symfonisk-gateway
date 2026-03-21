@@ -1,12 +1,14 @@
 import os
-import shutil
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 from bridge_core.stream.utils import resolve_ffmpeg_path
+
 
 @pytest.fixture
 def mock_config_store():
     return MagicMock()
+
 
 def test_resolve_ffmpeg_path_config_store(mock_config_store, tmp_path):
     ffmpeg_file = tmp_path / "ffmpeg_config"
@@ -18,6 +20,7 @@ def test_resolve_ffmpeg_path_config_store(mock_config_store, tmp_path):
     assert resolve_ffmpeg_path(mock_config_store) == str(ffmpeg_file)
     mock_config_store.get.assert_called_once_with("ffmpeg_path")
 
+
 def test_resolve_ffmpeg_path_env_var(tmp_path):
     ffmpeg_file = tmp_path / "ffmpeg_env"
     ffmpeg_file.write_text("dummy")
@@ -27,16 +30,19 @@ def test_resolve_ffmpeg_path_env_var(tmp_path):
         # Pass None for config_store to skip first check or ensure it returns None
         assert resolve_ffmpeg_path(None) == str(ffmpeg_file)
 
+
 def test_resolve_ffmpeg_path_shutil_which():
     with patch("shutil.which", return_value="/usr/bin/ffmpeg"):
         with patch.dict(os.environ, {}, clear=True):
             assert resolve_ffmpeg_path(None) == "/usr/bin/ffmpeg"
+
 
 def test_resolve_ffmpeg_path_not_found():
     with patch("shutil.which", return_value=None):
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(RuntimeError, match="FFmpeg executable not found"):
                 resolve_ffmpeg_path(None)
+
 
 def test_resolve_ffmpeg_path_priority(mock_config_store, tmp_path):
     # Setup config store path

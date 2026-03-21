@@ -1,14 +1,15 @@
 """Utility functions for the audio pipeline."""
 
+import logging
 import os
 import shutil
-import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from bridge_core.core.config_store import ConfigStore
 
 logger = logging.getLogger(__name__)
+
 
 def resolve_ffmpeg_path(config_store: "ConfigStore | None" = None) -> str:
     """
