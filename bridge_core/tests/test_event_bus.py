@@ -1,7 +1,7 @@
 """Tests for the EventBus component."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
