@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from bridge_core.api.models import ErrorResponse
 from bridge_core.core import SessionManager
+from bridge_core.core.errors import SessionError
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
@@ -30,6 +31,7 @@ class SessionResponse(BaseModel):
     created_at: float
     started_at: float | None = None
     stopped_at: float | None = None
+    last_error: SessionError | None = None
 
 
 class SessionListResponse(BaseModel):
@@ -89,9 +91,14 @@ async def start_session(request: Request, session_id: str) -> dict[str, Any]:
 
     success = await manager.start_session(session_id)
     if not success:
+        error_detail: dict[str, Any] = {"code": "SESSION_START_FAILED", "message": "Failed to start session"}
+        if session.last_error:
+            error_detail["last_error"] = session.last_error.model_dump()
+            error_detail["message"] = session.last_error.message
+
         raise HTTPException(
             status_code=400,
-            detail={"code": "SESSION_START_FAILED", "message": "Failed to start session"},
+            detail=error_detail,
         )
     return {"success": True}
 

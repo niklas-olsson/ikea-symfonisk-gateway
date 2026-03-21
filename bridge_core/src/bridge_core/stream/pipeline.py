@@ -119,7 +119,7 @@ class StreamPipeline:
         self._feed_task.add_done_callback(self._handle_task_done)
         self._read_task.add_done_callback(self._handle_task_done)
 
-    def _handle_task_done(self, task: asyncio.Task) -> None:
+    def _handle_task_done(self, task: asyncio.Task[None]) -> None:
         """Handle completion of background tasks and report errors."""
         if not task.cancelled() and task.exception():
             exc = task.exception()
