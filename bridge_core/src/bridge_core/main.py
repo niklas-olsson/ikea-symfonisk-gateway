@@ -150,12 +150,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     register_ingress_adapters(source_registry, event_bus)
 
-    # Start stream publisher in the background
+    # Start registries and publisher
+    target_registry.start()
     publisher_task = asyncio.create_task(publisher.start())
 
     yield
 
     # Clean up
+    await target_registry.stop()
     await publisher.stop()
     publisher_task.cancel()
     try:

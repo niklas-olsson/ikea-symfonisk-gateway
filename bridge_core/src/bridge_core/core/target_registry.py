@@ -1,9 +1,13 @@
 """Target registry - tracks renderer adapters and available playback targets."""
 
+import asyncio
+import logging
 from typing import Any
 
 from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
 from bridge_core.core.event_bus import EventBus, EventType
+
+logger = logging.getLogger(__name__)
 
 
 class TargetRegistry:
@@ -14,6 +18,38 @@ class TargetRegistry:
         self._adapters: dict[str, RendererAdapter] = {}
         self._targets: dict[str, TargetDescriptor] = {}
         self._target_to_adapter: dict[str, str] = {}
+        self._refresh_task: asyncio.Task[None] | None = None
+        self._active = False
+
+    def start(self) -> None:
+        """Start background refresh task."""
+        if self._active:
+            return
+        self._active = True
+        self._refresh_task = asyncio.create_task(self._background_refresh())
+
+    async def stop(self) -> None:
+        """Stop background refresh task."""
+        self._active = False
+        if self._refresh_task:
+            self._refresh_task.cancel()
+            try:
+                await self._refresh_task
+            except asyncio.CancelledError:
+                pass
+            self._refresh_task = None
+
+    async def _background_refresh(self) -> None:
+        """Periodically refresh targets from all adapters."""
+        while self._active:
+            try:
+                await asyncio.sleep(60)  # Refresh every minute
+                await self.refresh_targets()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Error in background target refresh: %s", e)
+                await asyncio.sleep(10)  # Wait a bit before retrying on error
 
     async def register_adapter(self, adapter: RendererAdapter) -> None:
         """Register a new renderer adapter."""
@@ -52,15 +88,34 @@ class TargetRegistry:
         """Refresh targets from all registered adapters."""
         all_targets = {}
         new_target_to_adapter = {}
+
         for adapter_id, adapter in self._adapters.items():
-            targets = await adapter.list_targets()
-            for target in targets:
-                all_targets[target.target_id] = target
-                new_target_to_adapter[target.target_id] = adapter_id
+            try:
+                targets = await adapter.list_targets()
+                for target in targets:
+                    all_targets[target.target_id] = target
+                    new_target_to_adapter[target.target_id] = adapter_id
+            except Exception as e:
+                logger.error("Failed to refresh targets from adapter %s: %s", adapter_id, e)
+
+        # Detect changes before updating
+        changed = False
+        if set(self._targets.keys()) != set(all_targets.keys()):
+            changed = True
+        else:
+            # Check if members changed for any target
+            for tid, target in all_targets.items():
+                old_target = self._targets.get(tid)
+                if not old_target or set(old_target.members) != set(target.members):
+                    changed = True
+                    break
 
         self._targets = all_targets
         self._target_to_adapter = new_target_to_adapter
-        self._event_bus.emit(EventType.TOPOLOGY_CHANGED)
+
+        if changed:
+            logger.info("Topology changed, emitting event")
+            self._event_bus.emit(EventType.TOPOLOGY_CHANGED)
 
     def get_target(self, target_id: str) -> TargetDescriptor | None:
         """Get a target by ID."""
