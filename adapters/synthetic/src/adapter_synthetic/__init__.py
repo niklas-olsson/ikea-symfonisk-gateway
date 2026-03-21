@@ -138,7 +138,7 @@ class SyntheticAdapter(IngressAdapter):
             last_error=None,
         )
 
-    def start_pairing(self, timeout_seconds: int = 60) -> PairingResult:
+    def start_pairing(self, timeout_seconds: int = 60, candidate_mac: str | None = None) -> PairingResult:
         """Synthetic adapter doesn't support pairing."""
         return PairingResult(success=False, error="Pairing not supported by synthetic adapter")
 
