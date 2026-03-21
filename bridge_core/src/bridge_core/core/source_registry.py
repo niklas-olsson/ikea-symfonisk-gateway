@@ -12,7 +12,7 @@ from ingress_sdk.types import (
     StartResult,
 )
 
-from bridge_core.core.event_bus import EventBus, EventType
+from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
 
 
 class AdapterInfo:
@@ -52,6 +52,21 @@ class SourceRegistry:
         self._adapters: dict[str, AdapterInfo] = {}
         self._sources: dict[str, SourceDescriptor] = {}
         self._source_health: dict[str, HealthResult] = {}
+        self._event_bus.subscribe_handler(self._handle_topology_changed, EventType.TOPOLOGY_CHANGED)
+
+    async def _handle_topology_changed(self, event: BridgeEvent) -> None:
+        """Handle topology changed events from adapters."""
+        if not event.payload:
+            return
+
+        adapter_id = event.payload.get("adapter_id")
+        if not adapter_id:
+            return
+
+        adapter_info = self._adapters.get(adapter_id)
+        if adapter_info and adapter_info.adapter and adapter_info.capabilities.supports_hotplug_events:
+            sources = adapter_info.adapter.list_sources()
+            self.update_adapter_sources(adapter_id, sources)
 
     def register_adapter(
         self,
@@ -94,8 +109,17 @@ class SourceRegistry:
         if not adapter:
             return
 
+        # Check if sources actually changed to avoid infinite loop
+        new_source_map = {s.source_id: s for s in sources}
+        if adapter.sources.keys() == new_source_map.keys():
+            # Basic check for same source IDs.
+            # In a more complete system we might also compare metadata/content.
+            # For now, let's also check if display names changed.
+            if all(adapter.sources[sid].display_name == s.display_name for sid, s in new_source_map.items()):
+                return
+
         # Identify removed sources for cleanup
-        new_source_ids = {s.source_id for s in sources}
+        new_source_ids = set(new_source_map.keys())
         removed_source_ids = set(adapter.sources.keys()) - new_source_ids
 
         for s_id in removed_source_ids:
@@ -103,9 +127,11 @@ class SourceRegistry:
             self._source_health.pop(s_id, None)
 
         # Update adapter and global map
-        adapter.sources = {s.source_id: s for s in sources}
+        adapter.sources = new_source_map
         self._sources.update(adapter.sources)
 
+        # Emit without adapter_id to avoid infinite recursion
+        # (self._handle_topology_changed only reacts if adapter_id is present)
         self._event_bus.emit(EventType.TOPOLOGY_CHANGED)
 
     def update_source_health(self, source_id: str, health: HealthResult) -> None:

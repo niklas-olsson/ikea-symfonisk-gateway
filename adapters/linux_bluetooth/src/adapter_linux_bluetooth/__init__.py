@@ -41,12 +41,16 @@ class LinuxBluetoothAdapter(IngressAdapter):
         self._pairing_timeout_task: asyncio.Task[None] | None = None
         self._monitor_task: asyncio.Task[None] | None = None
         self._reconnect_task: asyncio.Task[None] | None = None
+        self._hotplug_task: asyncio.Task[None] | None = None
         self._dbus_bus: MessageBus | None = None
         self._device_paths: dict[str, str] = {}  # path -> mac
+        self._device_info: dict[str, dict[str, Any]] = {}  # mac -> info
+        self._source_id_map: dict[str, str] = {}  # virtual_id -> pa_id
 
         if self._event_bus:
             try:
                 self._monitor_task = asyncio.create_task(self._monitor_devices())
+                self._start_hotplug_listener()
             except RuntimeError:
                 # Handle cases where there is no running event loop (e.g. some tests)
                 logger.warning("No running event loop, Bluetooth monitoring not started")
@@ -54,12 +58,66 @@ class LinuxBluetoothAdapter(IngressAdapter):
     def id(self) -> str:
         return "linux-bluetooth-adapter"
 
+    def _start_hotplug_listener(self) -> None:
+        """Starts a background task to listen for PulseAudio events."""
+        if shutil.which("pactl"):
+            self._hotplug_task = asyncio.create_task(self._hotplug_loop())
+
+    async def _hotplug_loop(self) -> None:
+        """Listens for PulseAudio events to detect Bluetooth source changes."""
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "pactl",
+                "subscribe",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            if process.stdout is None:
+                return
+
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+
+                line_str = line.decode().strip()
+                if "Event 'new' on source" in line_str or "Event 'remove' on source" in line_str:
+                    # Refresh sources and notify core
+                    if self._event_bus:
+                        # Wait a bit for PulseAudio to stabilize
+                        await asyncio.sleep(0.5)
+
+                        # Determine if it was an add or remove for specific Bluetooth events
+                        # This is a bit heuristic with pactl subscribe output
+                        if "Event 'new'" in line_str:
+                            # We don't have the MAC yet easily, list_sources will find it
+                            self.list_sources()
+                            # Finding the new one might be hard without state comparison
+                            # but we can at least emit the general available event if we find any Bluetooth source
+                        elif "Event 'remove'" in line_str:
+                            pass
+
+                        self._event_bus.emit("topology.changed", payload={"adapter_id": self.id()})
+
+        except asyncio.CancelledError:
+            if process:
+                try:
+                    process.terminate()
+                    await process.wait()
+                except ProcessLookupError:
+                    pass
+        except Exception as e:
+            logger.error(f"Bluetooth hotplug listener error: {e}")
+
     def __del__(self) -> None:
         """Cleanup background tasks on deletion."""
         if self._monitor_task:
             self._monitor_task.cancel()
         if self._reconnect_task:
             self._reconnect_task.cancel()
+        if self._hotplug_task:
+            self._hotplug_task.cancel()
         if self._dbus_bus:
             try:
                 # dbus-next disconnect is sync
@@ -90,7 +148,15 @@ class LinuxBluetoothAdapter(IngressAdapter):
         if not shutil.which("pactl"):
             return sources
 
+        # Clear old mapping
+        new_source_id_map: dict[str, str] = {}
+
         try:
+            # Check for PipeWire vs PulseAudio
+            backend_type = "PulseAudio"
+            if shutil.which("pw-cli"):
+                backend_type = "PipeWire"
+
             result = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
@@ -99,13 +165,37 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 if len(parts) < 2:
                     continue
 
-                source_id = parts[1]
+                pa_source_id = parts[1]
                 # Bluetooth sources in PulseAudio typically have "bluez" in the name
-                if "bluez" in source_id:
-                    display_name = f"Bluetooth: {source_id.replace('bluez_source.', '').replace('.a2dp_source', '').replace('_', ':')}"
+                if "bluez" in pa_source_id:
+                    # Extract MAC from source name
+                    # e.g. bluez_source.XX_XX_XX_XX_XX_XX.a2dp_source
+                    # or bluez_input.XX_XX_XX_XX_XX_XX.a2dp_source
+                    mac = (
+                        pa_source_id.replace("bluez_source.", "").replace("bluez_input.", "").replace(".a2dp_source", "").replace("_", ":")
+                    )
+                    virtual_id = f"bluetooth:{mac.lower()}"
+
+                    info = self._device_info.get(mac.upper(), {})
+                    alias = info.get("Alias", mac)
+                    display_name = f"Bluetooth: {alias}"
+                    metadata = {
+                        "device_alias": alias,
+                        "mac": mac,
+                        "backend_type": backend_type,
+                        "profile": "A2DP",
+                        "pa_source_id": pa_source_id,
+                    }
+
+                    # Try to find alias via device paths if we have them
+                    for path, d_mac in self._device_paths.items():
+                        if d_mac.lower() == mac.lower():
+                            metadata["dbus_path"] = path
+                            break
+
                     sources.append(
                         SourceDescriptor(
-                            source_id=source_id,
+                            source_id=virtual_id,
                             source_type=SourceType.BLUETOOTH_AUDIO,
                             display_name=display_name,
                             platform="linux",
@@ -114,8 +204,13 @@ class LinuxBluetoothAdapter(IngressAdapter):
                                 channels=[2],
                                 bit_depths=[16],
                             ),
+                            metadata=metadata,
                         )
                     )
+                    new_source_id_map[virtual_id] = pa_source_id
+
+            self._source_id_map = new_source_id_map
+
         except (subprocess.SubprocessError, FileNotFoundError) as e:
             logger.error(f"Failed to list Bluetooth sources: {e}")
 
@@ -135,12 +230,14 @@ class LinuxBluetoothAdapter(IngressAdapter):
         if self._running:
             return StartResult(success=False, message="Already running")
 
+        pa_source_id = self._source_id_map.get(source_id, source_id)
+
         self._session_id = f"sess_{id(self)}"
         self._frame_sink = frame_sink
         self._running = True
-        self._capture_task = asyncio.create_task(self._capture_loop(source_id))
+        self._capture_task = asyncio.create_task(self._capture_loop(pa_source_id))
 
-        logger.info(f"Started Bluetooth capture from {source_id} (session: {self._session_id})")
+        logger.info(f"Started Bluetooth capture from {source_id} ({pa_source_id}) (session: {self._session_id})")
         return StartResult(success=True, session_id=self._session_id)
 
     def stop(self, session_id: str) -> None:
@@ -315,6 +412,12 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
             if mac:
                 self._device_paths[path] = mac
+                self._device_info[mac.upper()] = {
+                    "Address": mac,
+                    "Alias": device_props.get("Alias").value if device_props.get("Alias") else mac,
+                    "Icon": device_props.get("Icon").value if device_props.get("Icon") else None,
+                    "Class": device_props.get("Class").value if device_props.get("Class") else None,
+                }
                 logger.info(f"Bluetooth device seen: {mac} at {path}")
                 if self._event_bus:
                     self._event_bus.emit("bluetooth.device.seen", payload={"mac": mac, "path": path})
@@ -345,6 +448,14 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     def _on_device_properties_changed(self, path: str, changed_properties: dict[str, Any]) -> None:
         """Handle property changes for a specific device."""
+        mac = self._device_paths.get(path)
+        if mac:
+            info = self._device_info.get(mac.upper(), {})
+            for prop_name, prop_val in changed_properties.items():
+                if prop_name in ["Alias", "Icon", "Class"]:
+                    info[prop_name] = prop_val.value
+            self._device_info[mac.upper()] = info
+
         if "Connected" in changed_properties:
             is_connected = changed_properties["Connected"].value
             mac = self._device_paths.get(path)
@@ -353,6 +464,9 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 # Disconnected event
                 if self._event_bus:
                     self._event_bus.emit("bluetooth.device.disconnected", payload={"mac": mac, "path": path})
+                    self._event_bus.emit(
+                        "bluetooth.source.unavailable", payload={"mac": mac, "source_id": f"bluetooth:{mac.lower() if mac else ''}"}
+                    )
 
                 # Check if we should reconnect
                 # We need full properties for _check_and_trigger_reconnect, so let's fetch them
@@ -360,6 +474,9 @@ class LinuxBluetoothAdapter(IngressAdapter):
             else:
                 if self._event_bus:
                     self._event_bus.emit("bluetooth.device.connected", payload={"mac": mac, "path": path})
+                    self._event_bus.emit(
+                        "bluetooth.source.available", payload={"mac": mac, "source_id": f"bluetooth:{mac.lower() if mac else ''}"}
+                    )
 
     async def _fetch_and_check_reconnect(self, path: str) -> None:
         if not self._dbus_bus:

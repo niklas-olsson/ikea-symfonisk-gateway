@@ -38,6 +38,8 @@ class EventType(str, Enum):
     BLUETOOTH_DEVICE_DISCONNECTED = "bluetooth.device.disconnected"
     BLUETOOTH_DEVICE_RECONNECT_SCHEDULED = "bluetooth.device.reconnect_scheduled"
     BLUETOOTH_DEVICE_RECONNECT_FAILED = "bluetooth.device.reconnect_failed"
+    BLUETOOTH_SOURCE_AVAILABLE = "bluetooth.source.available"
+    BLUETOOTH_SOURCE_UNAVAILABLE = "bluetooth.source.unavailable"
 
 
 class Severity(str, Enum):
