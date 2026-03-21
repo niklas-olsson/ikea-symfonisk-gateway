@@ -18,10 +18,11 @@ class JitterBuffer:
     def __init__(self, target_ms: int = 250, sample_rate: int = 48000):
         self.target_ms = target_ms
         self.sample_rate = sample_rate
-        self._frames: list[tuple[int, AudioFrame]] = []
+        self._frames: list[tuple[int, int, AudioFrame]] = []
         self._next_sequence: int | None = None
         self._last_pts: int | None = None
         self._buffer_size_ms = 0.0
+        self._counter = 0
         self._lock = asyncio.Lock()
         self._ready = asyncio.Event()
 
@@ -33,7 +34,8 @@ class JitterBuffer:
                 logger.warning(f"Dropping late frame: seq={frame.sequence}, expected={self._next_sequence}")
                 return
 
-            heapq.heappush(self._frames, (frame.sequence, frame))
+            self._counter += 1
+            heapq.heappush(self._frames, (frame.sequence, self._counter, frame))
             self._buffer_size_ms += frame.duration_ns / 1_000_000
 
             if self._buffer_size_ms >= self.target_ms:
@@ -50,7 +52,7 @@ class JitterBuffer:
             if not self._ready.is_set() and self._next_sequence is None:
                 return None
 
-            seq, frame = heapq.heappop(self._frames)
+            seq, _, frame = heapq.heappop(self._frames)
             self._buffer_size_ms -= frame.duration_ns / 1_000_000
 
             if self._next_sequence is not None and seq > self._next_sequence:
