@@ -32,6 +32,12 @@ class EventType(str, Enum):
     ADAPTER_REGISTERED = "adapter.registered"
     ADAPTER_UNREGISTERED = "adapter.unregistered"
     CONFIG_CHANGED = "config.changed"
+    BLUETOOTH_DEVICE_SEEN = "bluetooth.device.seen"
+    BLUETOOTH_DEVICE_CONNECTING = "bluetooth.device.connecting"
+    BLUETOOTH_DEVICE_CONNECTED = "bluetooth.device.connected"
+    BLUETOOTH_DEVICE_DISCONNECTED = "bluetooth.device.disconnected"
+    BLUETOOTH_DEVICE_RECONNECT_SCHEDULED = "bluetooth.device.reconnect_scheduled"
+    BLUETOOTH_DEVICE_RECONNECT_FAILED = "bluetooth.device.reconnect_failed"
 
 
 class Severity(str, Enum):
@@ -132,14 +138,22 @@ class EventBus:
 
     def emit(
         self,
-        event_type: EventType,
+        event_type: EventType | str,
         payload: dict[str, Any] | None = None,
         severity: Severity = Severity.INFO,
         session_id: str | None = None,
     ) -> BridgeEvent:
         """Emit a new event synchronously."""
+        if isinstance(event_type, str):
+            try:
+                # Try to convert to EventType if possible for internal consistency
+                event_type = EventType(event_type)
+            except ValueError:
+                # Keep as string if not a known EventType
+                pass
+
         event = BridgeEvent(
-            event_type=event_type,
+            event_type=event_type,  # type: ignore[arg-type]
             payload=payload,
             severity=severity,
             session_id=session_id,

@@ -8,7 +8,10 @@ import asyncio
 import logging
 import shutil
 import subprocess
+from typing import Any
 
+from dbus_next.aio import MessageBus  # type: ignore[import-untyped]
+from dbus_next.constants import BusType  # type: ignore[import-untyped]
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
@@ -27,16 +30,42 @@ logger = logging.getLogger(__name__)
 class LinuxBluetoothAdapter(IngressAdapter):
     """Adapter for capturing Bluetooth audio on Linux."""
 
-    def __init__(self) -> None:
+    def __init__(self, event_bus: Any | None = None, config_store: Any | None = None) -> None:
+        self._event_bus = event_bus
+        self._config_store = config_store
         self._session_id: str | None = None
         self._running = False
         self._process: asyncio.subprocess.Process | None = None
         self._capture_task: asyncio.Task[None] | None = None
         self._frame_sink: FrameSink | None = None
         self._pairing_timeout_task: asyncio.Task[None] | None = None
+        self._monitor_task: asyncio.Task[None] | None = None
+        self._reconnect_task: asyncio.Task[None] | None = None
+        self._dbus_bus: MessageBus | None = None
+        self._device_paths: dict[str, str] = {}  # path -> mac
+
+        if self._event_bus:
+            try:
+                self._monitor_task = asyncio.create_task(self._monitor_devices())
+            except RuntimeError:
+                # Handle cases where there is no running event loop (e.g. some tests)
+                logger.warning("No running event loop, Bluetooth monitoring not started")
 
     def id(self) -> str:
         return "linux-bluetooth-adapter"
+
+    def __del__(self) -> None:
+        """Cleanup background tasks on deletion."""
+        if self._monitor_task:
+            self._monitor_task.cancel()
+        if self._reconnect_task:
+            self._reconnect_task.cancel()
+        if self._dbus_bus:
+            try:
+                # dbus-next disconnect is sync
+                self._dbus_bus.disconnect()
+            except Exception:
+                pass
 
     def platform(self) -> str:
         return "linux"
@@ -246,3 +275,205 @@ class LinuxBluetoothAdapter(IngressAdapter):
         except subprocess.SubprocessError as e:
             logger.error(f"Failed to disable pairing mode: {e}")
             return PairingResult(success=False, error=str(e))
+
+    async def _monitor_devices(self) -> None:
+        """Watch BlueZ events for device appearance and state changes."""
+        try:
+            self._dbus_bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+
+            # Introspect the BlueZ object manager
+            introspection = await self._dbus_bus.introspect("org.bluez", "/")
+            bluez_proxy = self._dbus_bus.get_proxy_object("org.bluez", "/", introspection)
+            object_manager = bluez_proxy.get_interface("org.freedesktop.DBus.ObjectManager")
+
+            # Listen for new interfaces (devices being discovered)
+            object_manager.on_interfaces_added(self._on_interfaces_added)
+
+            # Manually find already existing devices and subscribe to their property changes
+            managed_objects = await object_manager.call_get_managed_objects()
+            for path, interfaces in managed_objects.items():
+                if "org.bluez.Device1" in interfaces:
+                    self._subscribe_to_device_changes(path)
+                    # Check if it's already the preferred device and connection is needed
+                    self._check_and_trigger_reconnect(path, interfaces["org.bluez.Device1"])
+
+            # Keep the loop alive
+            while True:
+                await asyncio.sleep(3600)
+
+        except asyncio.CancelledError:
+            if self._dbus_bus:
+                self._dbus_bus.disconnect()
+        except Exception as e:
+            logger.error(f"Error monitoring BlueZ devices: {e}")
+
+    def _on_interfaces_added(self, path: str, interfaces: dict[str, Any]) -> None:
+        """Called when a new device or interface is seen."""
+        if "org.bluez.Device1" in interfaces:
+            device_props = interfaces["org.bluez.Device1"]
+            mac = device_props.get("Address").value
+
+            if mac:
+                self._device_paths[path] = mac
+                logger.info(f"Bluetooth device seen: {mac} at {path}")
+                if self._event_bus:
+                    self._event_bus.emit("bluetooth.device.seen", payload={"mac": mac, "path": path})
+
+                self._subscribe_to_device_changes(path)
+                self._check_and_trigger_reconnect(path, device_props)
+
+    def _subscribe_to_device_changes(self, path: str) -> None:
+        """Subscribe to PropertiesChanged on a specific device."""
+        asyncio.create_task(self._async_subscribe_to_device(path))
+
+    async def _async_subscribe_to_device(self, path: str) -> None:
+        if not self._dbus_bus:
+            return
+
+        try:
+            introspection = await self._dbus_bus.introspect("org.bluez", path)
+            proxy = self._dbus_bus.get_proxy_object("org.bluez", path, introspection)
+            properties = proxy.get_interface("org.freedesktop.DBus.Properties")
+
+            def on_properties_changed(interface_name: str, changed_properties: dict[str, Any], invalidated_properties: list[str]) -> None:
+                if interface_name == "org.bluez.Device1":
+                    self._on_device_properties_changed(path, changed_properties)
+
+            properties.on_properties_changed(on_properties_changed)
+        except Exception as e:
+            logger.warning(f"Failed to subscribe to device changes at {path}: {e}")
+
+    def _on_device_properties_changed(self, path: str, changed_properties: dict[str, Any]) -> None:
+        """Handle property changes for a specific device."""
+        if "Connected" in changed_properties:
+            is_connected = changed_properties["Connected"].value
+            mac = self._device_paths.get(path)
+
+            if not is_connected:
+                # Disconnected event
+                if self._event_bus:
+                    self._event_bus.emit("bluetooth.device.disconnected", payload={"mac": mac, "path": path})
+
+                # Check if we should reconnect
+                # We need full properties for _check_and_trigger_reconnect, so let's fetch them
+                asyncio.create_task(self._fetch_and_check_reconnect(path))
+            else:
+                if self._event_bus:
+                    self._event_bus.emit("bluetooth.device.connected", payload={"mac": mac, "path": path})
+
+    async def _fetch_and_check_reconnect(self, path: str) -> None:
+        if not self._dbus_bus:
+            return
+        try:
+            introspection = await self._dbus_bus.introspect("org.bluez", path)
+            proxy = self._dbus_bus.get_proxy_object("org.bluez", path, introspection)
+
+            # This is tricky with dbus-next proxy interfaces as they are not dictionaries.
+            # We might need to call GetManagedObjects again or use properties interface.
+            properties_iface = proxy.get_interface("org.freedesktop.DBus.Properties")
+            all_props = await properties_iface.call_get_all("org.bluez.Device1")
+            self._check_and_trigger_reconnect(path, all_props)
+        except Exception as e:
+            logger.error(f"Failed to fetch properties for {path}: {e}")
+
+    def _check_and_trigger_reconnect(self, path: str, properties: dict[str, Any]) -> None:
+        """Decide if we should attempt connection to this device."""
+        mac = properties.get("Address").value if properties.get("Address") else None
+        is_connected = properties.get("Connected").value if properties.get("Connected") else False
+        is_trusted = properties.get("Trusted").value if properties.get("Trusted") else False
+        is_paired = properties.get("Paired").value if properties.get("Paired") else False
+
+        if not mac:
+            mac = self._device_paths.get(path)
+
+        if not mac:
+            return
+
+        self._device_paths[path] = mac
+
+        preferred_mac = None
+        if self._config_store:
+            preferred_mac = self._config_store.get("bluetooth_preferred_device")
+
+        if mac == preferred_mac and is_trusted and is_paired and not is_connected:
+            logger.info(f"Preferred device {mac} seen and not connected. Triggering reconnect.")
+            if self._reconnect_task and not self._reconnect_task.done():
+                return  # Reconnect already in progress
+
+            self._reconnect_task = asyncio.create_task(self._reconnect_loop(path, mac))
+
+    async def _reconnect_loop(self, path: str, mac: str) -> None:
+        """Bounded retry with backoff for device connection."""
+        backoff_schedule = [0, 5, 15, 30, 60]
+        retry_count = 0
+
+        while True:
+            # Determine delay
+            delay = backoff_schedule[retry_count] if retry_count < len(backoff_schedule) else 60
+
+            if delay > 0:
+                logger.info(f"Scheduling Bluetooth reconnect for {mac} in {delay}s")
+                if self._event_bus:
+                    self._event_bus.emit(
+                        "bluetooth.device.reconnect_scheduled", payload={"mac": mac, "delay": delay, "retry_count": retry_count}
+                    )
+                await asyncio.sleep(delay)
+
+            logger.info(f"Attempting Bluetooth connection to {mac} (attempt {retry_count + 1})")
+            if self._event_bus:
+                self._event_bus.emit("bluetooth.device.connecting", payload={"mac": mac})
+
+            try:
+                # Use bluetoothctl for connection as it's more robust than raw DBus calls for A2DP
+                process = await asyncio.create_subprocess_exec(
+                    "bluetoothctl", "connect", mac, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                exit_code = process.returncode
+
+                if exit_code == 0:
+                    logger.info(f"Successfully connected to Bluetooth device {mac}")
+                    # Note: EventType.BLUETOOTH_DEVICE_CONNECTED will be emitted by PropertiesChanged
+                    break
+                else:
+                    error_msg = stdout.decode().strip() + " " + stderr.decode().strip()
+                    logger.warning(f"Failed to connect to Bluetooth device {mac}: {error_msg}")
+
+                    # Stop retrying on fatal/auth errors
+                    # Common BlueZ error strings for fatal issues
+                    fatal_errors = [
+                        "Authentication Failed",
+                        "Authentication Canceled",
+                        "NotReady",
+                        "Failed to connect: org.bluez.Error.Failed",
+                    ]
+                    if any(err in error_msg for err in fatal_errors):
+                        logger.error(f"Fatal connection error for {mac}. Stopping retries.")
+                        if self._event_bus:
+                            self._event_bus.emit(
+                                "bluetooth.device.reconnect_failed", payload={"mac": mac, "error": error_msg, "fatal": True}
+                            )
+                        break
+
+            except Exception as e:
+                logger.error(f"Unexpected error connecting to Bluetooth device {mac}: {e}")
+
+            retry_count += 1
+            if self._event_bus:
+                self._event_bus.emit("bluetooth.device.reconnect_failed", payload={"mac": mac, "retry_count": retry_count, "fatal": False})
+
+            # Check if device is still disconnected before retrying
+            # (PropertiesChanged might have already updated connection state)
+            # Fetch properties again
+            try:
+                if not self._dbus_bus:
+                    break
+                introspection = await self._dbus_bus.introspect("org.bluez", path)
+                proxy = self._dbus_bus.get_proxy_object("org.bluez", path, introspection)
+                properties_iface = proxy.get_interface("org.freedesktop.DBus.Properties")
+                is_connected = (await properties_iface.call_get("org.bluez.Device1", "Connected")).value
+                if is_connected:
+                    logger.info(f"Device {mac} already connected, stopping reconnect loop.")
+                    break
+            except Exception:
+                pass  # Continue retry if we can't check
