@@ -1,7 +1,7 @@
 import sys
+
 import requests
-import json
-import time
+
 
 def verify_system_health(base_url: str = "http://localhost:8732"):
     print(f"Starting SYMFONISK Bridge System Verification via {base_url}/health...")
@@ -27,16 +27,16 @@ def verify_system_health(base_url: str = "http://localhost:8732"):
     print(f" - OS: {system.get('os')}")
     print(f" - Arch: {system.get('arch')}")
     print(f" - Python: {system.get('python_version', '').splitlines()[0]}")
-    if not all([system.get('os'), system.get('arch'), system.get('python_version')]):
-         print("FAILED: Incomplete system information.")
-         sys.exit(1)
+    if not all([system.get("os"), system.get("arch"), system.get("python_version")]):
+        print("FAILED: Incomplete system information.")
+        sys.exit(1)
     print("SUCCESS: System info is complete.")
 
     print("\n[3] FFmpeg Status")
     ffmpeg = health_data["ffmpeg"]
     print(f" - Path: {ffmpeg.get('path')}")
     print(f" - Available: {ffmpeg.get('available')}")
-    if not ffmpeg.get('available'):
+    if not ffmpeg.get("available"):
         print("WARNING: FFmpeg is reported as NOT available. Some features will not work.")
     else:
         print("SUCCESS: FFmpeg is available.")
@@ -49,7 +49,7 @@ def verify_system_health(base_url: str = "http://localhost:8732"):
     print(f" - Active Sessions: {subsystems.get('sessions')}")
 
     # Validation logic: we expect at least the Synthetic adapter to be present if bridge is initialized
-    if subsystems.get('adapters', 0) < 1:
+    if subsystems.get("adapters", 0) < 1:
         print("FAILED: No adapters registered. Bridge might not be fully initialized.")
         sys.exit(1)
     print("SUCCESS: Subsystems summary is populated.")
@@ -63,6 +63,7 @@ def verify_system_health(base_url: str = "http://localhost:8732"):
     print("SUCCESS: Uptime is valid.")
 
     print("\nVERIFICATION COMPLETE: Bridge diagnostics are actionable and authoritative.")
+
 
 if __name__ == "__main__":
     # If a port was specified as an argument
