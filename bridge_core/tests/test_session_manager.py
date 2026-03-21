@@ -964,7 +964,7 @@ async def test_session_frame_sink_preserves_sequences_across_pipeline_swap() -> 
 
 
 @pytest.mark.asyncio
-async def test_delivery_loss_triggers_replay_heal_without_restarting_source(
+async def test_client_detach_does_not_degrade_healthy_stream(
     event_bus: EventBus,
     stream_publisher: MagicMock,
     target_registry: MagicMock,
@@ -1031,10 +1031,111 @@ async def test_delivery_loss_triggers_replay_heal_without_restarting_source(
         "last_client_fanout_monotonic": time.monotonic() - 1,
         "last_client_detach_monotonic": time.monotonic(),
     }
-    recovered = {
-        **healthy,
-        "last_client_fanout_monotonic": time.monotonic(),
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
+        mock_pipeline = mock_pipeline_cls.return_value
+        mock_pipeline.start = AsyncMock()
+        mock_pipeline.stop = AsyncMock()
+        mock_pipeline.jitter_buffer = MagicMock()
+        mock_pipeline.jitter_buffer.size_ms = 0.0
+        mock_pipeline.get_diagnostics_snapshot.side_effect = [
+            healthy,
+            detached,
+            detached,
+            detached,
+            detached,
+            detached,
+            detached,
+        ]
+
+        success = await manager.start_session(session.session_id)
+        assert success is True
+        await asyncio.sleep(1.2)
+
+    assert session.state == SessionState.PLAYING
+    assert session.media_reason is None
+    assert session.media_state in {"playing_active", "playing_idle"}
+    assert source_registry.start_source.call_count == 1
+    assert target_registry.play_stream.await_count == 1
+    await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_normal_reconnect_churn_remains_non_fatal(
+    event_bus: EventBus,
+    stream_publisher: MagicMock,
+    target_registry: MagicMock,
+) -> None:
+    source_registry = MagicMock(spec=SourceRegistry)
+    source_registry.prepare_source.return_value = PrepareResult(success=True, source_id="default")
+    source_registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
+    source_registry.resolve_source.return_value = MagicMock(
+        source=SourceDescriptor(
+            source_id="windows-audio-adapter:system:default",
+            source_type=SourceType.SYSTEM_OUTPUT,
+            display_name="Default System Sound (windows)",
+            platform="windows",
+            capabilities=SourceCapabilities(),
+        ),
+        adapter_info=MagicMock(adapter=MagicMock()),
+    )
+    source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=True,
+        source_state="active",
+        last_error=None,
+        details={
+            "startup_substate": "active",
+            "callback_count": 5,
+            "frames_emitted": 5,
+            "start_viability": {"stream_opened": True, "stream_started": True, "callback_registered": True},
+        },
+    )
+    config_store = MagicMock()
+    config_store.get.side_effect = lambda key, default=None: {"audio_transport_heartbeat_window_ms": 100}.get(key, default)
+
+    manager = SessionManager(
+        event_bus=event_bus,
+        source_registry=source_registry,
+        target_registry=target_registry,
+        stream_publisher=stream_publisher,
+        config_store=config_store,
+    )
+    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+
+    healthy = {
+        "real_frames_written": 3,
+        "silence_frames_written": 0,
+        "runtime_mode": "active",
+        "last_real_frame_age_ms": 5.0,
+        "keepalive_to_first_real_frame_ms": None,
+        "first_keepalive_encoded_output_after_session_start_ms": 15.0,
+        "first_real_encoded_output_after_session_start_ms": 20.0,
+        "transport_alive": True,
+        "encoded_bytes_emitted_total": 1024,
+        "encoded_bytes_emitted_last_window": 512,
+        "last_stdout_read_monotonic": time.monotonic(),
+        "last_stdin_write_monotonic": time.monotonic(),
+        "keepalive_active": False,
         "active_client_count": 1,
+        "last_client_fanout_monotonic": time.monotonic(),
+        "last_client_attach_monotonic": time.monotonic() - 1,
+        "last_client_detach_monotonic": None,
+    }
+    detached = {
+        **healthy,
+        "active_client_count": 0,
+        "last_client_fanout_monotonic": time.monotonic() - 1,
+        "last_client_detach_monotonic": time.monotonic(),
+    }
+    reattached = {
+        **healthy,
+        "active_client_count": 1,
+        "last_client_attach_monotonic": time.monotonic(),
+        "last_client_fanout_monotonic": time.monotonic(),
+        "last_client_detach_monotonic": time.monotonic() - 0.5,
     }
 
     with (
@@ -1050,21 +1151,18 @@ async def test_delivery_loss_triggers_replay_heal_without_restarting_source(
             healthy,
             detached,
             detached,
-            detached,
-            recovered,
-            recovered,
-            recovered,
+            reattached,
+            reattached,
+            reattached,
         ]
 
         success = await manager.start_session(session.session_id)
         assert success is True
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(1.0)
 
     assert session.state == SessionState.PLAYING
     assert session.media_reason is None
-    assert session.media_state in {"playing_active", "playing_idle"}
-    assert source_registry.start_source.call_count == 1
-    assert target_registry.play_stream.await_count >= 2
+    assert target_registry.play_stream.await_count == 1
     await manager.stop_session(session.session_id)
 
 

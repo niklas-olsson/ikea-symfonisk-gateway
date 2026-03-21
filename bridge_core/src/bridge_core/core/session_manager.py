@@ -471,22 +471,19 @@ class SessionManager:
                 self._set_media_state(session, "playing_degraded", "media_plane_heal_failed")
                 return
 
-            if mode == "replay":
-                await self._start_renderer_playback(session)
-            else:
-                old_pipeline = session.pipeline
-                new_pipeline = self._build_pipeline(session)
-                await new_pipeline.start()
-                session.media_epoch += 1
-                if self._stream_publisher:
-                    self._register_pipeline(session, new_pipeline, swap=True)
-                frame_sink = self._frame_sinks.get(session_id)
-                if frame_sink:
-                    frame_sink.set_pipeline(new_pipeline, session.media_epoch)
-                session.pipeline = new_pipeline
-                if old_pipeline:
-                    await old_pipeline.stop()
-                await self._start_renderer_playback(session)
+            old_pipeline = session.pipeline
+            new_pipeline = self._build_pipeline(session)
+            await new_pipeline.start()
+            session.media_epoch += 1
+            if self._stream_publisher:
+                self._register_pipeline(session, new_pipeline, swap=True)
+            frame_sink = self._frame_sinks.get(session_id)
+            if frame_sink:
+                frame_sink.set_pipeline(new_pipeline, session.media_epoch)
+            session.pipeline = new_pipeline
+            if old_pipeline:
+                await old_pipeline.stop()
+            await self._start_renderer_playback(session)
 
             heartbeat_window_ms = self._get_int_config(
                 "audio_transport_heartbeat_window_ms",
@@ -501,8 +498,7 @@ class SessionManager:
                     return
                 diagnostics = session.pipeline.get_diagnostics_snapshot()
                 encoder_alive = self._derive_encoder_alive(diagnostics)
-                delivery_alive = self._derive_delivery_alive(diagnostics, heartbeat_window_ms)
-                if encoder_alive and delivery_alive:
+                if encoder_alive:
                     if recovery_started_at is None:
                         recovery_started_at = time.monotonic()
                     if (time.monotonic() - recovery_started_at) * 1000 >= heartbeat_window_ms:
@@ -935,9 +931,7 @@ class SessionManager:
         activation_seen = startup_result == "active"
         activation_degraded_emitted = False
         transport_degraded_emitted = False
-        delivery_degraded_emitted = False
         transport_miss_started_at: float | None = None
-        delivery_miss_started_at: float | None = None
         transport_recovery_started_at: float | None = None
 
         try:
@@ -1025,15 +1019,26 @@ class SessionManager:
                 recent_fanout = isinstance(last_client_fanout_monotonic, (int, float)) and (
                     (now - last_client_fanout_monotonic) * 1000 <= transport_heartbeat_window_ms
                 )
-                if (
-                    encoder_alive
-                    and not delivery_alive
-                    and not recent_fanout
-                ):
-                    if delivery_miss_started_at is None:
-                        delivery_miss_started_at = now
-                else:
-                    delivery_miss_started_at = None
+                last_client_attach_monotonic = diagnostics.get("last_client_attach_monotonic")
+                last_client_detach_monotonic = diagnostics.get("last_client_detach_monotonic")
+                detach_evidence = isinstance(last_client_detach_monotonic, (int, float)) and (
+                    not isinstance(last_client_attach_monotonic, (int, float))
+                    or last_client_detach_monotonic >= last_client_attach_monotonic
+                )
+                if encoder_alive and not recent_fanout and (active_client_count == 0 or detach_evidence):
+                    logger.info(
+                        "audio_delivery_inactive_observed session_id=%s source_id=%s details=%s",
+                        session_id,
+                        session.source_id,
+                        {
+                            "active_client_count": active_client_count,
+                            "last_client_fanout_monotonic": diagnostics.get("last_client_fanout_monotonic"),
+                            "last_client_attach_monotonic": diagnostics.get("last_client_attach_monotonic"),
+                            "last_client_detach_monotonic": diagnostics.get("last_client_detach_monotonic"),
+                            "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
+                            "transport_alive": transport_alive,
+                        },
+                    )
 
                 transport_should_degrade = (
                     session.state == SessionState.PLAYING
@@ -1075,51 +1080,10 @@ class SessionManager:
                         payload={"state": "playing_degraded", "details": details},
                     )
                     transport_degraded_emitted = True
-                    delivery_degraded_emitted = False
                     if session.auto_heal:
                         self._schedule_media_plane_heal(session_id, "swap", "transport_heartbeat_lost")
 
-                delivery_should_degrade = (
-                    session.state == SessionState.PLAYING
-                    and encoder_alive
-                    and delivery_miss_started_at is not None
-                    and (now - delivery_miss_started_at) * 1000 >= transport_heartbeat_window_ms
-                    and not delivery_alive
-                )
-                if delivery_should_degrade and not delivery_degraded_emitted:
-                    session.transition_to(SessionState.DEGRADED)
-                    self._set_media_state(session, "playing_degraded", "client_detached_while_session_open")
-                    details = {
-                        "reason": "client_detached_while_session_open",
-                        "transport_alive": transport_alive,
-                        "encoder_alive": encoder_alive,
-                        "delivery_alive": delivery_alive,
-                        "transport_heartbeat_window_ms": transport_heartbeat_window_ms,
-                        "active_client_count": active_client_count,
-                        "last_client_fanout_monotonic": diagnostics.get("last_client_fanout_monotonic"),
-                        "last_client_attach_monotonic": diagnostics.get("last_client_attach_monotonic"),
-                        "last_client_detach_monotonic": diagnostics.get("last_client_detach_monotonic"),
-                        "encoded_bytes_emitted_last_window": encoded_bytes_emitted_last_window,
-                        "keepalive_active": keepalive_active,
-                        "health": health.details if health else None,
-                    }
-                    logger.warning(
-                        "audio_delivery_heartbeat_degraded session_id=%s source_id=%s details=%s",
-                        session_id,
-                        session.source_id,
-                        details,
-                    )
-                    self._event_bus.emit(
-                        EventType.SOURCE_STATE_CHANGED,
-                        session_id=session_id,
-                        payload={"state": "playing_degraded", "details": details},
-                    )
-                    delivery_degraded_emitted = True
-                    transport_degraded_emitted = False
-                    if session.auto_heal:
-                        self._schedule_media_plane_heal(session_id, "replay", "client_detached_while_session_open")
-
-                if session.state == SessionState.DEGRADED and encoder_alive and delivery_alive and not session.media_heal_in_progress:
+                if session.state == SessionState.DEGRADED and encoder_alive and not session.media_heal_in_progress:
                     if transport_recovery_started_at is None:
                         transport_recovery_started_at = now
                 else:
@@ -1128,7 +1092,6 @@ class SessionManager:
                 if (
                     session.state == SessionState.DEGRADED
                     and encoder_alive
-                    and delivery_alive
                     and transport_recovery_started_at is not None
                     and (now - transport_recovery_started_at) * 1000 >= transport_heartbeat_window_ms
                     and (real_frames_written > 0 or keepalive_active)
@@ -1169,9 +1132,7 @@ class SessionManager:
                         },
                     )
                     transport_degraded_emitted = False
-                    delivery_degraded_emitted = False
                     transport_miss_started_at = None
-                    delivery_miss_started_at = None
                     if session.last_media_healthy_at and (time.time() - session.last_media_healthy_at) >= 5:
                         session.media_heal_attempts = 0
 
@@ -1364,11 +1325,9 @@ class SessionManager:
 
         if session.state == SessionState.DEGRADED and session.media_reason in {
             "transport_heartbeat_lost",
-            "client_detached_while_session_open",
             "media_plane_heal_failed",
         }:
-            mode = "replay" if session.media_reason == "client_detached_while_session_open" else "swap"
-            self._schedule_media_plane_heal(session_id, mode, session.media_reason)
+            self._schedule_media_plane_heal(session_id, "swap", session.media_reason)
             self._event_bus.emit(EventType.HEAL_ATTEMPTED, session_id=session_id)
             return
 
