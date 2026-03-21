@@ -4,6 +4,7 @@ import asyncio
 import heapq
 import logging
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from ingress_sdk.protocol import AudioFrame
 
@@ -76,10 +77,17 @@ class JitterBuffer:
 class StreamPipeline:
     """Active audio pipeline for a session using FFmpeg for encoding."""
 
-    def __init__(self, session_id: str, profile_id: str, ffmpeg_path: str = "ffmpeg"):
+    def __init__(
+        self,
+        session_id: str,
+        profile_id: str,
+        ffmpeg_path: str = "ffmpeg",
+        on_error: Any | None = None,
+    ):
         self.session_id = session_id
         self.profile_id = profile_id
         self.ffmpeg_path = ffmpeg_path
+        self.on_error = on_error
         self.profile = STREAM_PROFILES[profile_id]
         self.jitter_buffer = JitterBuffer()
         self._process: asyncio.subprocess.Process | None = None
@@ -106,6 +114,18 @@ class StreamPipeline:
         self._active = True
         self._feed_task = asyncio.create_task(self._feed_ffmpeg())
         self._read_task = asyncio.create_task(self._read_ffmpeg())
+
+        # Supervise tasks
+        self._feed_task.add_done_callback(self._handle_task_done)
+        self._read_task.add_done_callback(self._handle_task_done)
+
+    def _handle_task_done(self, task: asyncio.Task[None]) -> None:
+        """Handle completion of background tasks and report errors."""
+        if not task.cancelled() and task.exception():
+            exc = task.exception()
+            logger.error(f"Pipeline task for {self.session_id} failed: {exc}", exc_info=exc)
+            if self.on_error:
+                self.on_error(exc)
 
     async def stop(self) -> None:
         """Stop the pipeline and FFmpeg subprocess."""

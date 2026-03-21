@@ -91,7 +91,7 @@ async def start_session(request: Request, session_id: str) -> dict[str, Any]:
 
     success = await manager.start_session(session_id)
     if not success:
-        error_detail = {"code": "SESSION_START_FAILED", "message": "Failed to start session"}
+        error_detail: dict[str, Any] = {"code": "SESSION_START_FAILED", "message": "Failed to start session"}
         if session.last_error:
             error_detail["last_error"] = session.last_error.model_dump()
             error_detail["message"] = session.last_error.message

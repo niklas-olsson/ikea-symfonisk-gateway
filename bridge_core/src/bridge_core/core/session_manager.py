@@ -109,11 +109,54 @@ class Session:
 class SessionFrameSink:
     """Bridges between ingress adapter and stream pipeline."""
 
-    def __init__(self, pipeline: StreamPipeline):
+    def __init__(self, pipeline: StreamPipeline, on_error: Any | None = None):
         self.pipeline = pipeline
+        self.on_error_callback = on_error
+        self._queue: asyncio.Queue[AudioFrame] = asyncio.Queue(maxsize=100)
+        self._task: asyncio.Task[None] | None = None
+        self._active = False
+
+    def start(self) -> None:
+        """Start the ingestion task."""
+        self._active = True
+        self._task = asyncio.create_task(self._ingestion_loop())
+        self._task.add_done_callback(self._handle_task_done)
+
+    def stop(self) -> None:
+        """Stop the ingestion task."""
+        self._active = False
+        if self._task:
+            self._task.cancel()
+            self._task = None
+
+    def _handle_task_done(self, task: asyncio.Task[None]) -> None:
+        """Handle completion of the ingestion task."""
+        if not task.cancelled() and task.exception():
+            exc = task.exception()
+            logger.error(f"Ingestion task failed: {exc}", exc_info=exc)
+            if self.on_error_callback:
+                self.on_error_callback(exc)
+
+    async def _ingestion_loop(self) -> None:
+        """Continuously push frames from the queue to the pipeline."""
+        while self._active:
+            try:
+                frame = await self._queue.get()
+                await self.pipeline.push_frame(frame)
+                self._queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in ingestion loop: {e}")
+                if self.on_error_callback:
+                    self.on_error_callback(e)
+                break
 
     def on_frame(self, data: bytes, pts_ns: int, duration_ns: int) -> None:
         """Called by the ingress adapter for each frame."""
+        if not self._active:
+            return
+
         # Wrap in AudioFrame envelope as expected by the pipeline
         frame = AudioFrame(
             sequence=0,  # Sequence handled by jitter buffer/adapter if needed
@@ -122,8 +165,17 @@ class SessionFrameSink:
             format={"sample_rate": 48000, "channels": 2, "bit_depth": 16},
             audio_data=data,
         )
-        # Push to pipeline (non-blocking)
-        asyncio.create_task(self.pipeline.push_frame(frame))
+        # Push to queue (non-blocking)
+        try:
+            self._queue.put_nowait(frame)
+        except asyncio.QueueFull:
+            logger.warning("Ingestion queue full, dropping frame")
+
+    def on_error(self, error: Exception) -> None:
+        """Called by the ingress adapter when an error occurs."""
+        logger.error(f"Source reported error: {error}")
+        if self.on_error_callback:
+            self.on_error_callback(error)
 
 
 class SessionManager:
@@ -143,6 +195,30 @@ class SessionManager:
         self._target_registry = target_registry
         self._stream_publisher = stream_publisher
         self._config_store = config_store
+        self._frame_sinks: dict[str, SessionFrameSink] = {}
+
+    def _handle_session_error(self, session_id: str, error: Exception) -> None:
+        """Central error handler for session-related task failures."""
+        session = self.get(session_id)
+        if not session or session.state in [SessionState.FAILED, SessionState.STOPPED, SessionState.STOPPING]:
+            return
+
+        logger.error(f"Session {session_id} encountered a fatal error: {error}")
+        self._event_bus.emit(
+            EventType.SESSION_FAILED,
+            session_id=session_id,
+            payload={"error": str(error), "fatal": True},
+        )
+
+        # Update state directly to avoid transition loops if needed,
+        # but here we want to trigger cleanup
+        try:
+            session.transition_to(SessionState.FAILED)
+        except ValueError:
+            session.state = SessionState.FAILED
+
+        # Trigger cleanup
+        asyncio.create_task(self.stop_session(session_id))
 
     def create(
         self,
@@ -213,7 +289,12 @@ class SessionManager:
                         session.last_error = create_session_error(MEDIA_ENGINE_NOT_FOUND, str(e))
                         raise
 
-                    session.pipeline = StreamPipeline(session.session_id, session.stream_profile, ffmpeg_path=ffmpeg_path)
+                    session.pipeline = StreamPipeline(
+                        session.session_id,
+                        session.stream_profile,
+                        ffmpeg_path=ffmpeg_path,
+                        on_error=lambda e: self._handle_session_error(session_id, e),
+                    )
 
                 if self._stream_publisher:
                     self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
@@ -230,10 +311,17 @@ class SessionManager:
 
             # 3. Start source with frame sink
             try:
-                frame_sink = SessionFrameSink(session.pipeline)
+                frame_sink = SessionFrameSink(
+                    session.pipeline,
+                    on_error=lambda e: self._handle_session_error(session_id, e),
+                )
+                frame_sink.start()
+                self._frame_sinks[session_id] = frame_sink
+
                 start_res = self._source_registry.start_source(session.source_id, frame_sink)
                 if not start_res.success:
                     session.last_error = create_session_error(SOURCE_START_FAILED, f"Failed to start source: {start_res.message}")
+                    frame_sink.stop()
                     raise RuntimeError(session.last_error.message)
                 session.adapter_session_id = start_res.session_id
                 self._event_bus.emit(
@@ -365,16 +453,16 @@ class SessionManager:
                 payload={"error": f"Error stopping renderer: {e}"},
             )
 
-        # 2. Stop source
+        # 2. Stop source and frame sink
+        if session_id in self._frame_sinks:
+            self._frame_sinks[session_id].stop()
+            del self._frame_sinks[session_id]
+
         if session.adapter_session_id:
             try:
                 self._source_registry.stop_source(session.source_id, session.adapter_session_id)
             except Exception as e:
-                self._event_bus.emit(
-                    EventType.SESSION_FAILED,
-                    session_id=session_id,
-                    payload={"error": f"Error stopping source: {e}"},
-                )
+                logger.error(f"Error stopping source for session {session_id}: {e}")
             session.adapter_session_id = None
 
         # 3. Stop pipeline
