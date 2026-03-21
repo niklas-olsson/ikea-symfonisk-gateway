@@ -48,6 +48,9 @@ class LinuxBluetoothAdapter(IngressAdapter):
         self._status_monitoring_task: asyncio.Task[None] | None = None
         self._last_status: dict[str, Any] = {}
         self._source_id_map: dict[str, str] = {}  # virtual_id -> pa_id
+        self._last_pairing_result: dict[str, Any] | None = None
+        self._last_connection_error: dict[str, Any] | None = None
+        self._reconnect_state: dict[str, Any] = {"active": False, "retries": 0}
 
         if self._event_bus:
             self._status_monitoring_task = asyncio.create_task(self._monitor_status())
@@ -126,6 +129,16 @@ class LinuxBluetoothAdapter(IngressAdapter):
                         )
                     )
                     new_source_id_map[virtual_id] = source_id
+
+            # Check for available/unavailable sources
+            if self._event_bus:
+                old_sources = set(self._source_id_map.keys())
+                new_sources = set(new_source_id_map.keys())
+
+                for sid in new_sources - old_sources:
+                    self._event_bus.emit(EventType.BLUETOOTH_SOURCE_AVAILABLE, payload={"source_id": sid})
+                for sid in old_sources - new_sources:
+                    self._event_bus.emit(EventType.BLUETOOTH_SOURCE_UNAVAILABLE, payload={"source_id": sid})
 
             self._source_id_map = new_source_id_map
 
@@ -255,10 +268,29 @@ class LinuxBluetoothAdapter(IngressAdapter):
         """Get status of the Bluetooth adapter."""
         props = await self._adapter_controller.get_properties()
         errors = await self._adapter_controller.check_readiness()
+
+        backend_type = "PulseAudio"
+        if shutil.which("pw-cli"):
+            backend_type = "PipeWire"
+
         return {
+            "adapter_id": self.id(),
             "properties": props,
             "readiness_errors": errors,
             "healthy": len(errors) == 0,
+            "pairing_window": {
+                "is_open": self._pairing_window.is_open,
+                "agent_path": self._pairing_window.agent_path,
+            },
+            "backend": {
+                "type": backend_type,
+                "profile": "a2dp_source",
+            },
+            "trusted_devices": self._store.list_trusted(),
+            "preferred_device": self._store.get_preferred_device(),
+            "last_pairing_result": self._last_pairing_result,
+            "last_connection_error": self._last_connection_error,
+            "reconnect_retry_state": self._reconnect_state,
         }
 
     async def set_adapter_alias(self, alias: str) -> bool:
@@ -287,16 +319,98 @@ class LinuxBluetoothAdapter(IngressAdapter):
         if alias:
             metadata["alias"] = alias
         self._store.trust_device(mac, metadata)
+        if self._event_bus:
+            self._event_bus.emit(EventType.BLUETOOTH_DEVICE_TRUSTED, payload={"mac": mac, "alias": alias})
 
     def forget_device(self, mac: str) -> None:
         """Remove device from trusted store."""
         self._store.forget_device(mac)
+        if self._event_bus:
+            self._event_bus.emit(EventType.BLUETOOTH_DEVICE_UNTRUSTED, payload={"mac": mac})
+
+    async def list_devices(self) -> list[dict[str, Any]]:
+        """List all known Bluetooth devices."""
+        objects = await self._adapter_controller.get_managed_objects()
+        devices = []
+        for path, interfaces in objects.items():
+            if "org.bluez.Device1" in interfaces:
+                props = interfaces["org.bluez.Device1"]
+                mac = props.get("Address", "")
+                devices.append(
+                    {
+                        "mac": mac,
+                        "name": props.get("Name", props.get("Alias", "Unknown")),
+                        "alias": props.get("Alias"),
+                        "paired": props.get("Paired", False),
+                        "trusted": props.get("Trusted", False) or self._store.is_trusted(mac),
+                        "connected": props.get("Connected", False),
+                        "blocked": props.get("Blocked", False) or self._store.is_blocked(mac),
+                        "rssi": props.get("RSSI"),
+                        "path": path,
+                    }
+                )
+        return devices
+
+    async def connect_device(self, mac: str) -> bool:
+        """Connect to a Bluetooth device."""
+        device_path = self._adapter_controller.get_device_path(mac)
+        if self._event_bus:
+            self._event_bus.emit(EventType.BLUETOOTH_DEVICE_CONNECTING, payload={"mac": mac})
+
+        try:
+            success = await self._adapter_controller.connect_device(device_path)
+            if success:
+                self._last_connection_error = None
+                if self._event_bus:
+                    self._event_bus.emit(EventType.BLUETOOTH_DEVICE_CONNECTED, payload={"mac": mac})
+                return True
+            else:
+                self._last_connection_error = {"mac": mac, "error": "Connection failed", "timestamp": asyncio.get_event_loop().time()}
+                return False
+        except Exception as e:
+            self._last_connection_error = {"mac": mac, "error": str(e), "timestamp": asyncio.get_event_loop().time()}
+            return False
+
+    async def disconnect_device(self, mac: str) -> bool:
+        """Disconnect from a Bluetooth device."""
+        device_path = self._adapter_controller.get_device_path(mac)
+        success = await self._adapter_controller.disconnect_device(device_path)
+
+        if success and self._event_bus:
+            self._event_bus.emit(EventType.BLUETOOTH_DEVICE_DISCONNECTED, payload={"mac": mac})
+        return success
+
+    async def remove_device(self, mac: str) -> bool:
+        """Remove (unpair) and forget a Bluetooth device."""
+        device_path = self._adapter_controller.get_device_path(mac)
+        # Try to remove from BlueZ
+        await self._adapter_controller.remove_device(device_path)
+        # Always forget in our store
+        self.forget_device(mac)
+        return True
+
+    def get_preferred_device(self) -> str | None:
+        """Get the preferred device MAC."""
+        return self._store.get_preferred_device()
+
+    def set_preferred_device(self, mac: str | None) -> None:
+        """Set the preferred device MAC."""
+        self._store.set_preferred_device(mac)
 
     async def _monitor_status(self) -> None:
         """Periodically check adapter status and emit events on change."""
         try:
             while True:
                 status = await self.get_adapter_status()
+
+                # Check for readiness errors to emit READY/FAILED events
+                if status["healthy"] and not self._last_status.get("healthy", False):
+                    if self._event_bus:
+                        self._event_bus.emit(EventType.BLUETOOTH_ADAPTER_READY)
+                elif not status["healthy"] and self._last_status.get("healthy", True):
+                    if self._event_bus:
+                        self._event_bus.emit(EventType.BLUETOOTH_ADAPTER_FAILED, payload={"errors": status["readiness_errors"]})
+
                 if status != self._last_status:
                     if self._event_bus:
                         self._event_bus.emit(
@@ -309,3 +423,5 @@ class LinuxBluetoothAdapter(IngressAdapter):
             pass
         except Exception as e:
             logger.error(f"Error monitoring Bluetooth status: {e}")
+            if self._event_bus:
+                self._event_bus.emit(EventType.BLUETOOTH_BACKEND_ERROR, payload={"error": str(e)})

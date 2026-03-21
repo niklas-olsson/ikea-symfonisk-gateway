@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from bridge_core.api import (
     adapters_router,
+    bluetooth_router,
     config_router,
     events_router,
     health_router,
@@ -141,6 +142,7 @@ app.include_router(targets_router)
 app.include_router(sessions_router)
 app.include_router(events_router)
 app.include_router(adapters_router)
+app.include_router(bluetooth_router)
 app.include_router(config_router)
 
 # Resolve the path to the web UI
