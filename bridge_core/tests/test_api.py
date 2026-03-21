@@ -1,5 +1,6 @@
 """API integration tests."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,13 +9,13 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client():
+def client() -> Any:
     # Mock StreamPublisher to avoid port 8080 conflict during tests
     with patch("bridge_core.main.StreamPublisher") as mock_pub_class:
         mock_pub = MagicMock()
 
         # publisher.start() is awaited in lifespan
-        async def async_noop():
+        async def async_noop() -> None:
             pass
 
         mock_pub.start.return_value = async_noop()
@@ -26,7 +27,7 @@ def client():
             yield c
 
 
-def test_get_health(client):
+def test_get_health(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
@@ -35,7 +36,7 @@ def test_get_health(client):
     assert "uptime" in data
 
 
-def test_list_sources(client):
+def test_list_sources(client: TestClient) -> None:
     response = client.get("/v1/sources")
     assert response.status_code == 200
     data = response.json()
@@ -50,7 +51,7 @@ def test_list_sources(client):
     assert data["sources"][0]["local_source_id"] == "default"
 
 
-def test_get_source(client):
+def test_get_source(client: TestClient) -> None:
     sources_res = client.get("/v1/sources")
     source_id = sources_res.json()["sources"][0]["source_id"]
 
@@ -60,7 +61,7 @@ def test_get_source(client):
     assert data["source_id"] == source_id
 
 
-def test_prepare_source(client):
+def test_prepare_source(client: TestClient) -> None:
     sources_res = client.get("/v1/sources")
     source_id = sources_res.json()["sources"][0]["source_id"]
 
@@ -69,13 +70,13 @@ def test_prepare_source(client):
     assert response.json()["success"] is True
 
 
-def test_get_source_health_404(client):
+def test_get_source_health_404(client: TestClient) -> None:
     response = client.get("/v1/sources/non_existent/health")
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "SOURCE_NOT_FOUND"
 
 
-def test_list_targets(client):
+def test_list_targets(client: TestClient) -> None:
     response = client.get("/v1/targets")
     assert response.status_code == 200
     data = response.json()
@@ -83,13 +84,13 @@ def test_list_targets(client):
     assert isinstance(data["targets"], list)
 
 
-def test_refresh_targets(client):
+def test_refresh_targets(client: TestClient) -> None:
     response = client.post("/v1/targets/refresh")
     assert response.status_code == 200
     assert response.json()["success"] is True
 
 
-def test_session_lifecycle(client):
+def test_session_lifecycle(client: TestClient) -> None:
     # 1. Get a source and target
     sources_res = client.get("/v1/sources")
     source_id = sources_res.json()["sources"][0]["source_id"]
@@ -138,7 +139,7 @@ def test_session_lifecycle(client):
     assert get_res.json()["state"] == "created"
 
 
-def test_get_session_404(client):
+def test_get_session_404(client: TestClient) -> None:
     response = client.get("/v1/sessions/non_existent")
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "SESSION_NOT_FOUND"

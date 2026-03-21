@@ -17,6 +17,9 @@ class MockFrameSink:
         self.pts.append(pts_ns)
         self.durations.append(duration_ns)
 
+    def on_error(self, error: Exception) -> None:
+        pass
+
 
 def test_adapter_instantiation() -> None:
     adapter = SyntheticAdapter()

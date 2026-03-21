@@ -1,6 +1,7 @@
 """Tests for Bluetooth API endpoints."""
 
 import sys
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.modules["sounddevice"] = MagicMock()
@@ -19,7 +20,7 @@ from ingress_sdk.types import (  # noqa: E402
 
 
 @pytest.fixture
-def mock_bluetooth_adapter():
+def mock_bluetooth_adapter() -> MagicMock:
     adapter = MagicMock()
     adapter.id.return_value = "linux-bluetooth-adapter"
     adapter.platform.return_value = "linux"
@@ -51,7 +52,7 @@ def mock_bluetooth_adapter():
 
 
 @pytest.fixture
-def client(mock_bluetooth_adapter):
+def client(mock_bluetooth_adapter: MagicMock) -> Any:
     event_bus = EventBus()
     source_registry = SourceRegistry(event_bus)
 
@@ -91,7 +92,7 @@ def client(mock_bluetooth_adapter):
             yield c
 
 
-def test_get_bluetooth_status(client, mock_bluetooth_adapter):
+def test_get_bluetooth_status(client: TestClient, mock_bluetooth_adapter: MagicMock) -> None:
     response = client.get("/v1/bluetooth/status")
     assert response.status_code == 200
     assert response.json()["healthy"] is True
@@ -99,28 +100,28 @@ def test_get_bluetooth_status(client, mock_bluetooth_adapter):
     # But it should be healthy in the response
 
 
-def test_open_pairing_window(client, mock_bluetooth_adapter):
+def test_open_pairing_window(client: TestClient, mock_bluetooth_adapter: MagicMock) -> None:
     mock_bluetooth_adapter.start_pairing.return_value = MagicMock(success=True, message="Opened")
     response = client.post("/v1/bluetooth/pairing/open", json={"timeout_seconds": 60})
     assert response.status_code == 200
     assert response.json()["success"] is True
 
 
-def test_list_bluetooth_devices(client, mock_bluetooth_adapter):
+def test_list_bluetooth_devices(client: TestClient, mock_bluetooth_adapter: MagicMock) -> None:
     response = client.get("/v1/bluetooth/devices")
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["mac"] == "AA:BB:CC:DD:EE:FF"
 
 
-def test_connect_device(client, mock_bluetooth_adapter):
+def test_connect_device(client: TestClient, mock_bluetooth_adapter: MagicMock) -> None:
     mock_bluetooth_adapter.connect_device = AsyncMock(return_value=True)
     response = client.post("/v1/bluetooth/devices/AA:BB:CC:DD:EE:FF/connect")
     assert response.status_code == 200
     assert response.json()["success"] is True
 
 
-def test_get_bluetooth_source(client, mock_bluetooth_adapter):
+def test_get_bluetooth_source(client: TestClient, mock_bluetooth_adapter: MagicMock) -> None:
     response = client.get("/v1/bluetooth/source")
     assert response.status_code == 200
     assert response.json()["active"] is True

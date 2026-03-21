@@ -11,7 +11,7 @@ from adapter_linux_audio import LinuxAudioAdapter
 from bridge_core.core import EventBus, SourceRegistry
 
 
-async def main():
+async def main() -> None:
     event_bus = EventBus()
     registry = SourceRegistry(event_bus)
 

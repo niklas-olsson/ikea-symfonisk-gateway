@@ -12,14 +12,17 @@ from ingress_sdk.base import FrameSink
 
 
 class MockFrameSink(FrameSink):
-    def __init__(self):
-        self.frames = []
+    def __init__(self) -> None:
+        self.frames: list[tuple[bytes, int, int]] = []
 
     def on_frame(self, data: bytes, pts_ns: int, duration_ns: int) -> None:
         self.frames.append((data, pts_ns, duration_ns))
 
+    def on_error(self, error: Exception) -> None:
+        pass
 
-async def verify_capture():
+
+async def verify_capture() -> None:
     print("Verifying audio capture...")
 
     # Mock subprocess creation
@@ -60,7 +63,7 @@ async def verify_capture():
             print(" - Health state is idle after stop")
 
 
-async def verify_restart_behavior():
+async def verify_restart_behavior() -> None:
     print("Verifying restart behavior...")
 
     mock_process = AsyncMock()

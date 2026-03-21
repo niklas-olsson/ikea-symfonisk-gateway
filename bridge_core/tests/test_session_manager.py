@@ -2248,7 +2248,7 @@ def test_auto_fallback_records_reason_and_sets_authoritative_session_fields(sess
     assert should_fallback is True
     assert reason == "repeated_primary_detach"
     session_manager._apply_delivery_profile_fallback(session, reason)
-    assert session.effective_delivery_profile == "stable"
+    assert session.effective_delivery_profile == "stable"  # type: ignore[comparison-overlap]
     assert session.auto_fell_back_to_stable is True
     assert session.fallback_reason == "repeated_primary_detach"
 
