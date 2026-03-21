@@ -64,6 +64,7 @@ class SourceRegistry:
 
     _TYPE_SLUGS = {
         "system_audio": "system",
+        "system_output": "system",
         "bluetooth_audio": "bluetooth",
         "line_in": "line-in",
         "microphone": "microphone",
@@ -246,10 +247,7 @@ class SourceRegistry:
             return True, None
 
         if source_platform != adapter_platform:
-            msg = (
-                f"{source_platform.capitalize()} source ({source.source_id}) "
-                f"was bound to {adapter_platform.capitalize()} audio adapter."
-            )
+            msg = f"{source_platform.capitalize()} source ({source.source_id}) was bound to {adapter_platform.capitalize()} audio adapter."
             return False, msg
 
         return True, None
@@ -312,14 +310,10 @@ class SourceRegistry:
         for source in sources:
             registered_source = self._canonicalize_source(adapter_id, adapter_platform, source)
             if registered_source.source_id in registered_sources:
-                raise ValueError(
-                    f"Adapter {adapter_id} produced duplicate canonical source ID {registered_source.source_id}"
-                )
+                raise ValueError(f"Adapter {adapter_id} produced duplicate canonical source ID {registered_source.source_id}")
             existing_owner = self._source_to_adapter.get(registered_source.source_id)
             if existing_owner is not None and existing_owner != adapter_id:
-                raise ValueError(
-                    f"Canonical source ID {registered_source.source_id} is already owned by adapter {existing_owner}"
-                )
+                raise ValueError(f"Canonical source ID {registered_source.source_id} is already owned by adapter {existing_owner}")
             registered_sources[registered_source.source_id] = registered_source
         return registered_sources
 
@@ -359,9 +353,7 @@ class SourceRegistry:
 
         source_platform = source.platform
         if source_platform != "any" and adapter_platform != "any" and source_platform != adapter_platform:
-            raise ValueError(
-                f"Adapter {adapter_id} platform {adapter_platform} does not match source platform {source_platform}"
-            )
+            raise ValueError(f"Adapter {adapter_id} platform {adapter_platform} does not match source platform {source_platform}")
 
     def _log_registered_sources(self, adapter_id: str, sources: Any) -> None:
         """Log resolved source ownership for diagnostics."""

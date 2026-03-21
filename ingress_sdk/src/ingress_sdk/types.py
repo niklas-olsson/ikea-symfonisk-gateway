@@ -3,11 +3,12 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SourceType(str, Enum):
     SYSTEM_AUDIO = "system_audio"
+    SYSTEM_OUTPUT = "system_output"
     BLUETOOTH_AUDIO = "bluetooth_audio"
     LINE_IN = "line_in"
     MICROPHONE = "microphone"
@@ -29,7 +30,7 @@ class SourceDescriptor(BaseModel):
     capabilities: SourceCapabilities
     adapter_id: str | None = None
     local_source_id: str | None = None
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AdapterCapabilities(BaseModel):
@@ -73,6 +74,7 @@ class HealthResult(BaseModel):
     signal_present: bool
     dropped_frames: int = 0
     last_error: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class SyntheticMode(str, Enum):

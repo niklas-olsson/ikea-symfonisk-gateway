@@ -201,6 +201,7 @@ The gateway connects **audio sources** to **audio targets** via **sessions**:
 | `synthetic` | All | Test adapter generating sine waves |
 | `linux-audio` | Linux | PulseAudio/ALSA line input |
 | `linux-bluetooth` | Linux | Bluetooth audio input |
+| `windows-audio` | Windows | Default system-output capture via WASAPI loopback |
 
 **Target Adapters** output audio:
 | Adapter | Platform | Description |
@@ -259,6 +260,29 @@ bluetoothctl
 [bluetooth]# connect XX:XX:XX:XX:XX:XX
 [bluetooth]# trust XX:XX:XX:XX:XX:XX
 ```
+
+### Windows Audio Adapter
+
+For capturing the default Windows playback mix and relaying it to Sonos/SYMFONISK:
+
+```bash
+uv sync
+uv run python -m bridge_core
+```
+
+- The Windows source exposed by the API is `windows-audio-adapter:system:default`.
+- Its `source_type` is `system_output`.
+- The Windows backend depends on `PyAudioWPatch` and is installed only on Windows.
+- If the backend is missing or cannot probe the default output device, `/v1/sources` still lists the source in degraded form with backend diagnostics in `metadata`.
+- Silent startup is allowed: the session can reach `playing` before Windows audio begins, and playback starts flowing once an application produces sound.
+
+To isolate loopback capture without starting the full bridge:
+
+```bash
+uv run python scripts/verify_windows_loopback.py
+```
+
+The script prints the selected host API, default render device, chosen loopback capture device, callback counts, non-empty buffer counts, sample counts, emitted frame counts, and backend start-viability checks over a 5-second observation window.
 
 Configure in your `.env`:
 
