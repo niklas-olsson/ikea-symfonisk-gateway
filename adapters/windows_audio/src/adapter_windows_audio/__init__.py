@@ -271,7 +271,7 @@ class WindowsAudioAdapter(IngressAdapter):
             self._last_samples_captured = 0
 
             logger.info(f"Started Windows audio capture on device {source_id} ({source_type})")
-            return StartResult(success=True, session_id=self._session_id)
+            return StartResult(success=True, session_id=self._session_id, backend="wasapi_loopback")
 
         except Exception as e:
             logger.error(f"Unexpected error starting Windows audio capture: {e}")

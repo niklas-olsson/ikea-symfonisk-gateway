@@ -320,6 +320,9 @@ class SessionManager:
                 frame_sink.start()
                 self._frame_sinks[session_id] = frame_sink
 
+                source_desc = self._source_registry.get_source(session.source_id)
+                adapter_info = self._source_registry._get_adapter_info_for_source(session.source_id)
+
                 start_res = self._source_registry.start_source(session.source_id, frame_sink)
                 if not start_res.success:
                     session.last_error = create_session_error(
@@ -327,6 +330,17 @@ class SessionManager:
                     )
                     frame_sink.stop()
                     raise RuntimeError(session.last_error.message)
+
+                # Diagnostic logging
+                adapter_name = adapter_info.adapter.__class__.__name__ if adapter_info and adapter_info.adapter else "Unknown"
+                logger.info(
+                    f"Starting source: source_id={session.source_id} "
+                    f"source_type={source_desc.source_type.value if source_desc else 'unknown'} "
+                    f"platform={source_desc.platform if source_desc else 'unknown'} "
+                    f"adapter={adapter_name} "
+                    f"backend={start_res.backend or 'unknown'}"
+                )
+
                 session.adapter_session_id = start_res.session_id
                 self._event_bus.emit(
                     EventType.SOURCE_STARTED,
@@ -396,6 +410,9 @@ class SessionManager:
                 # Check if it's a Windows loopback source that is just silent
                 health = self._source_registry.probe_source_health(session.source_id)
                 source_desc = self._source_registry.get_source(session.source_id)
+                adapter_info = self._source_registry._get_adapter_info_for_source(session.source_id)
+                adapter_name = adapter_info.adapter.__class__.__name__ if adapter_info and adapter_info.adapter else "Unknown"
+
                 if (
                     health
                     and health.healthy
@@ -404,9 +421,12 @@ class SessionManager:
                     and source_desc.platform == "windows"
                     and source_desc.source_type == "system_audio"
                 ):
-                    logger.warning(f"Session {session_id}: Source is healthy but silent. Proceeding anyway.")
+                    logger.warning(f"Session {session_id}: Source is healthy but silent. Proceeding anyway. (adapter: {adapter_name})")
                     session.last_error = create_session_error(WINDOWS_OUTPUT_DEVICE_SILENT)
                 else:
+                    logger.error(
+                        f"Session {session_id}: Failed to ingest frames from source {session.source_id} using adapter {adapter_name}"
+                    )
                     session.last_error = create_session_error(FRAME_INGEST_FAILED)
                     raise RuntimeError(session.last_error.message)
 

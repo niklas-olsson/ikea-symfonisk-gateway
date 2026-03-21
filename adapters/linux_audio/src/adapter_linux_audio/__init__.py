@@ -203,8 +203,17 @@ class LinuxAudioAdapter(IngressAdapter):
         self._session_id = f"sess_{id(self)}"
         self._frame_sink = frame_sink
         self._running = True
+
+        import shutil
+
+        backend = "unknown"
+        if shutil.which("parec"):
+            backend = "parec"
+        elif shutil.which("arecord"):
+            backend = "arecord"
+
         self._capture_task = asyncio.create_task(self._capture_loop(source_id))
-        return StartResult(success=True, session_id=self._session_id)
+        return StartResult(success=True, session_id=self._session_id, backend=backend)
 
     def stop(self, session_id: str) -> None:
         if self._session_id != session_id:

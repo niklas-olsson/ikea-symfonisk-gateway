@@ -56,6 +56,7 @@ class StartResult(BaseModel):
     session_id: str = ""
     message: str = ""
     code: str | None = None
+    backend: str | None = None
 
 
 class PairingResult(BaseModel):
