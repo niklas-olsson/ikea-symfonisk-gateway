@@ -1,7 +1,7 @@
 """Tests for the EventBus component."""
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
@@ -76,3 +76,50 @@ async def test_event_bus_unsubscribe_handler() -> None:
     await bus.publish(BridgeEvent(EventType.SESSION_CREATED))
     await asyncio.sleep(0.1)
     handler.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_event_bus_emit_with_running_loop_schedules_publish() -> None:
+    bus = EventBus()
+    with patch.object(bus, "publish", new_callable=AsyncMock) as publish:
+        event = bus.emit(EventType.SESSION_CREATED)
+        await asyncio.sleep(0)
+
+    publish.assert_awaited_once()
+    assert event.type == EventType.SESSION_CREATED.value
+
+
+def test_event_bus_emit_without_running_loop_skips_async_handlers(caplog: pytest.LogCaptureFixture) -> None:
+    bus = EventBus()
+    handler = AsyncMock()
+    bus.subscribe_handler(handler, EventType.SESSION_CREATED)
+
+    caplog.set_level("DEBUG")
+    event = bus.emit(EventType.SESSION_CREATED)
+
+    assert event.type == EventType.SESSION_CREATED.value
+    handler.assert_not_called()
+    assert "no running loop exists" in caplog.text
+
+
+def test_event_bus_emit_without_running_loop_runs_sync_handlers() -> None:
+    bus = EventBus()
+    seen: list[BridgeEvent] = []
+
+    def sync_handler(event: BridgeEvent) -> None:
+        seen.append(event)
+
+    bus.subscribe_handler(sync_handler, EventType.SESSION_CREATED)  # type: ignore[arg-type]
+
+    event = bus.emit(EventType.SESSION_CREATED)
+
+    assert seen == [event]
+
+
+def test_event_bus_emit_without_running_loop_does_not_deliver_queue() -> None:
+    bus = EventBus()
+    queue = bus.subscribe(EventType.SESSION_CREATED)
+
+    bus.emit(EventType.SESSION_CREATED)
+
+    assert queue.empty()

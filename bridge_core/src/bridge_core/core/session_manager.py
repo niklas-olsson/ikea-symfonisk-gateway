@@ -867,6 +867,7 @@ class SessionManager:
                     },
                 )
                 raise
+
             logger.info("Session %s: renderer prepare/play completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
 
             session.transition_to(SessionState.PLAYING)

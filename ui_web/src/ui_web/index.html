@@ -19,6 +19,9 @@
             --accent-hover: oklch(70% 0.18 240);
             --error: oklch(60% 0.15 20);
             --success: oklch(65% 0.15 150);
+            --warning: oklch(70% 0.15 80);
+            --bt-accent: oklch(60% 0.16 260);
+            --bt-accent-hover: oklch(65% 0.16 260);
 
             /* 4pt Grid System */
             --radius: 12px;
@@ -269,6 +272,270 @@
         .event-time { color: var(--text-muted); opacity: 0.5; font-variant-numeric: tabular-nums; flex-shrink: 0; }
         .event-type { font-weight: 600; color: var(--accent); min-width: 140px; flex-shrink: 0; }
         .event-message { color: var(--text); word-break: break-all; }
+
+        /* ── Bluetooth Panel ─────────────────────────────── */
+
+        .bt-card {
+            border: 1px solid oklch(from var(--bt-accent) l c h / 15%);
+        }
+
+        .bt-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .bt-title {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-12);
+        }
+
+        .bt-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: oklch(from var(--bt-accent) l c h / 15%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+        }
+
+        .bt-title h2 {
+            font-size: 0.85rem;
+            color: var(--text);
+            text-transform: none;
+            letter-spacing: 0;
+        }
+
+        .bt-status-indicators {
+            display: flex;
+            gap: var(--spacing-8);
+        }
+
+        .bt-indicator {
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .bt-indicator.on {
+            background: oklch(from var(--success) l c h / 15%);
+            color: var(--success);
+            border: 1px solid oklch(from var(--success) l c h / 25%);
+        }
+
+        .bt-indicator.off {
+            background: oklch(40% 0 0 / 15%);
+            color: var(--text-muted);
+            border: 1px solid oklch(40% 0 0 / 25%);
+        }
+
+        .bt-indicator.warning {
+            background: oklch(from var(--warning) l c h / 15%);
+            color: var(--warning);
+            border: 1px solid oklch(from var(--warning) l c h / 25%);
+        }
+
+        .bt-indicator.error {
+            background: oklch(from var(--error) l c h / 15%);
+            color: var(--error);
+            border: 1px solid oklch(from var(--error) l c h / 25%);
+        }
+
+        .bt-pairing-section {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-16);
+        }
+
+        .bt-pairing-controls {
+            display: flex;
+            gap: var(--spacing-12);
+            align-items: center;
+        }
+
+        .bt-pairing-controls button {
+            flex: none;
+            padding: var(--spacing-8) var(--spacing-16);
+            font-size: 0.85rem;
+        }
+
+        button.bt-primary {
+            background-color: var(--bt-accent);
+            color: white;
+        }
+
+        button.bt-primary:hover {
+            background-color: var(--bt-accent-hover);
+        }
+
+        button.bt-danger {
+            background-color: transparent;
+            color: var(--error);
+            border: 1px solid oklch(from var(--error) l c h / 30%);
+        }
+
+        button.bt-danger:hover {
+            background: oklch(from var(--error) l c h / 10%);
+        }
+
+        .bt-countdown {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-8);
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .bt-countdown-bar {
+            flex: 1;
+            height: 4px;
+            background: oklch(40% 0 0 / 20%);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .bt-countdown-fill {
+            height: 100%;
+            background: var(--bt-accent);
+            border-radius: 2px;
+            transition: width 1s linear;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 0 0 oklch(from var(--bt-accent) l c h / 30%); }
+            50% { box-shadow: 0 0 0 8px oklch(from var(--bt-accent) l c h / 0%); }
+        }
+
+        .bt-pairing-active {
+            animation: pulse-glow 2s ease-in-out infinite;
+            border-color: oklch(from var(--bt-accent) l c h / 40%) !important;
+        }
+
+        .bt-devices-section {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-12);
+        }
+
+        .bt-devices-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .bt-device-list {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-8);
+        }
+
+        .bt-device-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--spacing-12) var(--spacing-16);
+            background: var(--bg);
+            border-radius: var(--radius);
+            border: 1px solid oklch(100% 0 0 / 5%);
+            transition: border-color 0.2s;
+        }
+
+        .bt-device-item:hover {
+            border-color: oklch(100% 0 0 / 12%);
+        }
+
+        .bt-device-item.connected {
+            border-color: oklch(from var(--success) l c h / 30%);
+        }
+
+        .bt-device-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .bt-device-name {
+            font-weight: 600;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .bt-device-mac {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-family: 'ui-monospace', 'Cascadia Code', 'Source Code Pro', monospace;
+        }
+
+        .bt-device-badges {
+            display: flex;
+            gap: var(--spacing-4);
+            margin-top: 2px;
+        }
+
+        .bt-badge {
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 0.6rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .bt-badge.paired { background: oklch(from var(--bt-accent) l c h / 15%); color: var(--bt-accent); }
+        .bt-badge.connected { background: oklch(from var(--success) l c h / 15%); color: var(--success); }
+        .bt-badge.trusted { background: oklch(from var(--warning) l c h / 15%); color: var(--warning); }
+        .bt-badge.preferred { background: oklch(from var(--accent) l c h / 15%); color: var(--accent); }
+
+        .bt-device-actions {
+            display: flex;
+            gap: var(--spacing-4);
+            flex-shrink: 0;
+        }
+
+        .bt-device-actions button {
+            flex: none;
+            padding: 4px 10px;
+            font-size: 0.65rem;
+            border-radius: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .bt-empty {
+            padding: var(--spacing-24);
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .bt-errors {
+            padding: var(--spacing-12) var(--spacing-16);
+            background: oklch(from var(--error) l c h / 8%);
+            border: 1px solid oklch(from var(--error) l c h / 20%);
+            border-radius: var(--radius);
+            font-size: 0.8rem;
+            color: var(--error);
+        }
+
+        .bt-errors ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-4);
+        }
+
+        .bt-errors li::before {
+            content: "⚠ ";
+        }
     </style>
 </head>
 <body>
@@ -278,6 +545,50 @@
             <p class="subtitle">IKEA SYMFONISK Gateway v0.1.0</p>
         </header>
 
+        <!-- ── Bluetooth Panel ─────────────────────────────── -->
+        <section id="bt-panel" class="card bt-card">
+            <div class="bt-header">
+                <div class="bt-title">
+                    <div class="bt-icon">᛭</div>
+                    <h2>Bluetooth</h2>
+                </div>
+                <div class="bt-status-indicators" id="bt-indicators">
+                    <span class="bt-indicator off" id="bt-power-ind">Off</span>
+                </div>
+            </div>
+
+            <!-- Readiness Errors -->
+            <div id="bt-errors" class="bt-errors" style="display: none;">
+                <ul id="bt-error-list"></ul>
+            </div>
+
+            <!-- Pairing Controls -->
+            <div class="bt-pairing-section">
+                <div class="bt-pairing-controls">
+                    <button id="bt-pair-btn" class="bt-primary" onclick="btOpenPairing()">Enter Pairing Mode</button>
+                    <button id="bt-pair-stop-btn" class="bt-danger" onclick="btClosePairing()" style="display: none;">Stop Pairing</button>
+                    <div id="bt-countdown" class="bt-countdown" style="display: none;">
+                        <div class="bt-countdown-bar">
+                            <div id="bt-countdown-fill" class="bt-countdown-fill" style="width: 100%;"></div>
+                        </div>
+                        <span id="bt-countdown-text">90s</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Device List -->
+            <div class="bt-devices-section">
+                <div class="bt-devices-header">
+                    <label>Devices</label>
+                    <button class="small-text" onclick="btRefreshDevices()">Refresh</button>
+                </div>
+                <div id="bt-device-list" class="bt-device-list">
+                    <div class="bt-empty">No devices discovered</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Session Controls ────────────────────────────── -->
         <section class="card">
             <div class="controls">
                 <div class="field">
@@ -301,44 +612,51 @@
             </div>
 
             <div class="actions">
-                <button id="play-btn">Start Session</button>
-                <button id="stop-btn" class="secondary" disabled>Stop</button>
+                <button id="play-btn">▶ Play</button>
+                <button id="stop-btn" class="secondary" disabled>■ Stop</button>
             </div>
 
             <div class="status-bar">
-                <span>Session Status</span>
+                <span>Session</span>
                 <span id="session-state" class="status-tag status-idle">Idle</span>
             </div>
         </section>
 
+        <!-- ── Event Log ───────────────────────────────────── -->
         <section class="log-section">
             <div class="log-header">
-                <h2>Activity Log</h2>
+                <h2>Events</h2>
             </div>
-            <div id="events-log" class="events-log">
-                <!-- Events will appear here -->
-            </div>
+            <div id="events-log" class="events-log"></div>
         </section>
     </main>
 
     <script>
+        // ── Session UI refs ────────────────────────────────
         const sourceSelect = document.getElementById('source-select');
         const targetSelect = document.getElementById('target-select');
         const playBtn = document.getElementById('play-btn');
         const stopBtn = document.getElementById('stop-btn');
-        const refreshSourcesBtn = document.getElementById('refresh-sources');
-        const refreshTargetsBtn = document.getElementById('refresh-targets');
         const sessionState = document.getElementById('session-state');
         const eventsLog = document.getElementById('events-log');
-
+        const refreshSourcesBtn = document.getElementById('refresh-sources');
+        const refreshTargetsBtn = document.getElementById('refresh-targets');
         let currentSessionId = null;
+
+        // ── Bluetooth state ────────────────────────────────
+        let btPairingTimer = null;
+        let btPairingTotalSeconds = 90;
+        let btPairingRemainingSeconds = 0;
+        let btPreferredMac = null;
+
+        // ── Session functions ──────────────────────────────
 
         async function fetchSources() {
             try {
-                const response = await fetch('/v1/sources');
-                const data = await response.json();
-                sourceSelect.innerHTML = data.sources.map(s =>
-                    `<option value="${s.source_id}">${s.display_name} (${s.platform})</option>`
+                const res = await fetch('/v1/sources');
+                const { sources } = await res.json();
+                sourceSelect.innerHTML = sources.map(s =>
+                    `<option value="${s.source_id}">${s.display_name} (${s.source_type})</option>`
                 ).join('') || '<option value="">No sources available</option>';
             } catch (err) {
                 console.error('Failed to fetch sources', err);
@@ -348,9 +666,9 @@
 
         async function fetchTargets() {
             try {
-                const response = await fetch('/v1/targets');
-                const data = await response.json();
-                targetSelect.innerHTML = data.targets.map(t =>
+                const res = await fetch('/v1/targets');
+                const { targets } = await res.json();
+                targetSelect.innerHTML = targets.map(t =>
                     `<option value="${t.target_id}">${t.display_name} (${t.renderer})</option>`
                 ).join('') || '<option value="">No targets available</option>';
             } catch (err) {
@@ -417,7 +735,6 @@
 
         async function stopCurrentSession() {
             if (!currentSessionId) {
-                // Try to find any active session to stop if we don't have the ID
                 addLog('SYSTEM', 'Looking for sessions to stop...');
                 try {
                     const res = await fetch('/v1/sessions');
@@ -479,6 +796,285 @@
             }
         }
 
+        // ── Bluetooth functions ────────────────────────────
+
+        async function btFetchStatus() {
+            try {
+                const res = await fetch('/v1/bluetooth/status');
+                if (!res.ok) {
+                    btShowError('Bluetooth adapter unavailable');
+                    return;
+                }
+                const status = await res.json();
+                btUpdateStatusUI(status);
+            } catch (err) {
+                btShowError('Cannot reach Bluetooth API');
+            }
+        }
+
+        function btUpdateStatusUI(status) {
+            const indicators = document.getElementById('bt-indicators');
+            const errorsDiv = document.getElementById('bt-errors');
+            const errorList = document.getElementById('bt-error-list');
+            const panel = document.getElementById('bt-panel');
+            const pairBtn = document.getElementById('bt-pair-btn');
+
+            // Indicators
+            const props = status.properties || {};
+            const powered = props.Powered || false;
+            const discoverable = props.Discoverable || false;
+            const pairable = props.Pairable || false;
+            const pairingOpen = status.pairing_window?.is_open || false;
+
+            let indicatorsHTML = '';
+            indicatorsHTML += `<span class="bt-indicator ${powered ? 'on' : 'off'}">${powered ? 'Powered' : 'Off'}</span>`;
+            if (discoverable) indicatorsHTML += `<span class="bt-indicator on">Discoverable</span>`;
+            if (pairingOpen) indicatorsHTML += `<span class="bt-indicator warning">Pairing</span>`;
+            indicators.innerHTML = indicatorsHTML;
+
+            // Errors
+            const errors = status.readiness_errors || [];
+            if (errors.length > 0 && !status.healthy) {
+                errorsDiv.style.display = 'block';
+                errorList.innerHTML = errors.map(e =>
+                    `<li>${e.replace(/_/g, ' ')}</li>`
+                ).join('');
+            } else {
+                errorsDiv.style.display = 'none';
+            }
+
+            // Pairing UI state
+            if (pairingOpen) {
+                panel.classList.add('bt-pairing-active');
+                pairBtn.style.display = 'none';
+                document.getElementById('bt-pair-stop-btn').style.display = '';
+                document.getElementById('bt-countdown').style.display = 'flex';
+            } else {
+                panel.classList.remove('bt-pairing-active');
+                pairBtn.style.display = '';
+                pairBtn.disabled = !powered;
+                document.getElementById('bt-pair-stop-btn').style.display = 'none';
+                if (!btPairingTimer) {
+                    document.getElementById('bt-countdown').style.display = 'none';
+                }
+            }
+
+            // Preferred device
+            btPreferredMac = status.preferred_device || null;
+        }
+
+        function btShowError(msg) {
+            const errorsDiv = document.getElementById('bt-errors');
+            const errorList = document.getElementById('bt-error-list');
+            errorsDiv.style.display = 'block';
+            errorList.innerHTML = `<li>${msg}</li>`;
+        }
+
+        async function btOpenPairing() {
+            const pairBtn = document.getElementById('bt-pair-btn');
+            pairBtn.disabled = true;
+
+            btPairingTotalSeconds = 90;
+            btPairingRemainingSeconds = btPairingTotalSeconds;
+
+            try {
+                const res = await fetch('/v1/bluetooth/pairing/open', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ timeout_seconds: btPairingTotalSeconds })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    addLog('BT-ERROR', err.detail?.message || 'Failed to open pairing window');
+                    pairBtn.disabled = false;
+                    return;
+                }
+
+                addLog('BLUETOOTH', 'Pairing mode activated (90s)');
+                btStartCountdown();
+                await btFetchStatus();
+            } catch (err) {
+                addLog('BT-ERROR', 'Failed to open pairing: ' + err.message);
+                pairBtn.disabled = false;
+            }
+        }
+
+        async function btClosePairing() {
+            try {
+                await fetch('/v1/bluetooth/pairing/close', { method: 'POST' });
+                addLog('BLUETOOTH', 'Pairing mode stopped');
+                btStopCountdown();
+                await btFetchStatus();
+            } catch (err) {
+                addLog('BT-ERROR', 'Failed to close pairing: ' + err.message);
+            }
+        }
+
+        function btStartCountdown() {
+            btStopCountdown();
+            const fill = document.getElementById('bt-countdown-fill');
+            const text = document.getElementById('bt-countdown-text');
+            const countdown = document.getElementById('bt-countdown');
+            countdown.style.display = 'flex';
+
+            btPairingTimer = setInterval(() => {
+                btPairingRemainingSeconds--;
+                const pct = (btPairingRemainingSeconds / btPairingTotalSeconds) * 100;
+                fill.style.width = pct + '%';
+                text.textContent = btPairingRemainingSeconds + 's';
+
+                if (btPairingRemainingSeconds <= 0) {
+                    btStopCountdown();
+                    btFetchStatus();
+                    btRefreshDevices();
+                }
+            }, 1000);
+        }
+
+        function btStopCountdown() {
+            if (btPairingTimer) {
+                clearInterval(btPairingTimer);
+                btPairingTimer = null;
+            }
+        }
+
+        async function btRefreshDevices() {
+            try {
+                const [devRes, prefRes] = await Promise.all([
+                    fetch('/v1/bluetooth/devices'),
+                    fetch('/v1/bluetooth/devices/preferred')
+                ]);
+                const devices = await devRes.json();
+                const pref = await prefRes.json();
+                btPreferredMac = pref.mac || null;
+                btRenderDevices(devices);
+            } catch (err) {
+                console.error('Failed to fetch BT devices', err);
+            }
+        }
+
+        function btRenderDevices(devices) {
+            const list = document.getElementById('bt-device-list');
+
+            if (!devices || devices.length === 0) {
+                list.innerHTML = '<div class="bt-empty">No devices discovered</div>';
+                return;
+            }
+
+            // Sort: connected first, then paired, then by name
+            devices.sort((a, b) => {
+                if (a.connected !== b.connected) return b.connected ? 1 : -1;
+                if (a.paired !== b.paired) return b.paired ? 1 : -1;
+                return (a.name || '').localeCompare(b.name || '');
+            });
+
+            list.innerHTML = devices.map(d => {
+                const isPreferred = btPreferredMac && d.mac.toUpperCase() === btPreferredMac.toUpperCase();
+                let badges = '';
+                if (d.connected) badges += '<span class="bt-badge connected">Connected</span>';
+                if (d.paired) badges += '<span class="bt-badge paired">Paired</span>';
+                if (d.trusted) badges += '<span class="bt-badge trusted">Trusted</span>';
+                if (isPreferred) badges += '<span class="bt-badge preferred">★ Preferred</span>';
+
+                let actions = '';
+                if (d.connected) {
+                    actions += `<button class="bt-danger" onclick="btDisconnect('${d.mac}')">Disconnect</button>`;
+                } else if (d.paired) {
+                    actions += `<button class="bt-primary" onclick="btConnect('${d.mac}')">Connect</button>`;
+                }
+                if (!d.trusted) {
+                    actions += `<button class="secondary" onclick="btTrust('${d.mac}', '${(d.name || '').replace(/'/g, "\\'")}')">Trust</button>`;
+                }
+                if (!isPreferred && d.paired) {
+                    actions += `<button class="secondary" onclick="btSetPreferred('${d.mac}')">★</button>`;
+                }
+                if (d.paired) {
+                    actions += `<button class="bt-danger" onclick="btRemove('${d.mac}')">✕</button>`;
+                }
+
+                return `
+                    <div class="bt-device-item ${d.connected ? 'connected' : ''}">
+                        <div class="bt-device-info">
+                            <span class="bt-device-name">${d.name || d.alias || 'Unknown'}</span>
+                            <span class="bt-device-mac">${d.mac}</span>
+                            <div class="bt-device-badges">${badges}</div>
+                        </div>
+                        <div class="bt-device-actions">${actions}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function btConnect(mac) {
+            addLog('BLUETOOTH', `Connecting to ${mac}...`);
+            try {
+                const res = await fetch(`/v1/bluetooth/devices/${mac}/connect`, { method: 'POST' });
+                if (!res.ok) {
+                    const err = await res.json();
+                    addLog('BT-ERROR', err.detail?.message || 'Connect failed');
+                } else {
+                    addLog('BLUETOOTH', `Connected to ${mac}`);
+                    await btRefreshDevices();
+                    await fetchSources(); // BT device may appear as new source
+                }
+            } catch (err) {
+                addLog('BT-ERROR', 'Connect failed: ' + err.message);
+            }
+        }
+
+        async function btDisconnect(mac) {
+            addLog('BLUETOOTH', `Disconnecting ${mac}...`);
+            try {
+                await fetch(`/v1/bluetooth/devices/${mac}/disconnect`, { method: 'POST' });
+                addLog('BLUETOOTH', `Disconnected ${mac}`);
+                await btRefreshDevices();
+            } catch (err) {
+                addLog('BT-ERROR', 'Disconnect failed: ' + err.message);
+            }
+        }
+
+        async function btTrust(mac, name) {
+            try {
+                await fetch(`/v1/bluetooth/devices/${mac}/trust`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ alias: name || null })
+                });
+                addLog('BLUETOOTH', `Trusted ${mac}`);
+                await btRefreshDevices();
+            } catch (err) {
+                addLog('BT-ERROR', 'Trust failed: ' + err.message);
+            }
+        }
+
+        async function btRemove(mac) {
+            if (!confirm(`Remove and unpair device ${mac}?`)) return;
+            try {
+                await fetch(`/v1/bluetooth/devices/${mac}`, { method: 'DELETE' });
+                addLog('BLUETOOTH', `Removed ${mac}`);
+                await btRefreshDevices();
+            } catch (err) {
+                addLog('BT-ERROR', 'Remove failed: ' + err.message);
+            }
+        }
+
+        async function btSetPreferred(mac) {
+            try {
+                await fetch('/v1/bluetooth/devices/preferred', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mac })
+                });
+                addLog('BLUETOOTH', `Set preferred device: ${mac}`);
+                await btRefreshDevices();
+            } catch (err) {
+                addLog('BT-ERROR', 'Set preferred failed: ' + err.message);
+            }
+        }
+
+        // ── SSE Event Stream ───────────────────────────────
+
         function setupSSE() {
             const evtSource = new EventSource("/events");
 
@@ -486,19 +1082,18 @@
                 // Generic message if any
             });
 
-            // Listen for specific event types from the bridge
-            const eventTypes = [
+            // Session + topology events
+            const sessionEventTypes = [
                 'session.created', 'session.starting', 'session.started',
                 'session.stopped', 'session.failed', 'topology.changed',
                 'publisher.active', 'source.started'
             ];
 
-            eventTypes.forEach(type => {
+            sessionEventTypes.forEach(type => {
                 evtSource.addEventListener(type, (event) => {
                     const data = JSON.parse(event.data);
                     addLog(type.toUpperCase(), data);
 
-                    // Update UI based on events
                     if (data.session_id === currentSessionId || !currentSessionId) {
                         if (type === 'session.started') {
                             updateSessionUI('ACTIVE', 'Playing');
@@ -526,16 +1121,66 @@
                 });
             });
 
+            // Bluetooth events
+            const btEventTypes = [
+                'bluetooth.adapter.ready', 'bluetooth.adapter.failed',
+                'bluetooth.pairing_window.opened', 'bluetooth.pairing_window.closed',
+                'bluetooth.device.discovered', 'bluetooth.device.paired',
+                'bluetooth.device.pairing_rejected', 'bluetooth.device.trusted',
+                'bluetooth.device.untrusted', 'bluetooth.device.connected',
+                'bluetooth.device.disconnected', 'bluetooth.adapter.status.changed',
+                'bluetooth.source.available', 'bluetooth.source.unavailable',
+                'bluetooth.backend.error'
+            ];
+
+            btEventTypes.forEach(type => {
+                evtSource.addEventListener(type, (event) => {
+                    const data = JSON.parse(event.data);
+                    addLog(type.toUpperCase().replace('BLUETOOTH.', 'BT.'), data);
+
+                    // Refresh BT UI on relevant events
+                    if (type === 'bluetooth.adapter.status.changed' ||
+                        type === 'bluetooth.adapter.ready' ||
+                        type === 'bluetooth.adapter.failed') {
+                        btFetchStatus();
+                    }
+
+                    if (type === 'bluetooth.device.paired' ||
+                        type === 'bluetooth.device.connected' ||
+                        type === 'bluetooth.device.disconnected' ||
+                        type === 'bluetooth.device.trusted' ||
+                        type === 'bluetooth.device.untrusted' ||
+                        type === 'bluetooth.device.discovered') {
+                        btRefreshDevices();
+                    }
+
+                    if (type === 'bluetooth.pairing_window.opened') {
+                        btFetchStatus();
+                    }
+
+                    if (type === 'bluetooth.pairing_window.closed') {
+                        btStopCountdown();
+                        btFetchStatus();
+                        btRefreshDevices();
+                    }
+
+                    if (type === 'bluetooth.source.available') {
+                        fetchSources();
+                    }
+                });
+            });
+
             evtSource.onerror = (err) => {
                 console.error("SSE connection failed", err);
-                // evtSource.close();
-                // setTimeout(setupSSE, 5000);
             };
         }
 
-        // Initialize
+        // ── Initialize ─────────────────────────────────────
+
         fetchSources();
         fetchTargets();
+        btFetchStatus();
+        btRefreshDevices();
         setupSSE();
 
         playBtn.onclick = createAndStartSession;
@@ -558,6 +1203,9 @@
             } catch (e) {}
         }
         checkActiveSessions();
+
+        // Poll BT status every 10s for adapter state changes
+        setInterval(btFetchStatus, 10000);
     </script>
 </body>
 </html>

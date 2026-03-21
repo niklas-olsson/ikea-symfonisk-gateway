@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import asyncio
+import inspect
 import logging
 import platform
 from collections.abc import AsyncGenerator
@@ -27,6 +28,7 @@ from bridge_core.api import (
     targets_router,
 )
 from bridge_core.core import (
+    AutoPlayController,
     ConfigStore,
     EventBus,
     SessionManager,
@@ -37,6 +39,30 @@ from bridge_core.stream.publisher import StreamPublisher
 from renderer_sonos import SonosRendererAdapter
 
 logger = logging.getLogger(__name__)
+
+
+def _schedule_adapter_startup(startup_result: object, adapter_name: str) -> asyncio.Future[object] | asyncio.Task[object] | None:
+    if startup_result is None:
+        return None
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.debug("Skipping %s startup scheduling because no running loop exists", adapter_name)
+        return None
+
+    if asyncio.isfuture(startup_result):
+        return startup_result
+
+    if inspect.iscoroutine(startup_result):
+        return loop.create_task(startup_result, name=f"{adapter_name}.startup")
+
+    logger.warning(
+        "Skipping %s startup scheduling because on_startup() returned non-coroutine %r",
+        adapter_name,
+        type(startup_result).__name__,
+    )
+    return None
 
 
 def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventBus, host_platform: str | None = None) -> None:
@@ -73,6 +99,7 @@ def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventB
             sources=linux_bluetooth_adapter.list_sources(),
             adapter_instance=linux_bluetooth_adapter,
         )
+        _schedule_adapter_startup(linux_bluetooth_adapter.on_startup(), "linux_bluetooth_adapter")
         return
 
     if normalized_platform == "windows":
@@ -106,6 +133,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         publisher,
         config_store=config_store,
     )
+    auto_play_controller = AutoPlayController(event_bus, session_manager, target_registry)
 
     # Store in app state
     app.state.config_store = config_store
@@ -114,6 +142,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.target_registry = target_registry
     app.state.stream_publisher = publisher
     app.state.session_manager = session_manager
+    app.state.auto_play_controller = auto_play_controller
 
     # Register adapters
     sonos_adapter = SonosRendererAdapter(event_bus)

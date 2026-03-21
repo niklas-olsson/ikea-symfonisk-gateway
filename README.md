@@ -1,6 +1,12 @@
 # IKEA Symfonisk Gateway
 
-Use your IKEA Symfonisk speakers as audio input targets for any source—turntables, game consoles, or anything with line-level or Bluetooth output.
+Stream supported audio sources to IKEA SYMFONISK and Sonos speakers through a Linux or Windows bridge device.
+
+Linux can capture local system audio and accept Bluetooth audio from supported devices such as phones and Bluetooth turntables. Windows currently captures system and app output from the host PC. The bridge relays that audio to speakers on the same local network.
+
+- Linux: system audio capture, Bluetooth audio ingest and pairing workflow, trusted-device reconnect path
+- Windows: system output capture only
+- Targets: Sonos and IKEA SYMFONISK speakers on the same LAN
 
 ## Quick Start
 
@@ -142,6 +148,26 @@ The Docker image exposes:
 - `8732` — REST API
 - `8080` — Audio stream
 
+#### Persistent Storage
+To persist Bluetooth pairings and 'Trusted/Preferred' settings, you must mount a local directory to `/app/config`:
+```yaml
+volumes:
+  - ./config:/app/config
+```
+
+#### Bluetooth Requirements
+Running the Bluetooth adapter inside Docker requires access to the host's BlueZ stack and specific capabilities:
+```yaml
+cap_add:
+  - NET_ADMIN
+  - SYS_ADMIN
+devices:
+  - /dev/bus/usb:/dev/bus/usb
+volumes:
+  - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+  - /var/lib/bluetooth:/var/lib/bluetooth
+```
+
 ### Option C: Docker (Manual)
 
 ```bash
@@ -242,7 +268,7 @@ ADAPTER_LINUX_AUDIO_SOURCE=<pulse-source-name>
 
 ### Linux Bluetooth Adapter
 
-For streaming audio via Bluetooth (e.g., from a phone or computer):
+For streaming audio via Bluetooth (e.g., from a phone or turntable):
 
 ```bash
 # Install dependencies
@@ -260,6 +286,12 @@ bluetoothctl
 [bluetooth]# connect XX:XX:XX:XX:XX:XX
 [bluetooth]# trust XX:XX:XX:XX:XX:XX
 ```
+
+#### Auto-Play & Persistence
+The gateway can automatically start playing audio when a trusted device connects.
+1.  **Trust the device**: In the Web UI, go to the Bluetooth settings and mark the device as **Trusted**.
+2.  **Pre-select the target**: Mark the device as **Preferred** if you want it to automatically start a session to your primary speaker on connection.
+3.  **Persistence**: These settings are saved to `/app/config/bluetooth_trusted_devices.json`. Ensure this path is persistent (see [Docker](#docker) section).
 
 ### Windows Audio Adapter
 
@@ -283,12 +315,6 @@ uv run python scripts/verify_windows_loopback.py
 ```
 
 The script prints the selected host API, default render device, chosen loopback capture device, callback counts, non-empty buffer counts, sample counts, emitted frame counts, and backend start-viability checks over a 5-second observation window.
-
-Configure in your `.env`:
-
-```bash
-ADAPTER_LINUX_BLUETOOTH_DEVICE=<bluetooth-device-mac>
-```
 
 ---
 

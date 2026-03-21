@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 
 def get_default_storage_path() -> Path:
     """Return default storage path for trusted devices."""
-    # Try to use a persistent data directory if available
-    data_dir = Path("/data")
+    # Use the persistent config directory mounted as a volume
+    data_dir = Path("/app/config")
     if not data_dir.is_dir():
+        # Fallback for development if /app/config isn't mapped
         data_dir = Path.home() / ".config" / "ikea-symfonisk-bridge"
 
     data_dir.mkdir(parents=True, exist_ok=True)

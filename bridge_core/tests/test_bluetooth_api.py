@@ -23,6 +23,7 @@ def mock_bluetooth_adapter():
     adapter = MagicMock()
     adapter.id.return_value = "linux-bluetooth-adapter"
     adapter.platform.return_value = "linux"
+    adapter.on_startup = MagicMock(return_value=None)
     adapter.get_adapter_status = AsyncMock(
         return_value={
             "healthy": True,
@@ -62,28 +63,25 @@ def client(mock_bluetooth_adapter):
         supports_channels=[2],
     )
 
-    async def dummy_coro():
-        pass
-
-    with patch("asyncio.create_task", return_value=MagicMock()):
-        source_registry.register_adapter(
-            adapter_id="linux-bluetooth-adapter",
-            platform="linux",
-            version="0.1.0",
-            capabilities=caps,
-            sources=[],
-            adapter_instance=mock_bluetooth_adapter,
-        )
+    source_registry.register_adapter(
+        adapter_id="linux-bluetooth-adapter",
+        platform="linux",
+        version="0.1.0",
+        capabilities=caps,
+        sources=[],
+        adapter_instance=mock_bluetooth_adapter,
+    )
 
     # Mock StreamPublisher.start and stop to return a real coroutine
     with (
         patch("bridge_core.main.StreamPublisher") as mock_pub_class,
         patch("bridge_core.main.LinuxBluetoothAdapter", return_value=mock_bluetooth_adapter),
         patch("bridge_core.main.ConfigStore"),
+        patch("bridge_core.main._schedule_adapter_startup", return_value=None),
     ):
         mock_pub = mock_pub_class.return_value
-        mock_pub.start.return_value = dummy_coro()
-        mock_pub.stop.return_value = dummy_coro()
+        mock_pub.start = AsyncMock(return_value=None)
+        mock_pub.stop = AsyncMock(return_value=None)
 
         # Override the app state with our controlled versions
         app.state.source_registry = source_registry

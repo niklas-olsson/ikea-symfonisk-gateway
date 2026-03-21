@@ -1,11 +1,15 @@
 """Event bus for bridge events."""
 
 import asyncio
+import inspect
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 
 class EventType(str, Enum):
@@ -138,18 +142,45 @@ class EventBus:
             if handler in self._handlers[event_type]:
                 self._handlers[event_type].remove(handler)
 
-    async def publish(self, event: BridgeEvent) -> None:
-        """Publish an event to all subscribers."""
-        # Deliver to queues
+    def _matching_handlers(self, event: BridgeEvent) -> list[EventHandler]:
+        matching: list[EventHandler] = []
+        concrete_type = EventType(event.type) if event.type in {member.value for member in EventType} else None
+        for event_type in (None, concrete_type):
+            if event_type in self._handlers:
+                matching.extend(self._handlers[event_type])
+        return matching
+
+    async def _deliver_to_queues_async(self, event: BridgeEvent) -> None:
         for queue, event_type in self._queues.items():
             if event_type is None or event_type.value == event.type:
                 await queue.put(event)
 
-        # Deliver to handlers
-        for et in [None, EventType(event.type) if event.type in [e.value for e in EventType] else None]:
-            if et in self._handlers:
-                for handler in self._handlers[et]:
-                    asyncio.create_task(handler(event))  # type: ignore[arg-type]
+    def _dispatch_handler_tasks(self, event: BridgeEvent, loop: asyncio.AbstractEventLoop) -> None:
+        for handler in self._matching_handlers(event):
+            result = handler(event)
+            if asyncio.isfuture(result):
+                continue
+            if inspect.iscoroutine(result):
+                loop.create_task(result)
+
+    def _emit_without_loop(self, event: BridgeEvent) -> None:
+        for handler in self._matching_handlers(event):
+            if asyncio.iscoroutinefunction(handler):
+                logger.debug("Skipping async handler for event %s because no running loop exists", event.type)
+                continue
+            result = handler(event)
+            if asyncio.isfuture(result):
+                logger.debug("Skipping future-like handler result for event %s because no running loop exists", event.type)
+                continue
+            if inspect.iscoroutine(result):
+                logger.debug("Skipping coroutine handler result for event %s because no running loop exists", event.type)
+                result.close()
+
+    async def publish(self, event: BridgeEvent) -> None:
+        """Publish an event to all subscribers."""
+        await self._deliver_to_queues_async(event)
+        loop = asyncio.get_running_loop()
+        self._dispatch_handler_tasks(event, loop)
 
     def emit(
         self,
@@ -173,5 +204,11 @@ class EventBus:
             severity=severity,
             session_id=session_id,
         )
-        asyncio.create_task(self.publish(event))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._emit_without_loop(event)
+            return event
+
+        loop.create_task(self.publish(event))
         return event
