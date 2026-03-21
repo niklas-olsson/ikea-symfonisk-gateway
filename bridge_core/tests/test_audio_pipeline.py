@@ -360,6 +360,7 @@ async def test_pipeline_closes_evicted_subscriber_cleanly() -> None:
         "test_sess",
         "mp3_48k_stereo_320",
         target_id="tgt_1",
+        delivery_profile="experimental",
         client_queue_bytes=8,
         client_overflow_grace_ms=1,
     )
@@ -387,6 +388,7 @@ async def test_primary_establishment_and_health_require_yield_progress() -> None
         "test_sess",
         "mp3_48k_stereo_320",
         target_id="tgt_1",
+        delivery_profile="experimental",
         transport_heartbeat_window_ms=100,
         primary_health_require_yield_progress=True,
     )
@@ -419,6 +421,162 @@ async def test_primary_establishment_and_health_require_yield_progress() -> None
     diagnostics = pipeline.get_diagnostics_snapshot()
     assert diagnostics["primary_effective_client_count"] == 1
     assert diagnostics["primary_delivery_alive"] is True
+    assert diagnostics["primary_delivery_health_model"] == "strict"
+
+
+@pytest.mark.asyncio
+async def test_stable_primary_delivery_alive_uses_attached_primary_count() -> None:
+    pipeline = StreamPipeline(
+        "test_sess",
+        "mp3_48k_stereo_320",
+        target_id="tgt_1",
+        delivery_profile="stable",
+        transport_heartbeat_window_ms=100,
+    )
+    now = time.monotonic()
+    primary = PipelineSubscriber(
+        subscriber_id=1,
+        queue=asyncio.Queue(),
+        wake_event=asyncio.Event(),
+        attached_monotonic=now,
+        role="primary_renderer",
+        remote_addr="192.168.1.10",
+        user_agent="Sonos/1.0",
+        delivery_path_id="tgt_1",
+        last_successful_enqueue_monotonic=now,
+        last_successful_dequeue_monotonic=None,
+        last_successful_yield_monotonic=None,
+        overflow_started_monotonic=None,
+        overflow_events=0,
+        queued_bytes=0,
+    )
+    pipeline._clients = [primary]
+
+    diagnostics = pipeline.get_diagnostics_snapshot()
+    assert diagnostics["primary_client_count"] == 1
+    assert diagnostics["primary_effective_client_count"] == 1
+    assert diagnostics["primary_delivery_alive"] is True
+    assert diagnostics["primary_delivery_health_model"] == "attached"
+    assert diagnostics["subscribers"][0]["is_primary_candidate"] is True
+    assert diagnostics["subscribers"][0]["is_primary_healthy"] is True
+
+
+@pytest.mark.asyncio
+async def test_stable_primary_subscriber_is_not_evicted_on_overflow() -> None:
+    pipeline = StreamPipeline(
+        "test_sess",
+        "mp3_48k_stereo_320",
+        target_id="tgt_1",
+        delivery_profile="stable",
+        primary_client_queue_bytes=8,
+        primary_client_overflow_grace_ms=1,
+    )
+    now = time.monotonic()
+    primary = PipelineSubscriber(
+        subscriber_id=1,
+        queue=asyncio.Queue(),
+        wake_event=asyncio.Event(),
+        attached_monotonic=now,
+        role="primary_renderer",
+        remote_addr="192.168.1.10",
+        user_agent="Sonos/1.0",
+        delivery_path_id="tgt_1",
+        last_successful_enqueue_monotonic=now,
+        last_successful_dequeue_monotonic=None,
+        last_successful_yield_monotonic=None,
+        overflow_started_monotonic=now - 1,
+        overflow_events=1,
+        queued_bytes=8,
+    )
+    pipeline._clients = [primary]
+    pipeline._active = True
+
+    await pipeline._fan_out_encoded_chunk(b"abcd", time.monotonic())
+
+    diagnostics = pipeline.get_diagnostics_snapshot()
+    assert diagnostics["active_client_count"] == 1
+    assert diagnostics["client_queue_overflow_events_total"] == 1
+    assert diagnostics["client_stall_disconnects_total"] == 0
+    assert primary.closed is False
+    assert primary.queue.qsize() == 1
+    assert diagnostics["primary_delivery_alive"] is True
+
+
+@pytest.mark.asyncio
+async def test_experimental_primary_subscriber_still_evicted_on_overflow() -> None:
+    pipeline = StreamPipeline(
+        "test_sess",
+        "mp3_48k_stereo_320",
+        target_id="tgt_1",
+        delivery_profile="experimental",
+        primary_client_queue_bytes=8,
+        primary_client_overflow_grace_ms=1,
+    )
+    now = time.monotonic()
+    primary = PipelineSubscriber(
+        subscriber_id=1,
+        queue=asyncio.Queue(),
+        wake_event=asyncio.Event(),
+        attached_monotonic=now,
+        role="primary_renderer",
+        remote_addr="192.168.1.10",
+        user_agent="Sonos/1.0",
+        delivery_path_id="tgt_1",
+        last_successful_enqueue_monotonic=now,
+        last_successful_dequeue_monotonic=now,
+        last_successful_yield_monotonic=now,
+        overflow_started_monotonic=now - 1,
+        overflow_events=1,
+        queued_bytes=8,
+    )
+    pipeline._clients = [primary]
+    pipeline._active = True
+
+    await pipeline._fan_out_encoded_chunk(b"abcd", time.monotonic())
+
+    diagnostics = pipeline.get_diagnostics_snapshot()
+    assert diagnostics["active_client_count"] == 0
+    assert diagnostics["client_queue_overflow_events_total"] == 1
+    assert diagnostics["client_stall_disconnects_total"] == 1
+    assert primary.closed is True
+
+
+@pytest.mark.asyncio
+async def test_experimental_primary_health_snapshot_still_requires_progress() -> None:
+    pipeline = StreamPipeline(
+        "test_sess",
+        "mp3_48k_stereo_320",
+        target_id="tgt_1",
+        delivery_profile="experimental",
+        transport_heartbeat_window_ms=100,
+        primary_health_require_yield_progress=True,
+    )
+    now = time.monotonic()
+    primary = PipelineSubscriber(
+        subscriber_id=1,
+        queue=asyncio.Queue(),
+        wake_event=asyncio.Event(),
+        attached_monotonic=now,
+        role="primary_renderer",
+        remote_addr="192.168.1.10",
+        user_agent="Sonos/1.0",
+        delivery_path_id="tgt_1",
+        last_successful_enqueue_monotonic=now,
+        last_successful_dequeue_monotonic=now,
+        last_successful_yield_monotonic=None,
+        overflow_started_monotonic=None,
+        overflow_events=0,
+        queued_bytes=0,
+    )
+    pipeline._clients = [primary]
+
+    diagnostics = pipeline.get_diagnostics_snapshot()
+    assert diagnostics["subscribers"][0]["is_primary_candidate"] is True
+    assert diagnostics["subscribers"][0]["is_primary_healthy"] is False
+
+    primary.last_successful_yield_monotonic = time.monotonic()
+    diagnostics = pipeline.get_diagnostics_snapshot()
+    assert diagnostics["subscribers"][0]["is_primary_healthy"] is True
 
 
 @pytest.mark.asyncio

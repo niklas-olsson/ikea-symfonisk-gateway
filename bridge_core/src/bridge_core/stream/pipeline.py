@@ -623,6 +623,7 @@ class StreamPipeline:
         effective_client_count = self._effective_client_count(now)
         primary_client_count = self._primary_client_count(now)
         primary_effective_client_count = self._primary_effective_client_count(now)
+        primary_delivery_alive = self._primary_delivery_alive(now)
         return {
             "keepalive_active": self._keepalive_active,
             "source_outage_active": self._source_outage_active,
@@ -651,7 +652,8 @@ class StreamPipeline:
             "effective_client_count": effective_client_count,
             "primary_client_count": primary_client_count,
             "primary_effective_client_count": primary_effective_client_count,
-            "primary_delivery_alive": primary_effective_client_count > 0,
+            "primary_delivery_alive": primary_delivery_alive,
+            "primary_delivery_health_model": "attached" if self._is_stable_profile() else "strict",
             "first_primary_attach_after_session_start_ms": self._elapsed_since_start_ms(self._first_primary_attach_monotonic),
             "last_primary_attach_monotonic": self._last_primary_attach_monotonic,
             "last_primary_enqueue_monotonic": self._last_primary_enqueue_monotonic,
@@ -717,8 +719,7 @@ class StreamPipeline:
                             subscriber.queued_bytes,
                             backlog_ms,
                         )
-                    overflow_age_ms = (now - subscriber.overflow_started_monotonic) * 1000
-                    if overflow_age_ms >= self._policy_for_subscriber(subscriber).overflow_grace_ms:
+                    if self._should_evict_subscriber(subscriber, now):
                         to_evict.append(subscriber)
                         continue
                 else:
@@ -786,6 +787,17 @@ class StreamPipeline:
     def _primary_effective_client_count(self, now: float) -> int:
         return sum(1 for subscriber in self._clients if self._subscriber_primary_healthy(subscriber, now))
 
+    def _primary_delivery_alive(self, now: float) -> bool:
+        if self._is_stable_profile():
+            return self._primary_client_count(now) > 0
+        return self._primary_effective_client_count(now) > 0
+
+    def _is_stable_profile(self) -> bool:
+        return self._delivery_profile == "stable"
+
+    def _is_experimental_profile(self) -> bool:
+        return self._delivery_profile == "experimental"
+
     def _policy_for_subscriber(self, subscriber: PipelineSubscriber) -> PipelineClientPolicy:
         if subscriber.role == "primary_renderer":
             return self._primary_policy
@@ -802,6 +814,8 @@ class StreamPipeline:
     def _subscriber_primary_healthy(self, subscriber: PipelineSubscriber, now: float) -> bool:
         if not self._is_primary_candidate(subscriber):
             return False
+        if self._is_stable_profile():
+            return True
         if subscriber.last_successful_enqueue_monotonic is None:
             return False
         heartbeat_window_seconds = self._transport_heartbeat_window_ms / 1000
@@ -863,6 +877,13 @@ class StreamPipeline:
             "is_establishing_candidate": self._subscriber_is_establishing_candidate(subscriber, now),
             "is_primary_healthy": self._subscriber_primary_healthy(subscriber, now),
         }
+
+    def _should_evict_subscriber(self, subscriber: PipelineSubscriber, now: float) -> bool:
+        if subscriber.overflow_started_monotonic is None:
+            return False
+        if self._is_stable_profile() and self._is_primary_candidate(subscriber):
+            return False
+        return (now - subscriber.overflow_started_monotonic) * 1000 >= self._policy_for_subscriber(subscriber).overflow_grace_ms
 
     async def _evict_subscriber(self, subscriber: PipelineSubscriber, now: float) -> None:
         async with self._lock:
