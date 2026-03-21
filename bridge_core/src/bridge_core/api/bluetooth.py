@@ -1,6 +1,6 @@
 """Bluetooth API endpoints."""
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -38,7 +38,7 @@ async def get_bluetooth_status(request: Request) -> dict[str, Any]:
     """Get status of the Bluetooth subsystem."""
     registry: SourceRegistry = request.app.state.source_registry
     adapter = _get_bluetooth_adapter(registry)
-    return await adapter.get_adapter_status()
+    return cast(dict[str, Any], await adapter.get_adapter_status())
 
 
 @router.post("/pairing/open")
@@ -75,7 +75,7 @@ async def get_pairing_status(request: Request) -> dict[str, Any]:
     registry: SourceRegistry = request.app.state.source_registry
     adapter = _get_bluetooth_adapter(registry)
     status = await adapter.get_adapter_status()
-    return status.get("pairing_window", {})
+    return cast(dict[str, Any], status.get("pairing_window", {}))
 
 
 @router.get("/devices")
@@ -83,7 +83,7 @@ async def list_bluetooth_devices(request: Request) -> list[dict[str, Any]]:
     """List all discovered/known Bluetooth devices."""
     registry: SourceRegistry = request.app.state.source_registry
     adapter = _get_bluetooth_adapter(registry)
-    return await adapter.list_devices()
+    return cast(list[dict[str, Any]], await adapter.list_devices())
 
 
 @router.get("/devices/preferred")
@@ -177,4 +177,4 @@ async def get_backend_status(request: Request) -> dict[str, Any]:
     registry: SourceRegistry = request.app.state.source_registry
     adapter = _get_bluetooth_adapter(registry)
     status = await adapter.get_adapter_status()
-    return status.get("backend", {})
+    return cast(dict[str, Any], status.get("backend", {}))

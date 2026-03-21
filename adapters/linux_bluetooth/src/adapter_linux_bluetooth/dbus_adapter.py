@@ -3,7 +3,7 @@
 import logging
 import os
 import shutil
-from typing import Any
+from typing import Any, cast
 
 from dbus_fast import BusType, Variant
 from dbus_fast.aio import MessageBus
@@ -107,7 +107,7 @@ class BlueZAdapterController:
                     return [unwrap(v) for v in obj]
                 return obj
 
-            return unwrap(managed_objects)
+            return cast(dict[str, dict[str, dict[str, Any]]], unwrap(managed_objects))
         except Exception as e:
             logger.error(f"Failed to get managed objects: {e}")
             return {}

@@ -6,9 +6,10 @@ Emits canonical PCM 48kHz stereo frames.
 
 import asyncio
 import logging
+import platform
 import shutil
 import subprocess
-from typing import Any
+from typing import Any, Protocol, cast
 
 from bridge_core.core.event_bus import EventBus, EventType
 from ingress_sdk.base import FrameSink, IngressAdapter
@@ -23,9 +24,42 @@ from ingress_sdk.types import (
     StartResult,
 )
 
-from .dbus_adapter import BlueZAdapterController
 from .store import TrustedDeviceStore
-from .window import PairingWindowManager
+
+
+class _BlueZAdapterController(Protocol):
+    async def get_properties(self) -> dict[str, Any]: ...
+
+    async def check_readiness(self) -> list[str]: ...
+
+    async def set_alias(self, alias: str) -> bool: ...
+
+    async def set_discoverable_timeout(self, timeout: int) -> None: ...
+
+    async def set_discoverable(self, enabled: bool) -> bool: ...
+
+    async def set_pairable_timeout(self, timeout: int) -> None: ...
+
+    async def set_pairable(self, enabled: bool) -> bool: ...
+
+    async def get_managed_objects(self) -> dict[str, dict[str, dict[str, Any]]]: ...
+
+    def get_device_path(self, mac: str) -> str: ...
+
+    async def connect_device(self, device_path: str) -> bool: ...
+
+    async def disconnect_device(self, device_path: str) -> bool: ...
+
+    async def remove_device(self, device_path: str) -> None: ...
+
+
+class _PairingWindowManager(Protocol):
+    is_open: bool
+    agent_path: str | None
+
+    async def open_window(self, timeout_seconds: int, candidate_mac: str | None = None) -> None: ...
+
+    async def close_window(self) -> None: ...
 
 logger = logging.getLogger(__name__)
 
@@ -42,17 +76,25 @@ class LinuxBluetoothAdapter(IngressAdapter):
         self._frame_sink: FrameSink | None = None
 
         self._store = TrustedDeviceStore()
-        self._adapter_controller = BlueZAdapterController()
-        self._pairing_window = PairingWindowManager(self._adapter_controller, self._store, event_bus)
+
+        is_linux = platform.system() == "Linux"
+        self._adapter_controller: _BlueZAdapterController | None = None
+        self._pairing_window: _PairingWindowManager | None = None
+        if is_linux:
+            from .dbus_adapter import BlueZAdapterController
+            from .window import PairingWindowManager
+
+            self._adapter_controller = cast(_BlueZAdapterController, BlueZAdapterController())
+            self._pairing_window = cast(
+                _PairingWindowManager,
+                PairingWindowManager(cast(Any, self._adapter_controller), self._store, event_bus),
+            )
 
         self._status_monitoring_task: asyncio.Task[None] | None = None
         self._last_status: dict[str, Any] = {}
         self._source_id_map: dict[str, str] = {}  # virtual_id -> pa_id
-        self._last_pairing_result: dict[str, Any] | None = None
-        self._last_connection_error: dict[str, Any] | None = None
-        self._reconnect_state: dict[str, Any] = {"active": False, "retries": 0}
 
-        if self._event_bus:
+        if self._event_bus and is_linux:
             self._status_monitoring_task = asyncio.create_task(self._monitor_status())
 
     def id(self) -> str:
@@ -256,16 +298,30 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     def start_pairing(self, timeout_seconds: int = 90, candidate_mac: str | None = None) -> PairingResult:
         """Start adapter pairing mode via Window Manager."""
+        if self._pairing_window is None:
+            return PairingResult(success=False, error="Bluetooth not available on this platform")
+        assert self._pairing_window is not None
         asyncio.create_task(self._pairing_window.open_window(timeout_seconds, candidate_mac=candidate_mac))
         return PairingResult(success=True, message=f"Pairing window opened for {timeout_seconds}s")
 
     def stop_pairing(self) -> PairingResult:
         """Stop adapter pairing mode."""
+        if self._pairing_window is None:
+            return PairingResult(success=False, error="Bluetooth not available on this platform")
+        assert self._pairing_window is not None
         asyncio.create_task(self._pairing_window.close_window())
         return PairingResult(success=True, message="Pairing window closed")
 
     async def get_adapter_status(self) -> dict[str, Any]:
         """Get status of the Bluetooth adapter."""
+        if self._adapter_controller is None:
+            return {
+                "adapter_id": self.id(),
+                "healthy": False,
+                "error": "Bluetooth not available on this platform",
+                "trusted_devices": self._store.list_trusted(),
+            }
+
         props = await self._adapter_controller.get_properties()
         errors = await self._adapter_controller.check_readiness()
 
@@ -279,8 +335,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
             "readiness_errors": errors,
             "healthy": len(errors) == 0,
             "pairing_window": {
-                "is_open": self._pairing_window.is_open,
-                "agent_path": self._pairing_window.agent_path,
+                "is_open": self._pairing_window.is_open if self._pairing_window else False,
+                "agent_path": self._pairing_window.agent_path if self._pairing_window else None,
             },
             "backend": {
                 "type": backend_type,
@@ -288,23 +344,26 @@ class LinuxBluetoothAdapter(IngressAdapter):
             },
             "trusted_devices": self._store.list_trusted(),
             "preferred_device": self._store.get_preferred_device(),
-            "last_pairing_result": self._last_pairing_result,
-            "last_connection_error": self._last_connection_error,
-            "reconnect_retry_state": self._reconnect_state,
         }
 
     async def set_adapter_alias(self, alias: str) -> bool:
         """Set the adapter alias."""
+        if self._adapter_controller is None:
+            return False
         return await self._adapter_controller.set_alias(alias)
 
     async def set_discoverable(self, enabled: bool, timeout: int = 0) -> bool:
         """Set discoverable mode."""
+        if self._adapter_controller is None:
+            return False
         if enabled and timeout > 0:
             await self._adapter_controller.set_discoverable_timeout(timeout)
         return await self._adapter_controller.set_discoverable(enabled)
 
     async def set_pairable(self, enabled: bool, timeout: int = 0) -> bool:
         """Set pairable mode."""
+        if self._adapter_controller is None:
+            return False
         if enabled and timeout > 0:
             await self._adapter_controller.set_pairable_timeout(timeout)
         return await self._adapter_controller.set_pairable(enabled)
@@ -330,6 +389,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     async def list_devices(self) -> list[dict[str, Any]]:
         """List all known Bluetooth devices."""
+        if self._adapter_controller is None:
+            return []
         objects = await self._adapter_controller.get_managed_objects()
         devices = []
         for path, interfaces in objects.items():
@@ -353,6 +414,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     async def connect_device(self, mac: str) -> bool:
         """Connect to a Bluetooth device."""
+        if self._adapter_controller is None:
+            return False
         device_path = self._adapter_controller.get_device_path(mac)
         if self._event_bus:
             self._event_bus.emit(EventType.BLUETOOTH_DEVICE_CONNECTING, payload={"mac": mac})
@@ -360,19 +423,19 @@ class LinuxBluetoothAdapter(IngressAdapter):
         try:
             success = await self._adapter_controller.connect_device(device_path)
             if success:
-                self._last_connection_error = None
                 if self._event_bus:
                     self._event_bus.emit(EventType.BLUETOOTH_DEVICE_CONNECTED, payload={"mac": mac})
                 return True
-            else:
-                self._last_connection_error = {"mac": mac, "error": "Connection failed", "timestamp": asyncio.get_event_loop().time()}
-                return False
+            return False
         except Exception as e:
-            self._last_connection_error = {"mac": mac, "error": str(e), "timestamp": asyncio.get_event_loop().time()}
+            if self._event_bus:
+                self._event_bus.emit(EventType.BLUETOOTH_BACKEND_ERROR, payload={"mac": mac, "error": str(e)})
             return False
 
     async def disconnect_device(self, mac: str) -> bool:
         """Disconnect from a Bluetooth device."""
+        if self._adapter_controller is None:
+            return False
         device_path = self._adapter_controller.get_device_path(mac)
         success = await self._adapter_controller.disconnect_device(device_path)
 
@@ -382,10 +445,9 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     async def remove_device(self, mac: str) -> bool:
         """Remove (unpair) and forget a Bluetooth device."""
-        device_path = self._adapter_controller.get_device_path(mac)
-        # Try to remove from BlueZ
-        await self._adapter_controller.remove_device(device_path)
-        # Always forget in our store
+        if self._adapter_controller is not None:
+            device_path = self._adapter_controller.get_device_path(mac)
+            await self._adapter_controller.remove_device(device_path)
         self.forget_device(mac)
         return True
 

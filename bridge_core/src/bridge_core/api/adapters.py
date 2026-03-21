@@ -1,6 +1,6 @@
 """Adapter management endpoints."""
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -83,7 +83,7 @@ async def get_adapter_status(request: Request, adapter_id: str) -> dict[str, Any
         )
 
     if hasattr(adapter_info.adapter, "get_adapter_status"):
-        return await adapter_info.adapter.get_adapter_status()
+        return cast(dict[str, Any], await adapter_info.adapter.get_adapter_status())
     return {"message": "Adapter does not support status reporting"}
 
 
@@ -100,7 +100,7 @@ async def set_adapter_alias(request: Request, adapter_id: str, body: AliasReques
 
     if hasattr(adapter_info.adapter, "set_adapter_alias"):
         success = await adapter_info.adapter.set_adapter_alias(body.alias)
-        return {"success": success}
+        return {"success": bool(success)}
     raise HTTPException(
         status_code=400,
         detail={"code": "NOT_SUPPORTED", "message": "Adapter does not support setting alias"},
@@ -120,7 +120,7 @@ async def set_discoverable(request: Request, adapter_id: str, body: VisibilityRe
 
     if hasattr(adapter_info.adapter, "set_discoverable"):
         success = await adapter_info.adapter.set_discoverable(body.enabled, body.timeout)
-        return {"success": success}
+        return {"success": bool(success)}
     raise HTTPException(
         status_code=400,
         detail={"code": "NOT_SUPPORTED", "message": "Adapter does not support discoverable mode"},
@@ -140,7 +140,7 @@ async def set_pairable(request: Request, adapter_id: str, body: VisibilityReques
 
     if hasattr(adapter_info.adapter, "set_pairable"):
         success = await adapter_info.adapter.set_pairable(body.enabled, body.timeout)
-        return {"success": success}
+        return {"success": bool(success)}
     raise HTTPException(
         status_code=400,
         detail={"code": "NOT_SUPPORTED", "message": "Adapter does not support pairable mode"},
