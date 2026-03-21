@@ -18,6 +18,7 @@ PIPELINE_START_FAILED = "pipeline_start_failed"
 RENDERER_PLAYBACK_FAILED = "renderer_playback_failed"
 SOURCE_START_FAILED = "source_start_failed"
 FRAME_INGEST_FAILED = "frame_ingest_failed"
+SOURCE_ADAPTER_PLATFORM_MISMATCH = "source_adapter_platform_mismatch"
 
 # Windows-specific errors
 WINDOWS_LOOPBACK_NOT_SUPPORTED = "windows_loopback_not_supported"
@@ -52,6 +53,11 @@ ERROR_DETAILS = {
         "message": "Session started but no audio data was received from the source.",
         "subsystem": "pipeline",
         "action": "Check source signal and adapter logs.",
+    },
+    SOURCE_ADAPTER_PLATFORM_MISMATCH: {
+        "message": "Source platform does not match adapter platform.",
+        "subsystem": "source_registry",
+        "action": "Check source registration and adapter selection logic.",
     },
     WINDOWS_LOOPBACK_NOT_SUPPORTED: {
         "message": "Windows WASAPI loopback is not supported on this device or version of Windows.",

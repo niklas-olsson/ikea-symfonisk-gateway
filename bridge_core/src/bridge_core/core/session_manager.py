@@ -272,10 +272,16 @@ class SessionManager:
             try:
                 prepare_res = self._source_registry.prepare_source(session.source_id)
                 if not prepare_res.success:
-                    session.last_error = create_session_error(
-                        prepare_res.code or SOURCE_START_FAILED,
-                        f"Failed to prepare source: {prepare_res.error or prepare_res.message}",
-                    )
+                    if prepare_res.code == "source_adapter_platform_mismatch":
+                        session.last_error = create_session_error(
+                            prepare_res.code,
+                            prepare_res.message,
+                        )
+                    else:
+                        session.last_error = create_session_error(
+                            prepare_res.code or SOURCE_START_FAILED,
+                            f"Failed to prepare source: {prepare_res.error or prepare_res.message}",
+                        )
                     raise RuntimeError(session.last_error.message)
             except Exception as e:
                 if not session.last_error:
@@ -325,9 +331,15 @@ class SessionManager:
 
                 start_res = self._source_registry.start_source(session.source_id, frame_sink)
                 if not start_res.success:
-                    session.last_error = create_session_error(
-                        start_res.code or SOURCE_START_FAILED, f"Failed to start source: {start_res.message}"
-                    )
+                    if start_res.code == "source_adapter_platform_mismatch":
+                        session.last_error = create_session_error(
+                            start_res.code,
+                            start_res.message,
+                        )
+                    else:
+                        session.last_error = create_session_error(
+                            start_res.code or SOURCE_START_FAILED, f"Failed to start source: {start_res.message}"
+                        )
                     frame_sink.stop()
                     raise RuntimeError(session.last_error.message)
 
