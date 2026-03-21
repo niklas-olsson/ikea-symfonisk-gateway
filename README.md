@@ -31,6 +31,10 @@ The gateway starts at `http://localhost:8732` (API) and `http://localhost:8080` 
   ```bash
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
+- **FFmpeg** — Required for audio transcoding.
+  - **Linux**: `sudo apt install ffmpeg`
+  - **macOS**: `brew install ffmpeg`
+  - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add `bin` to your PATH.
 
 ### Optional
 
@@ -89,7 +93,15 @@ Environment variables control the gateway behavior:
 | `BRIDGE_API_PORT` | `8732` | Port for API endpoints |
 | `BRIDGE_STREAM_PORT` | `8080` | Port for audio streaming |
 | `BRIDGE_AUTH_TOKEN` | _(empty)_ | Bearer token for API authentication. **Set this for production!** |
+| `FFMPEG_PATH` | `ffmpeg` | Explicit path to FFmpeg executable |
 | `LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+### FFmpeg Configuration
+
+The bridge requires FFmpeg to encode audio streams. It resolves the executable path in the following order:
+1.  **Config API**: `PUT /v1/config/ffmpeg_path` with `{"value": "/path/to/ffmpeg"}`
+2.  **Environment Variable**: `FFMPEG_PATH` (e.g., in `.env` file)
+3.  **System PATH**: Default `shutil.which("ffmpeg")` resolution
 
 ### Production Security
 

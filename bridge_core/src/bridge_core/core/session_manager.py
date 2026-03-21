@@ -9,10 +9,12 @@ from uuid import uuid4
 
 from ingress_sdk.protocol import AudioFrame
 
+from bridge_core.core.config_store import ConfigStore
 from bridge_core.core.event_bus import EventBus, EventType
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
 from bridge_core.stream.pipeline import StreamPipeline
+from bridge_core.stream.utils import resolve_ffmpeg_path
 
 logger = logging.getLogger(__name__)
 
@@ -122,12 +124,14 @@ class SessionManager:
         source_registry: SourceRegistry,
         target_registry: TargetRegistry,
         stream_publisher: Any | None = None,
+        config_store: ConfigStore | None = None,
     ) -> None:
         self._sessions: dict[str, Session] = {}
         self._event_bus = event_bus
         self._source_registry = source_registry
         self._target_registry = target_registry
         self._stream_publisher = stream_publisher
+        self._config_store = config_store
 
     def create(
         self,
@@ -183,7 +187,10 @@ class SessionManager:
 
             # 2. Setup pipeline and publisher
             if session.pipeline is None:
-                session.pipeline = StreamPipeline(session.session_id, session.stream_profile)
+                ffmpeg_path = resolve_ffmpeg_path(self._config_store)
+                session.pipeline = StreamPipeline(
+                    session.session_id, session.stream_profile, ffmpeg_path=ffmpeg_path
+                )
 
             if self._stream_publisher:
                 self._stream_publisher.register_pipeline(session.session_id, session.pipeline)
