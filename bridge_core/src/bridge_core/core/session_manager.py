@@ -327,8 +327,9 @@ class SessionManager:
                 frame_sink.start()
                 self._frame_sinks[session_id] = frame_sink
 
-                source_desc = self._source_registry.get_source(session.source_id)
-                adapter_info = self._source_registry._get_adapter_info_for_source(session.source_id)
+                source_binding = self._source_registry.resolve_source(session.source_id)
+                source_desc = source_binding.source if source_binding else None
+                adapter_info = source_binding.adapter_info if source_binding else None
 
                 start_res = self._source_registry.start_source(session.source_id, frame_sink)
                 if not start_res.success:
@@ -422,8 +423,9 @@ class SessionManager:
             if not frames_ingested:
                 # Check if it's a Windows loopback source that is just silent
                 health = self._source_registry.probe_source_health(session.source_id)
-                source_desc = self._source_registry.get_source(session.source_id)
-                adapter_info = self._source_registry._get_adapter_info_for_source(session.source_id)
+                source_binding = self._source_registry.resolve_source(session.source_id)
+                source_desc = source_binding.source if source_binding else None
+                adapter_info = source_binding.adapter_info if source_binding else None
                 adapter_name = adapter_info.adapter.__class__.__name__ if adapter_info and adapter_info.adapter else "Unknown"
 
                 if (

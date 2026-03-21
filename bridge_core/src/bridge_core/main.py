@@ -1,6 +1,8 @@
 """FastAPI application entry point."""
 
 import asyncio
+import logging
+import platform
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,6 +36,59 @@ from bridge_core.core import (
 from bridge_core.stream.publisher import StreamPublisher
 from renderer_sonos import SonosRendererAdapter
 
+logger = logging.getLogger(__name__)
+
+
+def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventBus, host_platform: str | None = None) -> None:
+    """Register built-in ingress adapters for the current host platform."""
+    synthetic_adapter = SyntheticAdapter()
+    source_registry.register_adapter(
+        adapter_id=synthetic_adapter.id(),
+        platform=synthetic_adapter.platform(),
+        version="0.1.0",
+        capabilities=synthetic_adapter.capabilities(),
+        sources=synthetic_adapter.list_sources(),
+        adapter_instance=synthetic_adapter,
+    )
+
+    normalized_platform = (host_platform or platform.system()).lower()
+
+    if normalized_platform == "linux":
+        linux_audio_adapter = LinuxAudioAdapter()
+        source_registry.register_adapter(
+            adapter_id=linux_audio_adapter.id(),
+            platform=linux_audio_adapter.platform(),
+            version="0.1.0",
+            capabilities=linux_audio_adapter.capabilities(),
+            sources=linux_audio_adapter.list_sources(),
+            adapter_instance=linux_audio_adapter,
+        )
+
+        linux_bluetooth_adapter = LinuxBluetoothAdapter(event_bus)
+        source_registry.register_adapter(
+            adapter_id=linux_bluetooth_adapter.id(),
+            platform=linux_bluetooth_adapter.platform(),
+            version="0.1.0",
+            capabilities=linux_bluetooth_adapter.capabilities(),
+            sources=linux_bluetooth_adapter.list_sources(),
+            adapter_instance=linux_bluetooth_adapter,
+        )
+        return
+
+    if normalized_platform == "windows":
+        windows_audio_adapter = WindowsAudioAdapter()
+        source_registry.register_adapter(
+            adapter_id=windows_audio_adapter.id(),
+            platform=windows_audio_adapter.platform(),
+            version="0.1.0",
+            capabilities=windows_audio_adapter.capabilities(),
+            sources=windows_audio_adapter.list_sources(),
+            adapter_instance=windows_audio_adapter,
+        )
+        return
+
+    logger.info("Skipping platform-specific ingress adapters on unsupported host platform: %s", normalized_platform)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -64,48 +119,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     sonos_adapter = SonosRendererAdapter(event_bus)
     await target_registry.register_adapter(sonos_adapter)
 
-    synthetic_adapter = SyntheticAdapter()
-    source_registry.register_adapter(
-        adapter_id=synthetic_adapter.id(),
-        platform=synthetic_adapter.platform(),
-        version="0.1.0",
-        capabilities=synthetic_adapter.capabilities(),
-        sources=synthetic_adapter.list_sources(),
-        adapter_instance=synthetic_adapter,
-    )
-
-    # Register Linux Audio adapter
-    linux_audio_adapter = LinuxAudioAdapter()
-    source_registry.register_adapter(
-        adapter_id=linux_audio_adapter.id(),
-        platform=linux_audio_adapter.platform(),
-        version="0.1.0",
-        capabilities=linux_audio_adapter.capabilities(),
-        sources=linux_audio_adapter.list_sources(),
-        adapter_instance=linux_audio_adapter,
-    )
-
-    # Register Linux Bluetooth adapter
-    linux_bluetooth_adapter = LinuxBluetoothAdapter(event_bus)
-    source_registry.register_adapter(
-        adapter_id=linux_bluetooth_adapter.id(),
-        platform=linux_bluetooth_adapter.platform(),
-        version="0.1.0",
-        capabilities=linux_bluetooth_adapter.capabilities(),
-        sources=linux_bluetooth_adapter.list_sources(),
-        adapter_instance=linux_bluetooth_adapter,
-    )
-
-    # Register Windows Audio adapter
-    windows_audio_adapter = WindowsAudioAdapter()
-    source_registry.register_adapter(
-        adapter_id=windows_audio_adapter.id(),
-        platform=windows_audio_adapter.platform(),
-        version="0.1.0",
-        capabilities=windows_audio_adapter.capabilities(),
-        sources=windows_audio_adapter.list_sources(),
-        adapter_instance=windows_audio_adapter,
-    )
+    register_ingress_adapters(source_registry, event_bus)
 
     # Start stream publisher in the background
     publisher_task = asyncio.create_task(publisher.start())

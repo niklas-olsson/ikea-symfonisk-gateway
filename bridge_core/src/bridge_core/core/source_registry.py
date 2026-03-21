@@ -1,6 +1,9 @@
 """Source registry - tracks adapters and available sources."""
 
+import logging
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
@@ -14,6 +17,8 @@ from ingress_sdk.types import (
 
 from bridge_core.core.errors import SOURCE_ADAPTER_PLATFORM_MISMATCH
 from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
+
+logger = logging.getLogger(__name__)
 
 
 class AdapterInfo:
@@ -45,13 +50,32 @@ class AdapterInfo:
         }
 
 
+@dataclass(frozen=True)
+class SourceBinding:
+    """Resolved source binding information."""
+
+    source: SourceDescriptor
+    adapter_info: AdapterInfo
+    local_source_id: str
+
+
 class SourceRegistry:
     """Registry for ingress adapters and their sources."""
+
+    _TYPE_SLUGS = {
+        "system_audio": "system",
+        "bluetooth_audio": "bluetooth",
+        "line_in": "line-in",
+        "microphone": "microphone",
+        "file_replay": "file",
+        "synthetic_test_source": "synthetic",
+    }
 
     def __init__(self, event_bus: EventBus) -> None:
         self._event_bus = event_bus
         self._adapters: dict[str, AdapterInfo] = {}
         self._sources: dict[str, SourceDescriptor] = {}
+        self._source_to_adapter: dict[str, str] = {}
         self._source_health: dict[str, HealthResult] = {}
         self._event_bus.subscribe_handler(self._handle_topology_changed, EventType.TOPOLOGY_CHANGED)
 
@@ -79,13 +103,12 @@ class SourceRegistry:
         adapter_instance: IngressAdapter | None = None,
     ) -> None:
         """Register a new adapter and its sources."""
-        for s in sources:
-            s.adapter_id = adapter_id
-
         adapter = AdapterInfo(adapter_id, platform, version, capabilities, adapter_instance)
-        adapter.sources = {s.source_id: s for s in sources}
+        adapter.sources = self._build_registered_source_map(adapter_id, platform, sources)
         self._adapters[adapter_id] = adapter
         self._sources.update(adapter.sources)
+        self._source_to_adapter.update({source_id: adapter_id for source_id in adapter.sources})
+        self._log_registered_sources(adapter_id, adapter.sources.values())
 
         self._event_bus.emit(
             EventType.ADAPTER_REGISTERED,
@@ -99,6 +122,7 @@ class SourceRegistry:
         if adapter:
             for source_id in adapter.sources:
                 self._sources.pop(source_id, None)
+                self._source_to_adapter.pop(source_id, None)
                 self._source_health.pop(source_id, None)
 
             self._event_bus.emit(
@@ -113,8 +137,9 @@ class SourceRegistry:
         if not adapter:
             return
 
+        new_source_map = self._build_registered_source_map(adapter_id, adapter.platform, sources)
+
         # Check if sources actually changed to avoid infinite loop
-        new_source_map = {s.source_id: s for s in sources}
         if adapter.sources.keys() == new_source_map.keys():
             # Basic check for same source IDs.
             # In a more complete system we might also compare metadata/content.
@@ -128,15 +153,14 @@ class SourceRegistry:
 
         for s_id in removed_source_ids:
             self._sources.pop(s_id, None)
+            self._source_to_adapter.pop(s_id, None)
             self._source_health.pop(s_id, None)
-
-        # Set adapter_id for hotplugged sources
-        for s in sources:
-            s.adapter_id = adapter_id
 
         # Update adapter and global map
         adapter.sources = new_source_map
         self._sources.update(adapter.sources)
+        self._source_to_adapter.update({source_id: adapter_id for source_id in adapter.sources})
+        self._log_registered_sources(adapter_id, adapter.sources.values())
 
         # Emit without adapter_id to avoid infinite recursion
         # (self._handle_topology_changed only reacts if adapter_id is present)
@@ -169,11 +193,11 @@ class SourceRegistry:
 
     def probe_source_health(self, source_id: str) -> HealthResult | None:
         """Probes source health and updates the registry."""
-        adapter_info = self._get_adapter_info_for_source(source_id)
-        if not adapter_info or not adapter_info.adapter:
+        binding = self.resolve_source(source_id)
+        if not binding or not binding.adapter_info.adapter:
             return None
 
-        health = adapter_info.adapter.probe_health(source_id)
+        health = binding.adapter_info.adapter.probe_health(binding.local_source_id)
         self.update_source_health(source_id, health)
         return health
 
@@ -193,12 +217,24 @@ class SourceRegistry:
         """List all available sources."""
         return list(self._sources.values())
 
-    def _get_adapter_info_for_source(self, source_id: str) -> AdapterInfo | None:
+    def get_source_adapter(self, source_id: str) -> AdapterInfo | None:
         """Find which adapter owns this source."""
-        for adapter_info in self._adapters.values():
-            if source_id in adapter_info.sources:
-                return adapter_info
-        return None
+        adapter_id = self._source_to_adapter.get(source_id)
+        if adapter_id is None:
+            return None
+        return self._adapters.get(adapter_id)
+
+    def resolve_source(self, source_id: str) -> SourceBinding | None:
+        """Resolve a registered source into its descriptor and owning adapter."""
+        source = self.get_source(source_id)
+        adapter_info = self.get_source_adapter(source_id)
+        if not source or not adapter_info:
+            return None
+        return SourceBinding(
+            source=source,
+            adapter_info=adapter_info,
+            local_source_id=self._get_adapter_local_source_id(source),
+        )
 
     def _validate_platform(self, source: SourceDescriptor, adapter_info: AdapterInfo) -> tuple[bool, str | None]:
         """Validate that the source and adapter platforms match."""
@@ -220,16 +256,12 @@ class SourceRegistry:
 
     def prepare_source(self, source_id: str) -> PrepareResult:
         """Prepare a source for capture."""
-        source = self.get_source(source_id)
-        if not source:
+        binding = self.resolve_source(source_id)
+        if not binding:
             return PrepareResult(success=False, source_id=source_id, error="Source not found")
 
-        adapter_info = self._get_adapter_info_for_source(source_id)
-        if not adapter_info:
-            return PrepareResult(success=False, source_id=source_id, error="Adapter not found for source")
-
         # Platform validation
-        is_valid, error_msg = self._validate_platform(source, adapter_info)
+        is_valid, error_msg = self._validate_platform(binding.source, binding.adapter_info)
         if not is_valid:
             return PrepareResult(
                 success=False,
@@ -238,27 +270,25 @@ class SourceRegistry:
                 message=error_msg or "Platform mismatch",
             )
 
-        if adapter_info.adapter:
-            return adapter_info.adapter.prepare(source_id)
+        if binding.adapter_info.adapter:
+            return binding.adapter_info.adapter.prepare(binding.local_source_id)
         else:
             return PrepareResult(
                 success=False,
                 source_id=source_id,
-                error=f"Adapter {adapter_info.adapter_id} does not support direct prepare",
+                error=f"Adapter {binding.adapter_info.adapter_id} does not support direct prepare",
             )
 
     def start_source(self, source_id: str, frame_sink: FrameSink) -> StartResult:
         """Start capturing from a source."""
-        source = self.get_source(source_id)
-        if not source:
+        binding = self.resolve_source(source_id)
+        if not binding:
             return StartResult(success=False, message="Source not found")
-
-        adapter_info = self._get_adapter_info_for_source(source_id)
-        if not adapter_info or not adapter_info.adapter:
+        if not binding.adapter_info.adapter:
             return StartResult(success=False, message="Adapter not found or not connected")
 
         # Platform validation
-        is_valid, error_msg = self._validate_platform(source, adapter_info)
+        is_valid, error_msg = self._validate_platform(binding.source, binding.adapter_info)
         if not is_valid:
             return StartResult(
                 success=False,
@@ -266,13 +296,84 @@ class SourceRegistry:
                 message=error_msg or "Platform mismatch",
             )
 
-        return adapter_info.adapter.start(source_id, frame_sink)
+        return binding.adapter_info.adapter.start(binding.local_source_id, frame_sink)
 
     def stop_source(self, source_id: str, adapter_session_id: str) -> None:
         """Stop capturing from a source."""
-        adapter_info = self._get_adapter_info_for_source(source_id)
-        if adapter_info and adapter_info.adapter:
-            adapter_info.adapter.stop(adapter_session_id)
+        binding = self.resolve_source(source_id)
+        if binding and binding.adapter_info.adapter:
+            binding.adapter_info.adapter.stop(adapter_session_id)
+
+    def _build_registered_source_map(
+        self, adapter_id: str, adapter_platform: str, sources: list[SourceDescriptor]
+    ) -> dict[str, SourceDescriptor]:
+        """Canonicalize adapter-local source descriptors for registry use."""
+        registered_sources: dict[str, SourceDescriptor] = {}
+        for source in sources:
+            registered_source = self._canonicalize_source(adapter_id, adapter_platform, source)
+            if registered_source.source_id in registered_sources:
+                raise ValueError(
+                    f"Adapter {adapter_id} produced duplicate canonical source ID {registered_source.source_id}"
+                )
+            existing_owner = self._source_to_adapter.get(registered_source.source_id)
+            if existing_owner is not None and existing_owner != adapter_id:
+                raise ValueError(
+                    f"Canonical source ID {registered_source.source_id} is already owned by adapter {existing_owner}"
+                )
+            registered_sources[registered_source.source_id] = registered_source
+        return registered_sources
+
+    def _canonicalize_source(self, adapter_id: str, adapter_platform: str, source: SourceDescriptor) -> SourceDescriptor:
+        """Convert an adapter-local descriptor into a registry descriptor."""
+        self._validate_source_descriptor(adapter_id, adapter_platform, source)
+        local_source_id = source.local_source_id or source.source_id
+        type_slug = self._get_type_slug(source)
+        registered_source = source.model_copy(deep=True)
+        registered_source.adapter_id = adapter_id
+        registered_source.local_source_id = local_source_id
+        registered_source.source_id = self._build_canonical_source_id(adapter_id, type_slug, local_source_id)
+        return registered_source
+
+    def _get_adapter_local_source_id(self, source: SourceDescriptor) -> str:
+        """Return the adapter-local ID for a registered source."""
+        return source.local_source_id or source.source_id
+
+    def _build_canonical_source_id(self, adapter_id: str, type_slug: str, local_source_id: str) -> str:
+        """Build a canonical registry source ID."""
+        return f"{adapter_id}:{type_slug}:{quote(local_source_id, safe='')}"
+
+    def _get_type_slug(self, source: SourceDescriptor) -> str:
+        """Resolve the shared canonical type slug for a source."""
+        type_slug = self._TYPE_SLUGS.get(source.source_type.value)
+        if type_slug is None:
+            raise ValueError(f"Unsupported source type {source.source_type!r} for source {source.source_id}")
+        return type_slug
+
+    def _validate_source_descriptor(self, adapter_id: str, adapter_platform: str, source: SourceDescriptor) -> None:
+        """Fail fast on invalid adapter-provided source descriptors."""
+        local_source_id = source.local_source_id or source.source_id
+        if not local_source_id:
+            raise ValueError(f"Adapter {adapter_id} provided an empty local source ID")
+
+        self._get_type_slug(source)
+
+        source_platform = source.platform
+        if source_platform != "any" and adapter_platform != "any" and source_platform != adapter_platform:
+            raise ValueError(
+                f"Adapter {adapter_id} platform {adapter_platform} does not match source platform {source_platform}"
+            )
+
+    def _log_registered_sources(self, adapter_id: str, sources: Any) -> None:
+        """Log resolved source ownership for diagnostics."""
+        for source in sources:
+            logger.info(
+                "Registered source binding: canonical_source_id=%s adapter_id=%s local_source_id=%s source_type=%s platform=%s",
+                source.source_id,
+                adapter_id,
+                source.local_source_id,
+                source.source_type.value,
+                source.platform,
+            )
 
     def start_pairing(self, adapter_id: str, timeout_seconds: int = 60, candidate_mac: str | None = None) -> PairingResult:
         """Start pairing mode on an adapter."""
