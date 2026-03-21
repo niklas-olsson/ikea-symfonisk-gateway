@@ -276,6 +276,14 @@ uv run python -m bridge_core
 - If the backend is missing or cannot probe the default output device, `/v1/sources` still lists the source in degraded form with backend diagnostics in `metadata`.
 - Silent startup is allowed: the session can reach `playing` before Windows audio begins, and playback starts flowing once an application produces sound.
 
+To isolate loopback capture without starting the full bridge:
+
+```bash
+uv run python scripts/verify_windows_loopback.py
+```
+
+The script prints the selected host API, default render device, chosen loopback capture device, callback counts, non-empty buffer counts, sample counts, emitted frame counts, and backend start-viability checks over a 5-second observation window.
+
 Configure in your `.env`:
 
 ```bash

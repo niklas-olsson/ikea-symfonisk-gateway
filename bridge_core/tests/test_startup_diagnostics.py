@@ -137,7 +137,11 @@ async def test_windows_system_output_silent_startup_proceeds(session_manager, mo
         ),
         adapter_info=MagicMock(adapter=MagicMock()),
     )
-    mock_source_registry.probe_source_health.return_value = MagicMock(healthy=True, signal_present=False)
+    mock_source_registry.probe_source_health.return_value = MagicMock(
+        healthy=True,
+        signal_present=False,
+        source_state="healthy_but_idle",
+    )
     mock_source_registry.start_source.return_value = MagicMock(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
 
     with (
@@ -172,7 +176,11 @@ async def test_windows_system_output_stalled_capture_fails(session_manager, mock
         ),
         adapter_info=MagicMock(adapter=MagicMock()),
     )
-    mock_source_registry.probe_source_health.return_value = MagicMock(healthy=False, signal_present=False)
+    mock_source_registry.probe_source_health.return_value = MagicMock(
+        healthy=False,
+        signal_present=False,
+        source_state="stream_started_no_callbacks",
+    )
     mock_source_registry.start_source.return_value = MagicMock(success=True, session_id="adapter_sess_1", backend="pyaudiowpatch")
 
     with (

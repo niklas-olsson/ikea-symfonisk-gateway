@@ -30,6 +30,8 @@ from bridge_core.stream.pipeline import StreamPipeline
 from bridge_core.stream.utils import resolve_ffmpeg_path
 
 logger = logging.getLogger(__name__)
+WINDOWS_STARTUP_GRACE_POLLS = 10
+WINDOWS_STARTUP_GRACE_INTERVAL_SECONDS = 0.5
 
 
 class SessionState(str, Enum):
@@ -416,11 +418,11 @@ class SessionManager:
 
             # 6. Verify frame ingestion
             frames_ingested = False
-            for _ in range(6):  # 3 seconds, 500ms intervals
+            for _ in range(WINDOWS_STARTUP_GRACE_POLLS):
                 if session.pipeline and session.pipeline.jitter_buffer.size_ms > 0:
                     frames_ingested = True
                     break
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(WINDOWS_STARTUP_GRACE_INTERVAL_SECONDS)
 
             if not frames_ingested:
                 # Check if it's a Windows loopback source that is just silent
@@ -434,15 +436,27 @@ class SessionManager:
                     health
                     and health.healthy
                     and not health.signal_present
+                    and health.source_state == "healthy_but_idle"
                     and source_desc
                     and source_desc.platform == "windows"
                     and source_desc.source_type == SourceType.SYSTEM_OUTPUT
                 ):
-                    logger.warning(f"Session {session_id}: Source is healthy but silent. Proceeding anyway. (adapter: {adapter_name})")
+                    logger.warning(
+                        "Session %s: Windows source is healthy but idle. Proceeding anyway. (adapter=%s state=%s)",
+                        session_id,
+                        adapter_name,
+                        health.source_state,
+                    )
                     session.last_error = create_session_error(WINDOWS_OUTPUT_DEVICE_SILENT)
                 else:
                     logger.error(
-                        f"Session {session_id}: Failed to ingest frames from source {session.source_id} using adapter {adapter_name}"
+                        "Session %s: Failed to ingest frames from source %s using adapter %s (health_state=%s healthy=%s signal_present=%s)",
+                        session_id,
+                        session.source_id,
+                        adapter_name,
+                        health.source_state if health else "unknown",
+                        health.healthy if health else None,
+                        health.signal_present if health else None,
                     )
                     if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT:
                         session.last_error = create_session_error(WINDOWS_LOOPBACK_CAPTURE_STALLED)

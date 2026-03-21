@@ -25,7 +25,19 @@ class NullWindowsBackend:
             "backend_state": self._probe_result.state,
             "loopback_supported": self._probe_result.loopback_supported,
             "default_output_detected": self._probe_result.default_output_detected,
+            "status": "degraded",
+            "startable": False,
             "degraded": True,
+            "backend_probe": self._probe_result.model_dump(),
+            "selected_host_api": None,
+            "default_render_device": None,
+            "loopback_device": None,
+            "startup_substate": "degraded",
+            "callback_count": 0,
+            "non_empty_buffer_count": 0,
+            "samples_received": 0,
+            "frames_emitted": 0,
+            "first_callback_at": None,
         }
         if self._probe_result.code:
             metadata["error_code"] = self._probe_result.code

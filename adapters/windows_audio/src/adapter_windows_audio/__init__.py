@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import platform
 
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import AdapterCapabilities, HealthResult, PairingResult, PrepareResult, SourceDescriptor, StartResult
 
 from .backends import BackendProbeResult, NullWindowsBackend, PyAudioWPatchBackend, WindowsSystemAudioBackend, load_pyaudiowpatch
+
+logger = logging.getLogger(__name__)
 
 
 class WindowsAudioAdapter(IngressAdapter):
@@ -82,6 +85,18 @@ class WindowsAudioAdapter(IngressAdapter):
 
         backend_module = load_pyaudiowpatch()
         backend = PyAudioWPatchBackend(backend_module=backend_module)
-        if backend.probe().available:
+        probe = backend.probe()
+        self._log_probe(probe)
+        if probe.available:
             return backend
-        return NullWindowsBackend(backend.probe())
+        return NullWindowsBackend(probe)
+
+    def _log_probe(self, probe: BackendProbeResult) -> None:
+        logger.info(
+            "Windows backend probe: backend=%s state=%s default_output_detected=%s loopback_supported=%s degraded=%s",
+            probe.backend,
+            probe.state,
+            probe.default_output_detected,
+            probe.loopback_supported,
+            not probe.available,
+        )

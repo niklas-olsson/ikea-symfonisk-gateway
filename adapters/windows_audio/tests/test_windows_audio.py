@@ -2,9 +2,28 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 from adapter_windows_audio import WindowsAudioAdapter
-from adapter_windows_audio.backends import NullWindowsBackend, PyAudioWPatchBackend
+from adapter_windows_audio.backends import NullWindowsBackend, PyAudioWPatchBackend, resolve_default_loopback_triplet
 from adapter_windows_audio.backends.models import BackendProbeResult
 from ingress_sdk.types import SourceType
+
+
+def _build_fake_backend_module(loopback_device: dict[str, object] | None = None) -> MagicMock:
+    fake_module = MagicMock()
+    fake_module.paInt16 = 8
+    fake_module.paContinue = 0
+    fake_pa = MagicMock()
+    fake_pa.get_default_wasapi_loopback.return_value = loopback_device
+    fake_pa.get_default_wasapi_loopback_device_info = None
+    fake_pa.get_default_output_device_info.return_value = {"index": 2, "name": "Speakers", "hostApi": 0}
+    fake_pa.get_host_api_count.return_value = 1
+    fake_pa.get_host_api_info_by_index.side_effect = lambda index: {"index": index, "name": "Windows WASAPI"}
+    fake_pa.get_device_count.return_value = 2
+    fake_pa.get_device_info_by_index.side_effect = lambda index: [
+        {"index": 2, "name": "Speakers", "hostApi": 0},
+        {"index": 7, "name": "Speakers (loopback)", "hostApi": 0, "isLoopbackDevice": True},
+    ][index]
+    fake_module.PyAudio.return_value = fake_pa
+    return fake_module
 
 
 def test_adapter_id() -> None:
@@ -31,8 +50,7 @@ def test_adapter_capabilities() -> None:
 @patch("adapter_windows_audio.load_pyaudiowpatch")
 def test_selects_pyaudiowpatch_backend(mock_load: MagicMock, mock_platform: MagicMock) -> None:
     del mock_platform
-    fake_module = MagicMock()
-    fake_module.PyAudio.return_value.get_default_wasapi_loopback.return_value = {"index": 7}
+    fake_module = _build_fake_backend_module(loopback_device={"index": 7, "name": "Speakers (loopback)", "hostApi": 0})
     mock_load.return_value = fake_module
 
     adapter = WindowsAudioAdapter()
@@ -43,6 +61,10 @@ def test_selects_pyaudiowpatch_backend(mock_load: MagicMock, mock_platform: Magi
     assert sources[0].source_type == SourceType.SYSTEM_OUTPUT
     assert sources[0].metadata["backend"] == "pyaudiowpatch"
     assert sources[0].metadata["degraded"] is False
+    assert sources[0].metadata["status"] == "ready"
+    assert sources[0].metadata["startable"] is True
+    assert sources[0].metadata["backend_probe"]["available"] is True
+    assert sources[0].metadata["non_empty_buffer_count"] == 0
 
 
 @patch("platform.system", return_value="Windows")
@@ -57,6 +79,8 @@ def test_missing_backend_yields_degraded_source(mock_load: MagicMock, mock_platf
     assert sources[0].display_name == "Default System Sound (windows)"
     assert sources[0].source_type == SourceType.SYSTEM_OUTPUT
     assert sources[0].metadata["degraded"] is True
+    assert sources[0].metadata["status"] == "degraded"
+    assert sources[0].metadata["startable"] is False
     assert sources[0].metadata["error_code"] == "windows_loopback_backend_missing"
 
     prepare = adapter.prepare("default")
@@ -68,7 +92,7 @@ def test_missing_backend_yields_degraded_source(mock_load: MagicMock, mock_platf
 @patch("adapter_windows_audio.load_pyaudiowpatch")
 def test_probe_failure_yields_degraded_source(mock_load: MagicMock, mock_platform: MagicMock) -> None:
     del mock_platform
-    fake_module = MagicMock()
+    fake_module = _build_fake_backend_module()
     fake_module.PyAudio.return_value.get_default_wasapi_loopback.side_effect = RuntimeError("probe failed")
     mock_load.return_value = fake_module
 
@@ -98,9 +122,7 @@ def test_null_backend_fails_with_probe_error() -> None:
 
 
 def test_pyaudiowpatch_callback_emits_canonical_frame() -> None:
-    fake_module = MagicMock()
-    fake_module.PyAudio.return_value.get_default_wasapi_loopback.return_value = {"index": 1}
-    fake_module.paContinue = 0
+    fake_module = _build_fake_backend_module(loopback_device={"index": 1, "name": "Loopback", "hostApi": 0})
     backend = PyAudioWPatchBackend(backend_module=fake_module)
     frame_sink = MagicMock()
     backend._frame_sink = frame_sink
@@ -114,6 +136,10 @@ def test_pyaudiowpatch_callback_emits_canonical_frame() -> None:
     assert len(args[0]) == 480 * 2 * 2
     assert args[1] == 0
     assert args[2] == 10_000_000
+    diagnostics = backend.get_diagnostics_snapshot()
+    assert diagnostics.frames_emitted == 1
+    assert diagnostics.non_empty_buffer_count == 1
+    assert diagnostics.startup_substate == "healthy_but_idle"
     assert callback_result == (None, 0)
 
 
@@ -123,10 +149,7 @@ def test_start_stop_session_delegates_backend(mock_load: MagicMock, mock_platfor
     del mock_platform
     fake_stream = MagicMock()
     fake_stream.start_stream = MagicMock()
-    fake_module = MagicMock()
-    fake_module.paInt16 = 8
-    fake_module.paContinue = 0
-    fake_module.PyAudio.return_value.get_default_wasapi_loopback.return_value = {"index": 3}
+    fake_module = _build_fake_backend_module(loopback_device={"index": 3, "name": "Loopback", "hostApi": 0})
     fake_module.PyAudio.return_value.open.return_value = fake_stream
     mock_load.return_value = fake_module
 
@@ -139,3 +162,14 @@ def test_start_stop_session_delegates_backend(mock_load: MagicMock, mock_platfor
     adapter.stop(result.session_id)
     fake_stream.stop_stream.assert_called_once()
     fake_stream.close.assert_called_once()
+
+
+def test_loopback_resolution_falls_back_to_enumerated_devices() -> None:
+    fake_module = _build_fake_backend_module(loopback_device=None)
+
+    host_api, render_device, loopback_device = resolve_default_loopback_triplet(fake_module)
+
+    assert host_api is not None
+    assert render_device is not None
+    assert loopback_device is not None
+    assert loopback_device["isLoopbackDevice"] is True
