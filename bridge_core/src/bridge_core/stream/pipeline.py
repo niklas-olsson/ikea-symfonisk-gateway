@@ -38,6 +38,7 @@ DEFAULT_CLIENT_QUEUE_BYTES = 131072
 DEFAULT_CLIENT_OVERFLOW_GRACE_MS = 750
 PRIMARY_BACKLOG_WARNING_THRESHOLD_MS = 750.0
 PACING_LOG_INTERVAL_SECONDS = 2.0
+STABLE_PRIMARY_HARD_EVICTION_QUEUE_MULTIPLIER = 8
 SubscriberRole = Literal["primary_renderer", "auxiliary", "unknown"]
 
 
@@ -751,7 +752,7 @@ class StreamPipeline:
                             subscriber.queued_bytes,
                             backlog_ms,
                         )
-                    if self._should_evict_subscriber(subscriber, now):
+                    if self._should_evict_subscriber(subscriber, now, len(data)):
                         to_evict.append(subscriber)
                         continue
                 else:
@@ -910,12 +911,15 @@ class StreamPipeline:
             "is_primary_healthy": self._subscriber_primary_healthy(subscriber, now),
         }
 
-    def _should_evict_subscriber(self, subscriber: PipelineSubscriber, now: float) -> bool:
+    def _should_evict_subscriber(self, subscriber: PipelineSubscriber, now: float, incoming_bytes: int) -> bool:
         if subscriber.overflow_started_monotonic is None:
             return False
         if self._is_stable_profile() and self._is_primary_candidate(subscriber):
-            return False
+            return (subscriber.queued_bytes + incoming_bytes) >= self._stable_primary_hard_queue_bytes(subscriber)
         return (now - subscriber.overflow_started_monotonic) * 1000 >= self._policy_for_subscriber(subscriber).overflow_grace_ms
+
+    def _stable_primary_hard_queue_bytes(self, subscriber: PipelineSubscriber) -> int:
+        return self._policy_for_subscriber(subscriber).queue_bytes * STABLE_PRIMARY_HARD_EVICTION_QUEUE_MULTIPLIER
 
     async def _evict_subscriber(self, subscriber: PipelineSubscriber, now: float) -> None:
         async with self._lock:

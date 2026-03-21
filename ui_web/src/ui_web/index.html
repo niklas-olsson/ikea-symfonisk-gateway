@@ -656,6 +656,10 @@
         const refreshSourcesBtn = document.getElementById('refresh-sources');
         const refreshTargetsBtn = document.getElementById('refresh-targets');
         let currentSessionId = null;
+        let deliveryProfileConfig = {
+            globalProfile: 'stable',
+            sourceOverrides: {}
+        };
 
         // ── Bluetooth state ────────────────────────────────
         let btPairingTimer = null;
@@ -663,33 +667,106 @@
         let btPairingRemainingSeconds = 0;
         let btPreferredMac = null;
 
+        function normalizeDeliveryProfile(value) {
+            return value === 'experimental' ? 'experimental' : 'stable';
+        }
+
+        function parseConfiguredDeliveryProfile(value) {
+            if (value === 'stable' || value === 'experimental') {
+                return value;
+            }
+            return null;
+        }
+
+        function normalizeDeliveryProfileOverrides(value) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                return {};
+            }
+
+            return Object.fromEntries(
+                Object.entries(value)
+                    .map(([sourceId, profile]) => [sourceId, typeof profile === 'string' ? parseConfiguredDeliveryProfile(profile) : null])
+                    .filter(([sourceId, profile]) => typeof sourceId === 'string' && profile !== null)
+            );
+        }
+
+        function getSelectedSourceId() {
+            return sourceSelect.value || null;
+        }
+
+        function getEffectiveDeliveryProfileForSource(sourceId) {
+            if (sourceId && Object.prototype.hasOwnProperty.call(deliveryProfileConfig.sourceOverrides, sourceId)) {
+                return deliveryProfileConfig.sourceOverrides[sourceId];
+            }
+            return deliveryProfileConfig.globalProfile;
+        }
+
+        function syncDeliveryProfileSelection() {
+            deliveryProfileSelect.value = getEffectiveDeliveryProfileForSource(getSelectedSourceId());
+            updateDeliveryProfileUI();
+        }
+
         function updateDeliveryProfileUI() {
             deliveryProfileNote.style.display = deliveryProfileSelect.value === 'experimental' ? 'block' : 'none';
         }
 
         async function loadDeliveryProfile() {
             try {
-                const res = await fetch('/v1/config/audio_delivery_profile');
-                if (res.ok) {
-                    const { value } = await res.json();
-                    deliveryProfileSelect.value = value === 'experimental' ? 'experimental' : 'stable';
+                const [globalRes, overridesRes] = await Promise.all([
+                    fetch('/v1/config/audio_delivery_profile'),
+                    fetch('/v1/config/audio_delivery_profile_overrides')
+                ]);
+
+                if (globalRes.ok) {
+                    const { value } = await globalRes.json();
+                    deliveryProfileConfig.globalProfile = parseConfiguredDeliveryProfile(value) || 'stable';
                 } else {
-                    deliveryProfileSelect.value = 'stable';
+                    deliveryProfileConfig.globalProfile = 'stable';
+                }
+
+                if (overridesRes.ok) {
+                    const { value } = await overridesRes.json();
+                    deliveryProfileConfig.sourceOverrides = normalizeDeliveryProfileOverrides(value);
+                } else {
+                    deliveryProfileConfig.sourceOverrides = {};
                 }
             } catch (err) {
-                deliveryProfileSelect.value = 'stable';
+                deliveryProfileConfig = {
+                    globalProfile: 'stable',
+                    sourceOverrides: {}
+                };
             }
-            updateDeliveryProfileUI();
+            syncDeliveryProfileSelection();
         }
 
         async function persistDeliveryProfile() {
-            const value = deliveryProfileSelect.value === 'experimental' ? 'experimental' : 'stable';
-            await fetch('/v1/config/audio_delivery_profile', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ value })
-            });
-            updateDeliveryProfileUI();
+            const sourceId = getSelectedSourceId();
+            const value = normalizeDeliveryProfile(deliveryProfileSelect.value);
+            const hasSourceOverride = sourceId && Object.prototype.hasOwnProperty.call(deliveryProfileConfig.sourceOverrides, sourceId);
+
+            if (sourceId && hasSourceOverride) {
+                const nextOverrides = { ...deliveryProfileConfig.sourceOverrides };
+                if (value === deliveryProfileConfig.globalProfile) {
+                    delete nextOverrides[sourceId];
+                } else {
+                    nextOverrides[sourceId] = value;
+                }
+                await fetch('/v1/config/audio_delivery_profile_overrides', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: nextOverrides })
+                });
+                deliveryProfileConfig.sourceOverrides = nextOverrides;
+            } else {
+                await fetch('/v1/config/audio_delivery_profile', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value })
+                });
+                deliveryProfileConfig.globalProfile = value;
+            }
+
+            syncDeliveryProfileSelection();
         }
 
         // ── Session functions ──────────────────────────────
@@ -701,6 +778,7 @@
                 sourceSelect.innerHTML = sources.map(s =>
                     `<option value="${s.source_id}">${s.display_name} (${s.source_type})</option>`
                 ).join('') || '<option value="">No sources available</option>';
+                syncDeliveryProfileSelection();
             } catch (err) {
                 console.error('Failed to fetch sources', err);
                 addLog('ERROR', 'Failed to fetch sources');
@@ -1230,6 +1308,7 @@
 
         playBtn.onclick = createAndStartSession;
         stopBtn.onclick = stopCurrentSession;
+        sourceSelect.onchange = syncDeliveryProfileSelection;
         deliveryProfileSelect.onchange = () => {
             persistDeliveryProfile().catch(err => {
                 console.error('Failed to persist delivery profile', err);

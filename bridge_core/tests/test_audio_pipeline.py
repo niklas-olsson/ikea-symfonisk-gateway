@@ -8,7 +8,13 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from bridge_core.core.session_manager import SessionFrameSink
-from bridge_core.stream.pipeline import JitterBuffer, PipelineSubscriber, PipelineSubscriberInfo, StreamPipeline
+from bridge_core.stream.pipeline import (
+    STABLE_PRIMARY_HARD_EVICTION_QUEUE_MULTIPLIER,
+    JitterBuffer,
+    PipelineSubscriber,
+    PipelineSubscriberInfo,
+    StreamPipeline,
+)
 from ingress_sdk.protocol import AudioFrame
 
 
@@ -531,6 +537,45 @@ async def test_stable_primary_subscriber_is_not_evicted_on_overflow() -> None:
     assert primary.closed is False
     assert primary.queue.qsize() == 1
     assert diagnostics["primary_delivery_alive"] is True
+
+
+@pytest.mark.asyncio
+async def test_stable_primary_subscriber_is_evicted_at_hard_limit() -> None:
+    queue_bytes = 8
+    pipeline = StreamPipeline(
+        "test_sess",
+        "mp3_48k_stereo_320",
+        target_id="tgt_1",
+        delivery_profile="stable",
+        primary_client_queue_bytes=queue_bytes,
+        primary_client_overflow_grace_ms=1,
+    )
+    now = time.monotonic()
+    primary = PipelineSubscriber(
+        subscriber_id=1,
+        queue=asyncio.Queue(),
+        wake_event=asyncio.Event(),
+        attached_monotonic=now,
+        role="primary_renderer",
+        remote_addr="192.168.1.10",
+        user_agent="Sonos/1.0",
+        delivery_path_id="tgt_1",
+        last_successful_enqueue_monotonic=now,
+        last_successful_dequeue_monotonic=None,
+        last_successful_yield_monotonic=None,
+        overflow_started_monotonic=now - 1,
+        overflow_events=1,
+        queued_bytes=(queue_bytes * STABLE_PRIMARY_HARD_EVICTION_QUEUE_MULTIPLIER) - 4,
+    )
+    pipeline._clients = [primary]
+    pipeline._active = True
+
+    await pipeline._fan_out_encoded_chunk(b"abcd", time.monotonic())
+
+    diagnostics = pipeline.get_diagnostics_snapshot()
+    assert diagnostics["active_client_count"] == 0
+    assert diagnostics["client_stall_disconnects_total"] == 1
+    assert primary.closed is True
 
 
 @pytest.mark.asyncio
