@@ -7,7 +7,8 @@ from pydantic import BaseModel
 
 from bridge_core.api.models import ErrorResponse
 from bridge_core.core import SessionManager
-from bridge_core.core.errors import QUIESCED_SESSION_CONFLICT, SessionConflictError, SessionError
+from bridge_core.core.errors import SESSION_CONFLICT, SessionConflictError, SessionError
+from bridge_core.core.session_manager import STOP_REASON_MANUAL
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
@@ -17,6 +18,8 @@ class CreateSessionRequest(BaseModel):
     target_id: str | None = None
     stream_profile: str = "auto"
     auto_heal: bool = True
+    takeover: bool = False
+    exclusive: bool = False
 
 
 class SessionResponse(BaseModel):
@@ -28,12 +31,14 @@ class SessionResponse(BaseModel):
     selected_stream_profile: str | None = None
     effective_stream_profile: str | None = None
     auto_heal: bool
+    exclusive: bool
     state: str
     stream_url: str | None = None
     adapter_session_id: str | None = None
     created_at: float
     started_at: float | None = None
     stopped_at: float | None = None
+    stop_reason: str | None = None
     last_error: SessionError | None = None
     presentation_state: str | None = None
     presentation_detail: str | None = None
@@ -51,18 +56,24 @@ async def create_session(request: Request, body: CreateSessionRequest) -> Sessio
     manager: SessionManager = request.app.state.session_manager
     source_registry = request.app.state.source_registry
     try:
-        session = manager.create(
+        session = await manager.create(
             source_id=body.source_id,
             target_id=body.target_id,
             stream_profile=body.stream_profile,
             auto_heal=body.auto_heal,
+            takeover=body.takeover,
+            takeover_reason=STOP_REASON_MANUAL if body.takeover else None,
+            exclusive=body.exclusive,
         )
         source_health = source_registry.get_source_health(session.source_id)
         return SessionResponse(**session.to_dict(source_health=source_health))
     except SessionConflictError as e:
+        # Check if the incumbent is quiesced to provide a more specific error code
+        # However, the requirement says different-source + reject return 409.
+        # We'll use SESSION_CONFLICT for general 409s.
         raise HTTPException(
             status_code=409,
-            detail={"code": QUIESCED_SESSION_CONFLICT, "message": str(e)},
+            detail={"code": SESSION_CONFLICT, "message": str(e)},
         )
     except Exception as e:
         raise HTTPException(

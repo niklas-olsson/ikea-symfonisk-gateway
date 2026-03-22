@@ -35,6 +35,11 @@ async def async_setup_entry(
 class SymfoniskButton(CoordinatorEntity[SymfoniskCoordinator], ButtonEntity):
     """Base class for Symfonisk buttons."""
 
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self.coordinator.last_update_success and self.coordinator.data.health.get("status") == "ok"
+
     def __init__(self, coordinator: SymfoniskCoordinator, entry: ConfigEntry) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -49,7 +54,7 @@ class SymfoniskButton(CoordinatorEntity[SymfoniskCoordinator], ButtonEntity):
 class SymfoniskStartButton(SymfoniskButton):
     """Button to start a playback session."""
 
-    _attr_name = "Start Session"
+    _attr_name = "Start Playback"
 
     async def async_press(self) -> None:
         """Handle the button press."""
@@ -69,14 +74,15 @@ class SymfoniskStartButton(SymfoniskButton):
 
 
 class SymfoniskStopButton(SymfoniskButton):
-    """Button to stop all playback sessions."""
+    """Button to stop the current playback session."""
 
-    _attr_name = "Stop All Sessions"
+    _attr_name = "Stop Playback"
 
     async def async_press(self) -> None:
         """Handle the button press."""
+        # Target all active sessions on this bridge for a "household stop"
         for session in self.coordinator.data.sessions:
-            if session.get("state") in ("playing", "starting", "preparing"):
+            if session.get("state") in ("playing", "starting", "preparing", "healing"):
                 await self.coordinator.stop_session(session["session_id"])
 
     @property
