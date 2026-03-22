@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
-from bridge_core.core.session_manager import SessionManager
+from bridge_core.core.session_manager import STOP_REASON_PREFERRED, SessionManager
 from bridge_core.core.target_registry import TargetRegistry
 
 logger = logging.getLogger(__name__)
@@ -62,10 +62,12 @@ class AutoPlayController:
         logger.info(f"Auto-playing newly available Bluetooth source {source_id} to target {target_id}")
 
         try:
-            # Create and start a new session
+            # Create and start a new session, taking over if necessary
             session = self._session_manager.create(
                 source_id=source_id,
                 target_id=target_id,
+                takeover=True,
+                takeover_reason=STOP_REASON_PREFERRED,
             )
             # Use synchronous shim or directly await (SessionManager.start spawns a background asyncio task)
             self._session_manager.start(session.session_id)
