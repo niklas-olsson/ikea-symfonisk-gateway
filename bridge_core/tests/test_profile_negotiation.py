@@ -13,6 +13,8 @@ from ingress_sdk.types import PrepareResult, SourceCapabilities, SourceDescripto
 
 
 class MockTargetDescriptor(TargetDescriptor):
+    """Mock target descriptor for testing."""
+
     def __init__(self, tid: str, codecs: list[str] | None = None) -> None:
         self._tid = tid
         self._codecs = codecs or ["mp3", "aac", "pcm_s16le"]

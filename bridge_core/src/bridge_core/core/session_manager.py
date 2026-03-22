@@ -235,7 +235,9 @@ class Session:
                 else None,
                 "keepalive_active": bool(diagnostics.get("keepalive_active", False)),
                 "jitter_buffer_size_ms": float(diagnostics.get("jitter_buffer_size_ms") or 0.0),
-                "source_health": source_health.model_dump() if (source_health is not None and hasattr(source_health, "model_dump")) else source_health,
+                "source_health": source_health.model_dump()
+                if (source_health is not None and hasattr(source_health, "model_dump"))
+                else source_health,
             },
         }
 
@@ -1874,7 +1876,11 @@ class SessionManager:
             self._event_bus.emit(
                 EventType.HEAL_ATTEMPTED,
                 session_id=session_id,
-                payload={"mode": mode, "reason": session.media_reason, "source_health": source_health.model_dump() if source_health else None},
+                payload={
+                    "mode": mode,
+                    "reason": session.media_reason,
+                    "source_health": source_health.model_dump() if source_health else None,
+                },
             )
             return
 
