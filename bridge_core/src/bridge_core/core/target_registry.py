@@ -189,7 +189,7 @@ class TargetRegistry:
             active_target_ids = {
                 sess.target_id
                 for sess in self._session_manager.list()
-                if sess.state.value in ("playing", "starting", "preparing", "healing", "degraded")
+                if sess.state.value in ("playing", "starting", "preparing", "healing", "degraded", "quiesced")
             }
 
         results = []

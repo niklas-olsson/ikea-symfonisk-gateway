@@ -20,6 +20,7 @@ RENDERER_PLAYBACK_FAILED = "renderer_playback_failed"
 SOURCE_START_FAILED = "source_start_failed"
 FRAME_INGEST_FAILED = "frame_ingest_failed"
 SOURCE_ADAPTER_PLATFORM_MISMATCH = "source_adapter_platform_mismatch"
+QUIESCED_SESSION_CONFLICT = "quiesced_session_conflict"
 LINUX_AUDIO_BACKEND_MISSING = "linux_audio_backend_missing"
 BLUETOOTH_PACTL_MISSING = "missing_pactl"
 BLUETOOTH_AUDIO_TOOLS_MISSING = "missing_audio_tools"
@@ -64,6 +65,11 @@ ERROR_DETAILS = {
         "message": "Source platform does not match adapter platform.",
         "subsystem": "source_registry",
         "action": "Check source registration and adapter selection logic.",
+    },
+    QUIESCED_SESSION_CONFLICT: {
+        "message": "A conflicting quiesced session exists for this target.",
+        "subsystem": "session_manager",
+        "action": "The target is currently allocated to another source in a detached state. Stop the other session or use its original source.",
     },
     LINUX_AUDIO_BACKEND_MISSING: {
         "message": "Required Linux audio capture tools (parec or arecord) are missing.",
@@ -121,6 +127,15 @@ ERROR_DETAILS = {
         "action": "Reinstall dependencies and ensure PortAudio is correctly installed.",
     },
 }
+
+
+class SessionConflictError(Exception):
+    """Raised when a session creation conflicts with an existing active session."""
+
+    def __init__(self, session_id: str, target_id: str):
+        self.session_id = session_id
+        self.target_id = target_id
+        super().__init__(f"Target {target_id} is already in use by session {session_id}")
 
 
 def create_session_error(code: str, custom_message: str | None = None, details: dict[str, object] | None = None) -> SessionError:

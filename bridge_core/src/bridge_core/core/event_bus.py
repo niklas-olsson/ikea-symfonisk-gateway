@@ -19,6 +19,7 @@ class EventType(str, Enum):
     SESSION_STOPPING = "session.stopping"
     SESSION_STOPPED = "session.stopped"
     SESSION_FAILED = "session.failed"
+    SESSION_MEDIA_CHANGED = "session.media.changed"
     PUBLISHER_ACTIVE = "publisher.active"
     SOURCE_STATE_CHANGED = "source.state.changed"
     SOURCE_STARTED = "source.started"

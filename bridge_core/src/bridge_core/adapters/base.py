@@ -2,7 +2,28 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from enum import Enum
 from typing import Any
+
+
+class OwnershipStatus(str, Enum):
+    OWNED = "owned"
+    NOT_OWNED = "not_owned"
+    UNKNOWN = "unknown"
+
+
+class OwnershipResult:
+    """Result of an ownership inspection."""
+
+    def __init__(self, status: OwnershipStatus, evidence: str | None = None):
+        self.status = status
+        self.evidence = evidence
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "evidence": self.evidence,
+        }
 
 
 class TargetDescriptor(ABC):
@@ -130,4 +151,9 @@ class RendererAdapter(ABC):
     @abstractmethod
     async def heal(self, target_id: str) -> dict[str, Any]:
         """Attempt to heal a target's group/topology."""
+        ...
+
+    @abstractmethod
+    async def inspect_ownership(self, target_id: str) -> OwnershipResult:
+        """Inspect if the target is currently playing content from this bridge."""
         ...

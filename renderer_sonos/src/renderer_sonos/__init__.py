@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import soco  # type: ignore[import-untyped]
-from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
+from bridge_core.adapters.base import OwnershipResult, OwnershipStatus, RendererAdapter, TargetDescriptor
 from bridge_core.core.event_bus import EventBus, EventType, Severity
 from shared.normalization import normalize_for_comparison
 
@@ -349,6 +349,42 @@ class SonosRendererAdapter(RendererAdapter):
         except Exception as e:
             logger.error("Failed to stop playback on %s: %s", target_id, e)
             return {"success": False, "error": f"Stop failed: {e}"}
+
+    async def inspect_ownership(self, target_id: str) -> OwnershipResult:
+        """Inspect if the target is currently playing content from this bridge."""
+        player = self._players.get(target_id)
+        if not player:
+            return OwnershipResult(OwnershipStatus.UNKNOWN, "Target not found in discovery")
+
+        try:
+
+            def _get_info(p: soco.SoCo) -> dict[str, Any]:
+                return {
+                    "transport": p.get_current_transport_info(),
+                    "track": p.get_current_track_info(),
+                }
+
+            info = await self._run_with_retry(_get_info, player)
+            current_uri = info.get("track", {}).get("uri")
+            state = info.get("transport", {}).get("current_transport_state")
+
+            if not current_uri:
+                return OwnershipResult(OwnershipStatus.NOT_OWNED, "No URI currently playing")
+
+            last_played = self._last_played.get(target_id)
+            if last_played and last_played.get("stream_url") == current_uri:
+                return OwnershipResult(OwnershipStatus.OWNED, f"URI match: {current_uri}")
+
+            # Also check for partial match if the bridge host is in the URI
+            # This handles cases where the adapter was restarted but the player still has the URL
+            if "/streams/" in current_uri:
+                return OwnershipResult(OwnershipStatus.OWNED, f"Bridge stream pattern match: {current_uri}")
+
+            return OwnershipResult(OwnershipStatus.NOT_OWNED, f"Foreign URI: {current_uri} (State: {state})")
+
+        except Exception as e:
+            logger.warning("Failed to inspect ownership for Sonos target %s: %s", target_id, e)
+            return OwnershipResult(OwnershipStatus.UNKNOWN, str(e))
 
     async def set_volume(self, target_id: str, volume: float) -> dict[str, Any]:
         """Set volume on a target group (0.0 to 1.0)."""

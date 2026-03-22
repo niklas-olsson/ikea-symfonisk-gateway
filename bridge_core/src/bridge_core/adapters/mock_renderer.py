@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from typing import Any
 
-from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
+from bridge_core.adapters.base import OwnershipResult, OwnershipStatus, RendererAdapter, TargetDescriptor
 
 
 class MockTargetDescriptor(TargetDescriptor):
@@ -80,3 +80,6 @@ class MockRendererAdapter(RendererAdapter):
 
     async def heal(self, target_id: str) -> dict[str, Any]:
         return {"success": True}
+
+    async def inspect_ownership(self, target_id: str) -> OwnershipResult:
+        return OwnershipResult(OwnershipStatus.OWNED)
