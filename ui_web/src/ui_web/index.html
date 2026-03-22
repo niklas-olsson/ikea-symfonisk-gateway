@@ -10,19 +10,25 @@
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            /* Impeccable Design System: OKLCH Colors */
-            --bg: oklch(12% 0.01 240);
-            --surface: oklch(18% 0.01 240);
-            --surface-hover: oklch(22% 0.02 240);
-            --text: oklch(92% 0.01 240);
-            --text-muted: oklch(65% 0.01 240);
-            --accent: oklch(65% 0.18 240);
-            --accent-hover: oklch(70% 0.18 240);
+            /* Impeccable Design System: OKLCH Colors (Papery Light Default) */
+            --bg: oklch(97% 0.01 95);
+            --surface: oklch(94% 0.01 95);
+            --surface-hover: oklch(91% 0.02 95);
+            --text: oklch(25% 0.01 95);
+            --text-muted: oklch(55% 0.01 95);
+            --accent: oklch(55% 0.15 240);
+            --accent-hover: oklch(60% 0.15 240);
             --error: oklch(60% 0.15 20);
             --success: oklch(65% 0.15 150);
             --warning: oklch(70% 0.15 80);
             --bt-accent: oklch(60% 0.16 260);
             --bt-accent-hover: oklch(65% 0.16 260);
+
+            /* Semantic UI variables */
+            --border-faint: oklch(0% 0 0 / 5%);
+            --border-muted: oklch(0% 0 0 / 10%);
+            --border-strong: oklch(0% 0 0 / 20%);
+            --ui-neutral: oklch(60% 0 0);
 
             /* 4pt Grid System */
             --radius: 12px;
@@ -34,6 +40,23 @@
             --spacing-32: 32px;
             --spacing-48: 48px;
             --spacing-64: 64px;
+        }
+
+        [data-theme="dark"] {
+            /* Impeccable Design System: Dark Palette */
+            --bg: oklch(12% 0.01 240);
+            --surface: oklch(18% 0.01 240);
+            --surface-hover: oklch(22% 0.02 240);
+            --text: oklch(92% 0.01 240);
+            --text-muted: oklch(65% 0.01 240);
+            --accent: oklch(65% 0.18 240);
+            --accent-hover: oklch(70% 0.18 240);
+
+            /* Semantic UI variables (Dark) */
+            --border-faint: oklch(100% 0 0 / 5%);
+            --border-muted: oklch(100% 0 0 / 10%);
+            --border-strong: oklch(100% 0 0 / 20%);
+            --ui-neutral: oklch(40% 0 0);
         }
 
         * {
@@ -85,7 +108,7 @@
             display: flex;
             flex-direction: column;
             gap: var(--spacing-24);
-            border: 1px solid oklch(100% 0 0 / 5%);
+            border: 1px solid var(--border-faint);
         }
 
         .selection-row {
@@ -112,7 +135,7 @@
             padding: var(--spacing-16) var(--spacing-24);
             background-color: var(--bg);
             border-radius: var(--radius);
-            border: 1px solid oklch(100% 0 0 / 5%);
+            border: 1px solid var(--border-faint);
         }
 
         .status-main {
@@ -170,7 +193,7 @@
             font-size: 1rem;
             padding: var(--spacing-12) var(--spacing-16);
             border-radius: var(--radius);
-            border: 1px solid oklch(100% 0 0 / 10%);
+            border: 1px solid var(--border-muted);
             background-color: var(--bg);
             color: var(--text);
             cursor: pointer;
@@ -187,7 +210,7 @@
 
         select:hover {
             background-color: var(--surface-hover);
-            border-color: oklch(100% 0 0 / 20%);
+            border-color: var(--border-strong);
         }
 
         select:focus {
@@ -228,7 +251,7 @@
         button.secondary {
             background-color: transparent;
             color: var(--text);
-            border: 1px solid oklch(100% 0 0 / 20%);
+            border: 1px solid var(--border-strong);
         }
 
         button.secondary:hover {
@@ -275,9 +298,9 @@
         }
 
         .status-idle {
-            background-color: oklch(40% 0 0 / 20%);
+            background-color: oklch(from var(--ui-neutral) l c h / 20%);
             color: var(--text-muted);
-            border: 1px solid oklch(40% 0 0 / 30%);
+            border: 1px solid oklch(from var(--ui-neutral) l c h / 30%);
         }
 
         .status-active {
@@ -332,7 +355,7 @@
             display: flex;
             flex-direction: column-reverse;
             gap: var(--spacing-12);
-            border: 1px solid oklch(100% 0 0 / 5%);
+            border: 1px solid var(--border-faint);
         }
 
         .event-item {
@@ -340,7 +363,7 @@
             gap: var(--spacing-16);
             align-items: flex-start;
             padding-bottom: var(--spacing-8);
-            border-bottom: 1px solid oklch(100% 0 0 / 5%);
+            border-bottom: 1px solid var(--border-faint);
         }
 
         .event-item:last-child {
@@ -423,9 +446,9 @@
         }
 
         .bt-indicator.off {
-            background: oklch(40% 0 0 / 15%);
+            background: oklch(from var(--ui-neutral) l c h / 15%);
             color: var(--text-muted);
-            border: 1px solid oklch(40% 0 0 / 25%);
+            border: 1px solid oklch(from var(--ui-neutral) l c h / 25%);
         }
 
         .bt-indicator.warning {
@@ -488,7 +511,7 @@
         .bt-countdown-bar {
             flex: 1;
             height: 4px;
-            background: oklch(40% 0 0 / 20%);
+            background: oklch(from var(--ui-neutral) l c h / 20%);
             border-radius: 2px;
             overflow: hidden;
         }
@@ -542,12 +565,12 @@
             padding: var(--spacing-12) var(--spacing-16);
             background: var(--bg);
             border-radius: var(--radius);
-            border: 1px solid oklch(100% 0 0 / 5%);
+            border: 1px solid var(--border-faint);
             transition: border-color 0.2s;
         }
 
         .bt-device-item:hover {
-            border-color: oklch(100% 0 0 / 12%);
+            border-color: var(--border-muted);
         }
 
         .bt-device-item.connected {
@@ -674,14 +697,27 @@
 </head>
 
 <body>
+    <script>
+        // Apply theme immediately to prevent flash
+        (function () {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            if (savedTheme === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
+
     <main>
         <header style="display: flex; justify-content: space-between; align-items: flex-start;">
             <div>
                 <h1>Bridge</h1>
                 <p class="subtitle">IKEA SYMFONISK Gateway v0.1.0</p>
             </div>
-            <div id="bridge-health" class="status-tag status-idle" style="margin-top: var(--spacing-12);">
-                Checking Health...
+            <div style="display: flex; gap: var(--spacing-12); align-items: center; margin-top: var(--spacing-12);">
+                <button id="theme-toggle" class="small-text" style="padding: 4px 10px;">◑</button>
+                <div id="bridge-health" class="status-tag status-idle">
+                    Checking Health...
+                </div>
             </div>
         </header>
 
@@ -822,7 +858,7 @@
 
             <!-- Unavailable Message -->
             <div id="bt-unavailable-msg"
-                style="display: none; padding: var(--spacing-24); text-align: center; color: var(--text-muted); font-size: 0.9rem; background: oklch(100% 0 0 / 2%); border-radius: var(--radius);">
+                style="display: none; padding: var(--spacing-24); text-align: center; color: var(--text-muted); font-size: 0.9rem; background: var(--border-faint); border-radius: var(--radius);">
                 Bluetooth is currently disabled or unsupported on this hardware.
             </div>
         </section>
@@ -838,6 +874,24 @@
     </main>
 
     <script>
+        // ── Theme Management ───────────────────────────────
+        const themeToggle = document.getElementById('theme-toggle');
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+            if (newTheme === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                localStorage.setItem('theme', 'dark');
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+                localStorage.setItem('theme', 'light');
+            }
+        }
+
+        themeToggle.onclick = toggleTheme;
+
         // ── Session UI refs ────────────────────────────────
         const sourceSelect = document.getElementById('source-select');
         const targetSelect = document.getElementById('target-select');
