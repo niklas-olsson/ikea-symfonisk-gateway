@@ -1854,7 +1854,8 @@
         // ── Initialize ─────────────────────────────────────
 
         fetchHealth();
-        setInterval(fetchHealth, 30000);
+        // Reduced health check frequency to 60s to lower idle compute budget
+        setInterval(fetchHealth, 60000);
 
         loadDeliveryProfile();
         fetchSources();
@@ -1911,8 +1912,8 @@
         }
         checkActiveSessions();
 
-        // Poll BT status every 10s for adapter state changes
-        setInterval(() => RefreshCoordinator.request(['btStatus']), 10000);
+        // Poll BT status every 30s (reduced from 10s) for adapter state changes
+        setInterval(() => RefreshCoordinator.request(['btStatus']), 30000);
     </script>
 </body>
 
