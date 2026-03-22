@@ -6,6 +6,7 @@ import logging
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -57,6 +58,7 @@ class SymfoniskStartButton(SymfoniskButton):
     """Button to start a playback session."""
 
     _attr_name = "Start Playback"
+    _attr_entity_category = EntityCategory.CONFIG
 
     async def async_press(self) -> None:
         """Handle the button press."""
@@ -79,6 +81,7 @@ class SymfoniskStopButton(SymfoniskButton):
     """Button to stop the current playback session."""
 
     _attr_name = "Stop Playback"
+    _attr_entity_category = EntityCategory.CONFIG
 
     async def async_press(self) -> None:
         """Handle the button press."""
