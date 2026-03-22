@@ -1238,40 +1238,34 @@
             }
 
             playBtn.disabled = true;
+            addLog('SYSTEM', `Starting playback on ${targetName}...`);
 
             try {
                 await persistDeliveryProfile();
-
-                // Check if target is already active to show "Taking over" message
-                const targetsRes = await fetch('/v1/targets');
-                const { targets } = await targetsRes.json();
-                const target = targets.find(t => t.target_id === target_id);
-                if (target && target.is_active) {
-                    addLog('SYSTEM', `Taking over ${targetName}...`);
-                } else {
-                    addLog('SYSTEM', 'Starting playback...');
-                }
-
-                const res = await fetch('/v1/play', {
+                const playRes = await fetch('/v1/play', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         source_id,
                         target_id,
                         conflict_policy: 'takeover',
+                        stream_profile: 'auto',
                         auto_heal: true
                     })
                 });
 
-                if (!res.ok) {
-                    const err = await res.json();
+                if (!playRes.ok) {
+                    const err = await playRes.json();
+                    if (playRes.status === 409) {
+                        throw new Error(err.detail?.message || 'Conflicting session already exists');
+                    }
                     throw new Error(err.detail?.message || 'Failed to start playback');
                 }
 
-                const session = await res.json();
+                const session = await playRes.json();
                 currentSessionId = session.session_id;
 
-                addLog('SYSTEM', `Session ${currentSessionId} initialized`);
+                addLog('SYSTEM', `Playback started (Session: ${currentSessionId})`);
                 stopBtn.disabled = false;
                 updateSessionUI('ACTIVE', 'Starting');
             } catch (err) {

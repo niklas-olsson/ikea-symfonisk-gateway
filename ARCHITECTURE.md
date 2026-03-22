@@ -47,14 +47,25 @@ To maintain a clean architecture and avoid "dependency hell," the following rule
 - Changes are pushed via `EventBus` (`TOPOLOGY_CHANGED`, `RENDERER_DISCOVERY_CHANGED`).
 
 ### 2. Session Lifecycle (Creation -> Playback)
-1. **Creation**: `SessionManager.create()` initializes a `Session` object with a unique ID, resolves incumbent conflicts for the same target, and reuses or supersedes sessions according to the current arbitration policy.
-2. **Start**: `SessionManager.start_session()`:
+
+The bridge provides two levels of session orchestration:
+
+#### Canonical Play (Product Integrations)
+For most integrations (Web UI, Home Assistant), the `POST /v1/play` endpoint is the preferred "one-shot" path. It encapsulates target arbitration, conflict resolution, and the full startup sequence.
+- **Conflict Policy**: Defaults to `takeover`, ensuring responsive behavior. Can be set to `reuse` or `reject`.
+- **Idempotency**: Requests for the same source/target pair are handled idempotently (reusing or resuming existing sessions).
+
+#### Granular Session Control (Low-level API)
+The `/v1/sessions` endpoints provide fine-grained control for specialized orchestration:
+1. **Creation**: `SessionManager.create()` (`POST /v1/sessions`) initializes a `Session` object with a unique ID, resolves incumbent conflicts for the same target, and reuses or supersedes sessions according to the current arbitration policy.
+2. **Start**: `SessionManager.start_session()` (`POST /v1/sessions/{id}/start`):
     - **Target Arbitration**: If another session is already using the same target, it is automatically stopped before the new session begins.
     - Calls `SourceRegistry.prepare_source()` and `start_source()`.
     - Initializes a `StreamPipeline` and `SessionFrameSink`.
     - Starts the FFmpeg process via the pipeline.
     - Calls `TargetRegistry.prepare_target()` and `play_stream()`.
     - The target (Sonos) is given the HTTP URL of the bridge's `StreamPublisher`.
+
 3. **Playback**:
     - Adapter captures PCM -> `SessionFrameSink.on_frame()` -> `StreamPipeline.push_frame()`.
     - Pipeline feeds FFmpeg via `stdin` -> FFmpeg encodes -> Pipeline reads `stdout`.
