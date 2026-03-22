@@ -1,15 +1,21 @@
 """Tests for Target Arbitration and Takeover semantics."""
 
-import asyncio
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from bridge_core.core.errors import SessionConflictError
 from bridge_core.core.event_bus import EventBus
 from bridge_core.core.session_manager import SessionManager, SessionState
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
-from bridge_core.core.errors import SessionConflictError
-from ingress_sdk.types import PrepareResult, StartResult, SourceDescriptor, SourceType, SourceCapabilities
+from ingress_sdk.types import (
+    PrepareResult,
+    SourceCapabilities,
+    SourceDescriptor,
+    SourceType,
+    StartResult,
+)
 
 
 @pytest.fixture
@@ -103,7 +109,7 @@ async def test_target_takeover_at_start(session_manager: SessionManager) -> None
 
     # 2. Create Session B for same target but different source
     # First mock source_2
-    session_manager._source_registry.resolve_source.side_effect = lambda sid: MagicMock(
+    cast(MagicMock, session_manager._source_registry.resolve_source).side_effect = lambda sid: MagicMock(
         source=SourceDescriptor(
             source_id=sid,
             source_type=SourceType.SYNTHETIC_TEST_SOURCE,
@@ -121,7 +127,7 @@ async def test_target_takeover_at_start(session_manager: SessionManager) -> None
     # 3. Start Session B - should stop Session A
     success = await session_manager.start_session(session_b.session_id)
     assert success is True
-    assert session_b.state == SessionState.PLAYING
+    assert session_b.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
     assert session_a.state == SessionState.STOPPED
 
 
@@ -156,7 +162,7 @@ async def test_start_session_ignores_failed_incumbent(session_manager: SessionMa
     session_manager.update_state(session_a.session_id, SessionState.FAILED)
 
     # Mock source_2
-    session_manager._source_registry.resolve_source.side_effect = lambda sid: MagicMock(
+    cast(MagicMock, session_manager._source_registry.resolve_source).side_effect = lambda sid: MagicMock(
         source=SourceDescriptor(
             source_id=sid,
             source_type=SourceType.SYNTHETIC_TEST_SOURCE,
