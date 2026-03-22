@@ -109,6 +109,13 @@ class LinuxAudioAdapter(IngressAdapter):
 
     def list_sources(self) -> list[SourceDescriptor]:
         """Enumerate available PulseAudio and ALSA sources."""
+        # Cache results for 5 seconds to avoid frequent subprocess calls
+        import time
+        now = time.time()
+        if hasattr(self, "_sources_cache") and hasattr(self, "_sources_time"):
+            if now - self._sources_time < 5:
+                return self._sources_cache
+
         sources = []
         import subprocess
 
@@ -195,6 +202,8 @@ class LinuxAudioAdapter(IngressAdapter):
                 )
             )
 
+        self._sources_cache = sources
+        self._sources_time = now
         return sources
 
     def prepare(self, source_id: str) -> PrepareResult:

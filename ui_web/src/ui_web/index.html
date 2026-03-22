@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -163,7 +164,8 @@
             letter-spacing: 0.05em;
         }
 
-        select, button {
+        select,
+        button {
             font-family: inherit;
             font-size: 1rem;
             padding: var(--spacing-12) var(--spacing-16);
@@ -176,7 +178,8 @@
         }
 
         /* Focus rings for accessibility */
-        select:focus-visible, button:focus-visible {
+        select:focus-visible,
+        button:focus-visible {
             outline: none;
             box-shadow: 0 0 0 4px oklch(from var(--accent) l c h / 30%);
             border-color: var(--accent);
@@ -271,9 +274,23 @@
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        .status-idle { background-color: oklch(40% 0 0 / 20%); color: var(--text-muted); border: 1px solid oklch(40% 0 0 / 30%); }
-        .status-active { background-color: oklch(from var(--success) l c h / 20%); color: var(--success); border: 1px solid oklch(from var(--success) l c h / 30%); }
-        .status-error { background-color: oklch(from var(--error) l c h / 20%); color: var(--error); border: 1px solid oklch(from var(--error) l c h / 30%); }
+        .status-idle {
+            background-color: oklch(40% 0 0 / 20%);
+            color: var(--text-muted);
+            border: 1px solid oklch(40% 0 0 / 30%);
+        }
+
+        .status-active {
+            background-color: oklch(from var(--success) l c h / 20%);
+            color: var(--success);
+            border: 1px solid oklch(from var(--success) l c h / 30%);
+        }
+
+        .status-error {
+            background-color: oklch(from var(--error) l c h / 20%);
+            color: var(--error);
+            border: 1px solid oklch(from var(--error) l c h / 30%);
+        }
 
         .log-section {
             display: flex;
@@ -295,12 +312,12 @@
             font-weight: 600;
         }
 
-        details > summary {
+        details>summary {
             transition: color 0.2s ease;
             cursor: pointer;
         }
 
-        details > summary:hover {
+        details>summary:hover {
             color: var(--text);
         }
 
@@ -330,9 +347,24 @@
             border-bottom: none;
         }
 
-        .event-time { color: var(--text-muted); opacity: 0.5; font-variant-numeric: tabular-nums; flex-shrink: 0; }
-        .event-type { font-weight: 600; color: var(--accent); min-width: 140px; flex-shrink: 0; }
-        .event-message { color: var(--text); word-break: break-all; }
+        .event-time {
+            color: var(--text-muted);
+            opacity: 0.5;
+            font-variant-numeric: tabular-nums;
+            flex-shrink: 0;
+        }
+
+        .event-type {
+            font-weight: 600;
+            color: var(--accent);
+            min-width: 140px;
+            flex-shrink: 0;
+        }
+
+        .event-message {
+            color: var(--text);
+            word-break: break-all;
+        }
 
         /* ── Bluetooth Panel ─────────────────────────────── */
 
@@ -469,8 +501,15 @@
         }
 
         @keyframes pulse-glow {
-            0%, 100% { box-shadow: 0 0 0 0 oklch(from var(--bt-accent) l c h / 30%); }
-            50% { box-shadow: 0 0 0 8px oklch(from var(--bt-accent) l c h / 0%); }
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 oklch(from var(--bt-accent) l c h / 30%);
+            }
+
+            50% {
+                box-shadow: 0 0 0 8px oklch(from var(--bt-accent) l c h / 0%);
+            }
         }
 
         .bt-pairing-active {
@@ -552,10 +591,25 @@
             letter-spacing: 0.03em;
         }
 
-        .bt-badge.paired { background: oklch(from var(--bt-accent) l c h / 15%); color: var(--bt-accent); }
-        .bt-badge.connected { background: oklch(from var(--success) l c h / 15%); color: var(--success); }
-        .bt-badge.trusted { background: oklch(from var(--warning) l c h / 15%); color: var(--warning); }
-        .bt-badge.preferred { background: oklch(from var(--accent) l c h / 15%); color: var(--accent); }
+        .bt-badge.paired {
+            background: oklch(from var(--bt-accent) l c h / 15%);
+            color: var(--bt-accent);
+        }
+
+        .bt-badge.connected {
+            background: oklch(from var(--success) l c h / 15%);
+            color: var(--success);
+        }
+
+        .bt-badge.trusted {
+            background: oklch(from var(--warning) l c h / 15%);
+            color: var(--warning);
+        }
+
+        .bt-badge.preferred {
+            background: oklch(from var(--accent) l c h / 15%);
+            color: var(--accent);
+        }
 
         .bt-device-actions {
             display: flex;
@@ -618,6 +672,7 @@
         }
     </style>
 </head>
+
 <body>
     <main>
         <header style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -658,12 +713,14 @@
                         <label>Session</label>
                         <span id="session-state" class="status-tag status-idle">Idle</span>
                     </div>
-                    <button id="recover-btn" class="small-text" style="display: none;" onclick="recoverSession()">Recover</button>
+                    <button id="recover-btn" class="small-text" style="display: none;"
+                        onclick="recoverSession()">Recover</button>
                 </div>
                 <div id="session-subtext" class="session-subtext">Select a source and speaker to begin</div>
             </div>
 
-            <div id="session-error-container" style="display: none; padding: var(--spacing-16) var(--spacing-24); background-color: oklch(from var(--error) l c h / 10%); border-radius: var(--radius); border: 1px solid oklch(from var(--error) l c h / 20%);">
+            <div id="session-error-container"
+                style="display: none; padding: var(--spacing-16) var(--spacing-24); background-color: oklch(from var(--error) l c h / 10%); border-radius: var(--radius); border: 1px solid oklch(from var(--error) l c h / 20%);">
                 <div style="display: flex; flex-direction: column; gap: var(--spacing-4);">
                     <label style="color: var(--error);">Recommendation</label>
                     <p id="session-error-action" style="font-size: 0.9rem; color: var(--text);"></p>
@@ -672,10 +729,12 @@
 
             <!-- Advanced Control -->
             <details style="margin-top: var(--spacing-8);">
-                <summary style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: var(--spacing-4) 0;">
+                <summary
+                    style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: var(--spacing-4) 0;">
                     Advanced Control
                 </summary>
-                <div style="padding-top: var(--spacing-16); display: flex; flex-direction: column; gap: var(--spacing-24);">
+                <div
+                    style="padding-top: var(--spacing-16); display: flex; flex-direction: column; gap: var(--spacing-24);">
                     <div class="advanced-controls-grid">
                         <div class="field">
                             <label>Source Management</label>
@@ -699,8 +758,10 @@
                             <option value="stable">Stable</option>
                             <option value="experimental">Experimental</option>
                         </select>
-                        <label id="delivery-profile-note" for="delivery-profile-select" style="text-transform: none; letter-spacing: 0; font-size: 0.8rem; display: none; color: var(--text-muted); margin-top: var(--spacing-4);">
-                            Experimental: Lower latency, reduced buffering. May fall back to Stable if connection is unstable.
+                        <label id="delivery-profile-note" for="delivery-profile-select"
+                            style="text-transform: none; letter-spacing: 0; font-size: 0.8rem; display: none; color: var(--text-muted); margin-top: var(--spacing-4);">
+                            Experimental: Lower latency, reduced buffering. May fall back to Stable if connection is
+                            unstable.
                         </label>
                     </div>
                 </div>
@@ -721,7 +782,8 @@
 
             <!-- Hardware Diagnostics -->
             <details id="bt-diagnostics" style="display: none;">
-                <summary style="font-size: 0.75rem; color: var(--error); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: var(--spacing-4) 0;">
+                <summary
+                    style="font-size: 0.75rem; color: var(--error); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: var(--spacing-4) 0;">
                     Hardware Diagnostics
                 </summary>
                 <div id="bt-errors" class="bt-errors" style="margin-top: var(--spacing-12);">
@@ -733,8 +795,10 @@
                 <!-- Pairing Controls -->
                 <div class="bt-pairing-section">
                     <div class="bt-pairing-controls">
-                        <button id="bt-pair-btn" class="bt-primary" onclick="btOpenPairing()">Enter Pairing Mode</button>
-                        <button id="bt-pair-stop-btn" class="bt-danger" onclick="btClosePairing()" style="display: none;">Stop Pairing</button>
+                        <button id="bt-pair-btn" class="bt-primary" onclick="btOpenPairing()">Enter Pairing
+                            Mode</button>
+                        <button id="bt-pair-stop-btn" class="bt-danger" onclick="btClosePairing()"
+                            style="display: none;">Stop Pairing</button>
                         <div id="bt-countdown" class="bt-countdown" style="display: none;">
                             <div class="bt-countdown-bar">
                                 <div id="bt-countdown-fill" class="bt-countdown-fill" style="width: 100%;"></div>
@@ -757,14 +821,16 @@
             </div>
 
             <!-- Unavailable Message -->
-            <div id="bt-unavailable-msg" style="display: none; padding: var(--spacing-24); text-align: center; color: var(--text-muted); font-size: 0.9rem; background: oklch(100% 0 0 / 2%); border-radius: var(--radius);">
+            <div id="bt-unavailable-msg"
+                style="display: none; padding: var(--spacing-24); text-align: center; color: var(--text-muted); font-size: 0.9rem; background: oklch(100% 0 0 / 2%); border-radius: var(--radius);">
                 Bluetooth is currently disabled or unsupported on this hardware.
             </div>
         </section>
 
         <!-- ── Event Log (Advanced) ────────────────────────── -->
         <details class="log-section">
-            <summary style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: var(--spacing-8);">
+            <summary
+                style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: var(--spacing-8);">
                 Developer Logs
             </summary>
             <div id="events-log" class="events-log"></div>
@@ -794,6 +860,18 @@
         let btPairingTotalSeconds = 90;
         let btPairingRemainingSeconds = 0;
         let btPreferredMac = null;
+
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
 
         function normalizeDeliveryProfile(value) {
             return value === 'experimental' ? 'experimental' : 'stable';
@@ -1404,6 +1482,12 @@
             }
         }
 
+        // ── Debounced versions for SSE/Background ──────────
+        const debouncedFetchSources = debounce(fetchSources, 500);
+        const debouncedFetchTargets = debounce(fetchTargets, 500);
+        const debouncedBtFetchStatus = debounce(btFetchStatus, 500);
+        const debouncedBtRefreshDevices = debounce(btRefreshDevices, 500);
+
         function btRenderDevices(devices) {
             const list = document.getElementById('bt-device-list');
 
@@ -1582,11 +1666,11 @@
                     }
 
                     if (type === 'topology.changed') {
-                        fetchSources();
-                        fetchTargets();
+                        debouncedFetchSources();
+                        debouncedFetchTargets();
                     }
                     if (type === 'renderer.discovery.changed') {
-                        fetchTargets();
+                        debouncedFetchTargets();
                     }
                 });
             });
@@ -1612,7 +1696,7 @@
                     if (type === 'bluetooth.adapter.status.changed' ||
                         type === 'bluetooth.adapter.ready' ||
                         type === 'bluetooth.adapter.failed') {
-                        btFetchStatus();
+                        debouncedBtFetchStatus();
                     }
 
                     if (type === 'bluetooth.device.paired' ||
@@ -1621,7 +1705,7 @@
                         type === 'bluetooth.device.trusted' ||
                         type === 'bluetooth.device.untrusted' ||
                         type === 'bluetooth.device.discovered') {
-                        btRefreshDevices();
+                        debouncedBtRefreshDevices();
                         if (type === 'bluetooth.device.connected' ||
                             type === 'bluetooth.device.disconnected' ||
                             type === 'bluetooth.device.untrusted') {
@@ -1641,7 +1725,7 @@
                     }
 
                     if (type === 'bluetooth.source.available') {
-                        fetchSources();
+                        debouncedFetchSources();
                     }
                 });
             });
@@ -1736,12 +1820,13 @@
                         stopBtn.disabled = false;
                     }
                 }
-            } catch (e) {}
+            } catch (e) { }
         }
         checkActiveSessions();
 
         // Poll BT status every 10s for adapter state changes
-        setInterval(btFetchStatus, 10000);
+        setInterval(debouncedBtFetchStatus, 10000);
     </script>
 </body>
+
 </html>

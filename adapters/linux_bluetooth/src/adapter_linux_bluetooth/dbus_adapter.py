@@ -185,6 +185,13 @@ class BlueZAdapterController:
 
     async def check_readiness(self) -> list[str]:
         """Check for common adapter issues (rfkill, permissions, missing service)."""
+        # Cache results for 30 seconds to avoid frequent subprocess calls
+        import time
+        now = time.time()
+        if hasattr(self, "_readiness_cache") and hasattr(self, "_readiness_time"):
+            if now - self._readiness_time < 30:
+                return self._readiness_cache
+
         errors = []
 
         # 1. Check if DBus socket is accessible
@@ -219,4 +226,6 @@ class BlueZAdapterController:
             except Exception:
                 pass
 
+        self._readiness_cache = errors
+        self._readiness_time = now
         return errors
