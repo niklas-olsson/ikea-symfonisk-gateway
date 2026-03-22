@@ -39,6 +39,8 @@ class LinuxAudioAdapter(IngressAdapter):
         self._capture_task: asyncio.Task[None] | None = None
         self._frame_sink: FrameSink | None = None
         self._hotplug_task: asyncio.Task[None] | None = None
+        self._sources_cache: list[SourceDescriptor] = []
+        self._sources_time: float = 0
 
         # We start listening to hotplug events asynchronously when instantiated
         # or it can be started on demand
@@ -109,6 +111,12 @@ class LinuxAudioAdapter(IngressAdapter):
 
     def list_sources(self) -> list[SourceDescriptor]:
         """Enumerate available PulseAudio and ALSA sources."""
+        # Cache results for 5 seconds to avoid frequent subprocess calls
+        import time
+        now = time.time()
+        if now - self._sources_time < 5:
+            return self._sources_cache
+
         sources = []
         import subprocess
 
@@ -195,6 +203,8 @@ class LinuxAudioAdapter(IngressAdapter):
                 )
             )
 
+        self._sources_cache = sources
+        self._sources_time = now
         return sources
 
     def prepare(self, source_id: str) -> PrepareResult:

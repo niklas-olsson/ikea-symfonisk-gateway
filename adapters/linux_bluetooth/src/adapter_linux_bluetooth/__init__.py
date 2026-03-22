@@ -98,6 +98,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
         self._status_monitoring_task: asyncio.Task[None] | None = None
         self._last_status: dict[str, Any] = {}
         self._source_id_map: dict[str, str] = {}  # virtual_id -> pa_id
+        self._sources_cache: list[SourceDescriptor] = []
+        self._sources_time: float = 0
 
         if self._event_bus and is_linux:
             self._status_monitoring_task = asyncio.create_task(self._monitor_status())
@@ -165,6 +167,12 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     def list_sources(self) -> list[SourceDescriptor]:
         """Discover connected Bluetooth A2DP sources using pactl."""
+        # Cache results for 5 seconds to avoid frequent pactl calls
+        import time
+        now = time.time()
+        if now - self._sources_time < 5:
+            return self._sources_cache
+
         sources: list[SourceDescriptor] = []
         if not shutil.which("pactl"):
             return sources
@@ -258,6 +266,9 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     self._event_bus.emit(EventType.TOPOLOGY_CHANGED, payload={"adapter_id": self.id()})
 
             self._source_id_map = new_source_id_map
+            self._sources_cache = sources
+            self._sources_time = now
+            return sources
 
         except (subprocess.SubprocessError, FileNotFoundError) as e:
             logger.error(f"Failed to list Bluetooth sources: {e}")
@@ -431,6 +442,14 @@ class LinuxBluetoothAdapter(IngressAdapter):
         elif backend_type == "PipeWire" and not (shutil.which("pactl") or shutil.which("pw-link")):
             # PipeWire can use pactl (compat) or its own tools
             errors.append("missing_audio_tools")
+
+        # Canonicalize properties for stable comparison
+        for k, v in props.items():
+            if isinstance(v, list):
+                try:
+                    props[k] = sorted(v)
+                except TypeError:
+                    pass
 
         return {
             "adapter_id": self.id(),

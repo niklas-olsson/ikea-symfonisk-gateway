@@ -24,6 +24,8 @@ class BlueZAdapterController:
         self.adapter_name = adapter_name
         self.adapter_path = f"/org/bluez/{adapter_name}"
         self._bus: MessageBus | None = None
+        self._readiness_cache: list[str] = []
+        self._readiness_time: float = 0
 
     async def _get_bus(self) -> MessageBus:
         """Get or create the system message bus."""
@@ -185,6 +187,12 @@ class BlueZAdapterController:
 
     async def check_readiness(self) -> list[str]:
         """Check for common adapter issues (rfkill, permissions, missing service)."""
+        # Cache results for 30 seconds to avoid frequent subprocess calls
+        import time
+        now = time.time()
+        if now - self._readiness_time < 30:
+            return self._readiness_cache
+
         errors = []
 
         # 1. Check if DBus socket is accessible
@@ -219,4 +227,6 @@ class BlueZAdapterController:
             except Exception:
                 pass
 
+        self._readiness_cache = errors
+        self._readiness_time = now
         return errors
