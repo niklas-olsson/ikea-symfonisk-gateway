@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Sequence
+from shared.normalization import normalize_for_comparison
 from typing import Any
 
 import soco  # type: ignore[import-untyped]
@@ -206,19 +207,14 @@ class SonosRendererAdapter(RendererAdapter):
                 logger.warning("Failed to process player %s during topology build: %s", player.uid, e)
                 continue
 
-        # Check for changes to emit event
-        old_ids = set(self._targets.keys())
-        new_ids = set(groups.keys())
+        # Check for changes to emit event using normalized comparison
+        norm_old = normalize_for_comparison([t.to_dict() for t in self._targets.values()])
+        norm_new = normalize_for_comparison([t.to_dict() for t in groups.values()])
 
-        # Also check if members changed for existing targets
-        members_changed = False
-        for tid in old_ids.intersection(new_ids):
-            if set(self._targets[tid].members) != set(groups[tid].members):
-                members_changed = True
-                break
-
-        if old_ids != new_ids or members_changed:
+        if norm_old != norm_new:
             if self._event_bus:
+                old_ids = set(self._targets.keys())
+                new_ids = set(groups.keys())
                 self._event_bus.emit(
                     EventType.RENDERER_DISCOVERY_CHANGED,
                     payload={

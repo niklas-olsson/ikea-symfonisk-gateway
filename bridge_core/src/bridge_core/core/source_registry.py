@@ -19,6 +19,7 @@ from ingress_sdk.types import (
 
 from bridge_core.core.errors import SOURCE_ADAPTER_PLATFORM_MISMATCH
 from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
+from shared.normalization import normalize_for_comparison
 
 logger = logging.getLogger(__name__)
 
@@ -159,12 +160,12 @@ class SourceRegistry:
         new_source_map = self._build_registered_source_map(adapter_id, adapter.platform, sources)
 
         # Check if sources actually changed to avoid infinite loop
-        if adapter.sources.keys() == new_source_map.keys():
-            # Basic check for same source IDs.
-            # In a more complete system we might also compare metadata/content.
-            # For now, let's also check if display names changed.
-            if all(adapter.sources[sid].display_name == s.display_name for sid, s in new_source_map.items()):
-                return
+        # Use normalized comparison to ignore volatility in metadata (e.g. timestamps, RSSI)
+        norm_old = normalize_for_comparison([s.model_dump() for s in adapter.sources.values()])
+        norm_new = normalize_for_comparison([s.model_dump() for s in new_source_map.values()])
+
+        if norm_old == norm_new:
+            return
 
         # Identify removed sources for cleanup
         new_source_ids = set(new_source_map.keys())
