@@ -44,11 +44,7 @@ def test_play_endpoint_takeover(client: TestClient) -> None:
     with patch("bridge_core.core.SessionManager.start_session", return_value=True):
         play_res_1 = client.post(
             "/v1/play",
-            json={
-                "source_id": source_id_1,
-                "target_id": target_id,
-                "conflict_policy": "takeover"
-            },
+            json={"source_id": source_id_1, "target_id": target_id, "conflict_policy": "takeover"},
         )
         assert play_res_1.status_code == 200
         session_id_1 = play_res_1.json()["session_id"]
@@ -56,11 +52,7 @@ def test_play_endpoint_takeover(client: TestClient) -> None:
         # 3. Start second session via /v1/play with different source (takeover)
         play_res_2 = client.post(
             "/v1/play",
-            json={
-                "source_id": source_id_2,
-                "target_id": target_id,
-                "conflict_policy": "takeover"
-            },
+            json={"source_id": source_id_2, "target_id": target_id, "conflict_policy": "takeover"},
         )
         assert play_res_2.status_code == 200
         session_id_2 = play_res_2.json()["session_id"]
@@ -84,11 +76,7 @@ def test_play_endpoint_reuse(client: TestClient) -> None:
     with patch("bridge_core.core.SessionManager.start_session", return_value=True):
         play_res_1 = client.post(
             "/v1/play",
-            json={
-                "source_id": source_id,
-                "target_id": target_id,
-                "conflict_policy": "reuse"
-            },
+            json={"source_id": source_id, "target_id": target_id, "conflict_policy": "reuse"},
         )
         assert play_res_1.status_code == 200
         session_id_1 = play_res_1.json()["session_id"]
@@ -96,11 +84,7 @@ def test_play_endpoint_reuse(client: TestClient) -> None:
         # 3. Request same source/target via /v1/play (reuse)
         play_res_2 = client.post(
             "/v1/play",
-            json={
-                "source_id": source_id,
-                "target_id": target_id,
-                "conflict_policy": "reuse"
-            },
+            json={"source_id": source_id, "target_id": target_id, "conflict_policy": "reuse"},
         )
         assert play_res_2.status_code == 200
         session_id_2 = play_res_2.json()["session_id"]

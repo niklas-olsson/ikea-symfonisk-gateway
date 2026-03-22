@@ -9,7 +9,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to the gateway",
+      "cannot_connect": "Failed to connect to the bridge",
       "unknown": "Unexpected error"
     }
   }

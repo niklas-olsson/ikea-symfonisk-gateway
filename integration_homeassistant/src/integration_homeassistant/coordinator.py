@@ -38,7 +38,7 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
         super().__init__(
             hass,
             _LOGGER,
-            name=f"Symfonisk Gateway ({host})",
+            name=f"SYMFONISK Bridge ({host})",
             update_interval=timedelta(seconds=5),
         )
 

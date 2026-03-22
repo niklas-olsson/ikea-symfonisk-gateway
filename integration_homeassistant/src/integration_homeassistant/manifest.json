@@ -1,6 +1,6 @@
 {
   "domain": "ikea_symfonisk_gateway",
-  "name": "IKEA SYMFONISK Gateway",
+  "name": "IKEA SYMFONISK Bridge",
   "codeowners": [],
   "config_flow": true,
   "documentation": "https://github.com/example/ikea-symfonisk-gateway",
