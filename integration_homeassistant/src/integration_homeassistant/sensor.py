@@ -29,6 +29,8 @@ async def async_setup_entry(
         [
             SymfoniskStatusSensor(coordinator, entry),
             SymfoniskUptimeSensor(coordinator, entry),
+            SymfoniskSessionStateSensor(coordinator, entry),
+            SymfoniskDeliveryProfileSensor(coordinator, entry),
         ]
     )
 
@@ -81,3 +83,43 @@ class SymfoniskUptimeSensor(SymfoniskSensor):
     def unique_id(self) -> str:
         """Return a unique ID."""
         return f"{self.coordinator.host}_uptime"
+
+
+class SymfoniskSessionStateSensor(SymfoniskSensor):
+    """Sensor for active session state."""
+
+    _attr_name = "Session State"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the state of the sensor."""
+        if not self.coordinator.data.sessions:
+            return "no_active_session"
+
+        return self.coordinator.data.sessions[0].get("state")
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"{self.coordinator.host}_session_state"
+
+
+class SymfoniskDeliveryProfileSensor(SymfoniskSensor):
+    """Sensor for active delivery profile."""
+
+    _attr_name = "Effective Delivery Profile"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the state of the sensor."""
+        if not self.coordinator.data.sessions:
+            return None
+
+        session = self.coordinator.data.sessions[0]
+        media_status = session.get("media_status") or {}
+        return media_status.get("effective_delivery_profile")
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"{self.coordinator.host}_delivery_profile"

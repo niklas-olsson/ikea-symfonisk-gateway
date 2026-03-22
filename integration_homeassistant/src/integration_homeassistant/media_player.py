@@ -60,6 +60,8 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
             return MediaPlayerState.BUFFERING
         if state == "degraded":
             return MediaPlayerState.ON
+        if state == "failed":
+            return MediaPlayerState.IDLE
 
         return MediaPlayerState.IDLE
 
@@ -79,11 +81,21 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
             return {}
 
         session = self.coordinator.data.sessions[0]
+        media_status = session.get("media_status") or {}
         return {
             "session_id": session.get("session_id"),
             "source_id": session.get("source_id"),
             "target_id": session.get("target_id"),
             "stream_profile": session.get("stream_profile"),
+            "bridge_state": session.get("state"),
+            "media_state": media_status.get("state"),
+            "media_reason": media_status.get("reason"),
+            "delivery_profile": media_status.get("delivery_profile"),
+            "effective_delivery_profile": media_status.get("effective_delivery_profile"),
+            "auto_fell_back_to_stable": media_status.get("auto_fell_back_to_stable"),
+            "fallback_reason": media_status.get("fallback_reason"),
+            "source_health": media_status.get("source_health"),
+            "last_error": session.get("last_error"),
         }
 
     async def async_media_stop(self) -> None:
