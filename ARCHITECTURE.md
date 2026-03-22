@@ -53,6 +53,7 @@ The bridge provides two levels of session orchestration:
 #### Canonical Play (Product Integrations)
 For most integrations (Web UI, Home Assistant), the `POST /v1/play` endpoint is the preferred "one-shot" path. It encapsulates target arbitration, conflict resolution, and the full startup sequence.
 - **Conflict Policy**: Defaults to `takeover`, ensuring responsive behavior. Can be set to `reuse` or `reject`.
+- **Intent Priority**: Playback requests include an `intent` (manual, homeassistant, autoplay, recovery) that governs arbitration. A higher or equal priority intent can preempt a lower one. Direct user actions (manual) always outrank background automation.
 - **Idempotency**: Requests for the same source/target pair are handled idempotently (reusing or resuming existing sessions).
 
 #### Granular Session Control (Low-level API)

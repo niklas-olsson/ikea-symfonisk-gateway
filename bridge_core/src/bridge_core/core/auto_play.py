@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
-from bridge_core.core.session_manager import STOP_REASON_PREFERRED, SessionManager
+from bridge_core.core.session_manager import STOP_REASON_PREFERRED, SessionIntent, SessionManager
 from bridge_core.core.target_registry import TargetRegistry
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ class AutoPlayController:
                 target_id=None,  # Resolved by SessionManager (preferred -> deterministic)
                 conflict_policy="takeover",
                 takeover_reason=STOP_REASON_PREFERRED,
+                intent=SessionIntent.AUTOPLAY,
             )
         except Exception as e:
             logger.error(f"Failed to auto-play source {source_id}: {e}")
