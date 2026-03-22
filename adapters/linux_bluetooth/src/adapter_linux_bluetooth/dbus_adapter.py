@@ -189,6 +189,7 @@ class BlueZAdapterController:
         """Check for common adapter issues (rfkill, permissions, missing service)."""
         # Cache results for 30 seconds to avoid frequent subprocess calls
         import time
+
         now = time.time()
         if now - self._readiness_time < 30:
             return self._readiness_cache

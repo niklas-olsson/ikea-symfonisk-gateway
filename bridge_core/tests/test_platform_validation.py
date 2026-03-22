@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from bridge_core.core.event_bus import EventBus
@@ -97,25 +97,25 @@ async def test_platform_any_works(session_manager: SessionManager, source_regist
         adapter_instance=linux_adapter,
     )
 
-    # 2. Mock FFmpeg resolution and negotiation to avoid failure
-    import bridge_core.core.session_manager as sm
+    # 2. Mock FFmpeg resolution and negotiation to avoid failure using patch to ensure cleanup
+    with (
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+        patch("bridge_core.core.session_manager.negotiate_stream_profile", return_value="mp3_48k_stereo_320"),
+    ):
+        # 3. Create and start session
+        _ = session_manager.create(source_id="linux_adapter:synthetic:any_source", target_id="target1")
 
-    sm.resolve_ffmpeg_path = MagicMock(return_value="/usr/bin/ffmpeg")  # type: ignore[attr-defined]
-    sm.negotiate_stream_profile = MagicMock(return_value="mp3_48k_stereo_320")  # type: ignore[attr-defined]
+        # We mock more things to let start_session succeed until frame ingestion check
+        session_manager._stream_publisher = MagicMock()
+        session_manager._stream_publisher.get_stream_url.return_value = "http://localhost/stream"
 
-    # 3. Create and start session
-    _ = session_manager.create(source_id="linux_adapter:synthetic:any_source", target_id="target1")
+        # Actually, we just care if it passes the platform validation.
+        # Actually, we just care if it passes the platform validation.
+        # platform validation is at the very beginning of prepare_source.
 
-    # We mock more things to let start_session succeed until frame ingestion check
-    session_manager._stream_publisher = MagicMock()
-    session_manager._stream_publisher.get_stream_url.return_value = "http://localhost/stream"
-
-    # Actually, we just care if it passes the platform validation.
-    # platform validation is at the very beginning of prepare_source.
-
-    res = source_registry.prepare_source("linux_adapter:synthetic:any_source")
-    assert res.success
-    assert res.code != "source_adapter_platform_mismatch"
+        res = source_registry.prepare_source("linux_adapter:synthetic:any_source")
+        assert res.success
+        assert res.code != "source_adapter_platform_mismatch"
 
 
 @pytest.mark.asyncio

@@ -123,6 +123,7 @@ class LinuxAudioAdapter(IngressAdapter):
         """Enumerate available PulseAudio and ALSA sources."""
         # Cache results for 5 seconds to avoid frequent subprocess calls
         import time
+
         now = time.time()
         if now - self._sources_time < 5:
             if self._metrics:

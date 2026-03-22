@@ -170,6 +170,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
         """Discover connected Bluetooth A2DP sources using pactl."""
         # Cache results for 5 seconds to avoid frequent pactl calls
         import time
+
         now = time.time()
         if now - self._sources_time < 5:
             if self._metrics:

@@ -63,10 +63,11 @@ def session_manager(
     original_start_session = manager.start_session
 
     async def mocked_start_session(session_id: str) -> bool:
-        with patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"), \
-             patch("bridge_core.core.session_manager.negotiate_stream_profile", return_value="mp3_48k_stereo_320"), \
-             patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls:
-
+        with (
+            patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+            patch("bridge_core.core.session_manager.negotiate_stream_profile", return_value="mp3_48k_stereo_320"),
+            patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        ):
             mock_pipeline = mock_pipeline_cls.return_value
             mock_pipeline.start = AsyncMock()
             mock_pipeline.stop = AsyncMock()
