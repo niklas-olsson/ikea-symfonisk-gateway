@@ -127,7 +127,7 @@ def session_manager(
 @pytest.mark.asyncio
 async def test_negotiate_highest_viable_profile(session_manager: SessionManager, target_registry: MagicMock) -> None:
     """Test that 'auto' picks the highest profile supported by both."""
-    session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -147,7 +147,7 @@ async def test_negotiate_highest_viable_profile(session_manager: SessionManager,
 async def test_negotiate_restricted_target(session_manager: SessionManager, target_registry: MagicMock) -> None:
     """Test negotiation when target only supports a lower quality codec."""
     target_registry.get_target.return_value = MockTargetDescriptor("tgt_1", codecs=["mp3"])
-    session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -166,7 +166,7 @@ async def test_negotiate_restricted_target(session_manager: SessionManager, targ
 @pytest.mark.asyncio
 async def test_fallback_ladder_on_failure(session_manager: SessionManager) -> None:
     """Test that if the highest profile fails, it tries the next one."""
-    session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
     # First attempt (PCM) fails at pipeline start, second (AAC) succeeds
     pipeline_pcm = MagicMock(spec=StreamPipeline)
@@ -192,7 +192,7 @@ async def test_fallback_ladder_on_failure(session_manager: SessionManager) -> No
 async def test_last_known_good_reuse(session_manager: SessionManager, config_store: MagicMock) -> None:
     """Test that LKG profile is prioritized in 'auto' mode."""
     config_store.get.return_value = "aac_48k_stereo_256"
-    session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -214,7 +214,7 @@ async def test_strict_manual_override_validation(session_manager: SessionManager
     """Test that manual override fails if unsupported, without fallback."""
     target_registry.get_target.return_value = MockTargetDescriptor("tgt_1", codecs=["mp3"])
     # Request PCM when target only supports MP3
-    session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="pcm_wav_48k_stereo_16")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="pcm_wav_48k_stereo_16")
 
     success = await session_manager.start_session(session.session_id)
 
@@ -226,7 +226,7 @@ async def test_strict_manual_override_validation(session_manager: SessionManager
 @pytest.mark.asyncio
 async def test_persistence_on_success(session_manager: SessionManager, config_store: MagicMock) -> None:
     """Test that successful start persists the profile."""
-    session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
