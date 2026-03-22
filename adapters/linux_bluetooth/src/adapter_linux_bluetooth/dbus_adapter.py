@@ -24,6 +24,8 @@ class BlueZAdapterController:
         self.adapter_name = adapter_name
         self.adapter_path = f"/org/bluez/{adapter_name}"
         self._bus: MessageBus | None = None
+        self._readiness_cache: list[str] = []
+        self._readiness_time: float = 0
 
     async def _get_bus(self) -> MessageBus:
         """Get or create the system message bus."""
@@ -188,9 +190,8 @@ class BlueZAdapterController:
         # Cache results for 30 seconds to avoid frequent subprocess calls
         import time
         now = time.time()
-        if hasattr(self, "_readiness_cache") and hasattr(self, "_readiness_time"):
-            if now - self._readiness_time < 30:
-                return self._readiness_cache
+        if now - self._readiness_time < 30:
+            return self._readiness_cache
 
         errors = []
 

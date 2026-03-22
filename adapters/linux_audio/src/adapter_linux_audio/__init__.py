@@ -39,6 +39,8 @@ class LinuxAudioAdapter(IngressAdapter):
         self._capture_task: asyncio.Task[None] | None = None
         self._frame_sink: FrameSink | None = None
         self._hotplug_task: asyncio.Task[None] | None = None
+        self._sources_cache: list[SourceDescriptor] = []
+        self._sources_time: float = 0
 
         # We start listening to hotplug events asynchronously when instantiated
         # or it can be started on demand
@@ -112,9 +114,8 @@ class LinuxAudioAdapter(IngressAdapter):
         # Cache results for 5 seconds to avoid frequent subprocess calls
         import time
         now = time.time()
-        if hasattr(self, "_sources_cache") and hasattr(self, "_sources_time"):
-            if now - self._sources_time < 5:
-                return self._sources_cache
+        if now - self._sources_time < 5:
+            return self._sources_cache
 
         sources = []
         import subprocess

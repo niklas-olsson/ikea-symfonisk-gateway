@@ -98,6 +98,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
         self._status_monitoring_task: asyncio.Task[None] | None = None
         self._last_status: dict[str, Any] = {}
         self._source_id_map: dict[str, str] = {}  # virtual_id -> pa_id
+        self._sources_cache: list[SourceDescriptor] = []
+        self._sources_time: float = 0
 
         if self._event_bus and is_linux:
             self._status_monitoring_task = asyncio.create_task(self._monitor_status())
@@ -168,9 +170,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
         # Cache results for 5 seconds to avoid frequent pactl calls
         import time
         now = time.time()
-        if hasattr(self, "_sources_cache") and hasattr(self, "_sources_time"):
-            if now - self._sources_time < 5:
-                return self._sources_cache
+        if now - self._sources_time < 5:
+            return self._sources_cache
 
         sources: list[SourceDescriptor] = []
         if not shutil.which("pactl"):
