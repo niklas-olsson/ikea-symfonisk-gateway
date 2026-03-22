@@ -78,6 +78,7 @@ class SymfoniskUptimeSensor(SymfoniskSensor):
     """Sensor for bridge uptime."""
 
     _attr_name = "Uptime"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -97,6 +98,7 @@ class SymfoniskSessionStateSensor(SymfoniskSensor):
     """Sensor for active playback state."""
 
     _attr_name = "Playback State"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:
@@ -116,6 +118,7 @@ class SymfoniskNegotiatedProfileSensor(SymfoniskSensor):
     """Sensor for negotiated stream profile."""
 
     _attr_name = "Stream Profile"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:
@@ -160,6 +163,7 @@ class SymfoniskDeliveryProfileSensor(SymfoniskSensor):
     """Sensor for active delivery profile."""
 
     _attr_name = "Delivery Profile"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:
