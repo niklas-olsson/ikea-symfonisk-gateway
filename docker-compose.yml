@@ -11,6 +11,7 @@ services:
       - BRIDGE_HOST=0.0.0.0
       - BRIDGE_PORT=8732
       - BRIDGE_STREAM_PORT=8080
+      - BRIDGE_CONFIG_DIR=/app/config
       - LOG_LEVEL=INFO
       - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/1000}
       - PULSE_SERVER=unix:${XDG_RUNTIME_DIR:-/run/user/1000}/pulse/native
