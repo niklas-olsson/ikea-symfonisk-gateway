@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from bridge_core.api.models import ErrorResponse
 from bridge_core.core import SessionManager
-from bridge_core.core.errors import QUIESCED_SESSION_CONFLICT, SessionConflictError, SessionError
+from bridge_core.core.errors import SESSION_CONFLICT, SessionConflictError, SessionError
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 

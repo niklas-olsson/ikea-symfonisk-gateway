@@ -1,15 +1,14 @@
 """Tests for incumbent session resolution rules."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from bridge_core.adapters.base import OwnershipResult, OwnershipStatus
+from bridge_core.core.errors import SessionConflictError
 from bridge_core.core.event_bus import EventBus
 from bridge_core.core.session_manager import SessionManager, SessionState
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
-from bridge_core.core.errors import SessionConflictError
 
 
 @pytest.fixture
