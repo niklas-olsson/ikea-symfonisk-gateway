@@ -45,7 +45,7 @@ class SymfoniskSelect(CoordinatorEntity[SymfoniskCoordinator], SelectEntity):
 class SymfoniskSourceSelect(SymfoniskSelect):
     """Select entity for audio source selection."""
 
-    _attr_name = "Selected Source"
+    _attr_name = "Source"
 
     @property
     def options(self) -> list[str]:
@@ -70,7 +70,7 @@ class SymfoniskSourceSelect(SymfoniskSelect):
 class SymfoniskTargetSelect(SymfoniskSelect):
     """Select entity for playback target selection."""
 
-    _attr_name = "Selected Target"
+    _attr_name = "Speaker"
 
     @property
     def options(self) -> list[str]:

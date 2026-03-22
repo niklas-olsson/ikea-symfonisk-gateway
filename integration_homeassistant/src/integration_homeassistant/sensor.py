@@ -8,6 +8,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -88,9 +89,9 @@ class SymfoniskUptimeSensor(SymfoniskSensor):
 
 
 class SymfoniskSessionStateSensor(SymfoniskSensor):
-    """Sensor for active session state."""
+    """Sensor for active playback state."""
 
-    _attr_name = "Session State"
+    _attr_name = "Playback State"
 
     @property
     def native_value(self) -> str | None:
@@ -109,7 +110,7 @@ class SymfoniskSessionStateSensor(SymfoniskSensor):
 class SymfoniskNegotiatedProfileSensor(SymfoniskSensor):
     """Sensor for negotiated stream profile."""
 
-    _attr_name = "Negotiated Stream Profile"
+    _attr_name = "Stream Profile"
 
     @property
     def native_value(self) -> str | None:
@@ -126,9 +127,11 @@ class SymfoniskNegotiatedProfileSensor(SymfoniskSensor):
 
 
 class SymfoniskFailureReasonSensor(SymfoniskSensor):
-    """Sensor for session failure reason/action."""
+    """Sensor for playback failure reason/action."""
 
     _attr_name = "Failure Reason"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str | None:
@@ -151,7 +154,7 @@ class SymfoniskFailureReasonSensor(SymfoniskSensor):
 class SymfoniskDeliveryProfileSensor(SymfoniskSensor):
     """Sensor for active delivery profile."""
 
-    _attr_name = "Effective Delivery Profile"
+    _attr_name = "Delivery Profile"
 
     @property
     def native_value(self) -> str | None:
