@@ -1,3 +1,4 @@
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -172,7 +173,7 @@ def test_pyaudiowpatch_fallback_sample_rate(mock_load: MagicMock) -> None:
     fake_pa = fake_module.PyAudio.return_value
 
     # Mock open to fail for 48000 but succeed for 44100
-    def mock_open(*args, **kwargs):
+    def mock_open(*args: Any, **kwargs: Any) -> MagicMock:
         rate = kwargs.get("rate")
         if rate == 48000:
             raise RuntimeError("Invalid sample rate")
