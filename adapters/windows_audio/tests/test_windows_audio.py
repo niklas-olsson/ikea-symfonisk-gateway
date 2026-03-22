@@ -164,6 +164,78 @@ def test_start_stop_session_delegates_backend(mock_load: MagicMock, mock_platfor
     fake_stream.close.assert_called_once()
 
 
+@patch("adapter_windows_audio.backends.pyaudiowpatch_backend.load_pyaudiowpatch")
+def test_pyaudiowpatch_fallback_sample_rate(mock_load: MagicMock) -> None:
+    loopback_device = {"index": 7, "name": "Loopback", "hostApi": 0, "defaultSampleRate": 48000}
+    fake_module = _build_fake_backend_module(loopback_device=loopback_device)
+    mock_load.return_value = fake_module
+    fake_pa = fake_module.PyAudio.return_value
+
+    # Mock open to fail for 48000 but succeed for 44100
+    def mock_open(*args, **kwargs):
+        rate = kwargs.get("rate")
+        if rate == 48000:
+            raise RuntimeError("Invalid sample rate")
+        return MagicMock()
+
+    fake_pa.open.side_effect = mock_open
+
+    backend = PyAudioWPatchBackend(backend_module=fake_module)
+    frame_sink = MagicMock()
+    result = backend.start("default", frame_sink)
+
+    assert result.success is True
+    assert backend._diagnostics.actual_sample_rate == 44100
+    assert 48000 in backend._diagnostics.attempted_rates
+    assert 44100 in backend._diagnostics.attempted_rates
+
+
+@patch("adapter_windows_audio.backends.pyaudiowpatch_backend.load_pyaudiowpatch")
+def test_pyaudiowpatch_resampling_normalization(mock_load: MagicMock) -> None:
+    loopback_device = {"index": 7, "name": "Loopback", "hostApi": 0, "defaultSampleRate": 44100}
+    fake_module = _build_fake_backend_module(loopback_device=loopback_device)
+    mock_load.return_value = fake_module
+    fake_pa = fake_module.PyAudio.return_value
+    fake_pa.open.return_value = MagicMock()
+
+    backend = PyAudioWPatchBackend(backend_module=fake_module)
+    frame_sink = MagicMock()
+    backend.start("default", frame_sink)
+
+    assert backend._diagnostics.actual_sample_rate == 44100
+
+    # Simulate 441 frames at 44.1kHz (10ms)
+    audio_44100 = np.zeros((441, 2), dtype=np.int16)
+    backend._audio_callback(audio_44100, 441, None, 0)
+
+    # Should be normalized to 480 frames (10ms at 48kHz)
+    frame_sink.on_frame.assert_called_once()
+    args, _ = frame_sink.on_frame.call_args
+    data_bytes, pts_ns, duration_ns = args
+    assert len(data_bytes) == 480 * 2 * 2
+    assert duration_ns == 10_000_000
+
+
+@patch("adapter_windows_audio.backends.pyaudiowpatch_backend.load_pyaudiowpatch")
+def test_pyaudiowpatch_hard_failure_all_rates(mock_load: MagicMock) -> None:
+    loopback_device = {"index": 7, "name": "Loopback", "hostApi": 0, "defaultSampleRate": 96000}
+    fake_module = _build_fake_backend_module(loopback_device=loopback_device)
+    mock_load.return_value = fake_module
+    fake_pa = fake_module.PyAudio.return_value
+
+    # Mock open to always fail
+    fake_pa.open.side_effect = RuntimeError("Invalid sample rate")
+
+    backend = PyAudioWPatchBackend(backend_module=fake_module)
+    frame_sink = MagicMock()
+    result = backend.start("default", frame_sink)
+
+    assert result.success is False
+    assert result.code == "windows_loopback_start_failed"
+    assert backend._diagnostics.startup_substate == "stream_open_failed"
+    assert len(backend._diagnostics.attempted_rates) >= 3
+
+
 def test_loopback_resolution_falls_back_to_enumerated_devices() -> None:
     fake_module = _build_fake_backend_module(loopback_device=None)
 

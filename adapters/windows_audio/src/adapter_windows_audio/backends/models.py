@@ -24,6 +24,8 @@ class BackendStartupDiagnostics(BaseModel):
     default_render_device: dict[str, Any] | None = None
     loopback_device: dict[str, Any] | None = None
     sample_rate: int = 48000
+    actual_sample_rate: int | None = None
+    attempted_rates: list[int] = Field(default_factory=list)
     channels: int = 2
     sample_format: str = "paInt16"
     frames_per_buffer: int = 480
