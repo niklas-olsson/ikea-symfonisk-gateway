@@ -32,7 +32,7 @@ async def async_setup_entry(
 class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerEntity):
     """Media player for SYMFONISK Gateway sessions."""
 
-    _attr_name = "Bridge Session"
+    _attr_name = "Playback"
     _attr_supported_features = MediaPlayerEntityFeature.STOP
 
     def __init__(self, coordinator: SymfoniskCoordinator, entry: ConfigEntry) -> None:
@@ -44,6 +44,11 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
             "manufacturer": "IKEA",
             "model": "SYMFONISK Gateway",
         }
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self.coordinator.last_update_success and self.coordinator.data.health.get("status") == "ok"
 
     @property
     def state(self) -> MediaPlayerState:
@@ -83,7 +88,7 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
             return None
 
         session = self.coordinator.data.sessions[0]
-        return f"Session {session.get('session_id')}"
+        return f"Playback {session.get('session_id')}"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

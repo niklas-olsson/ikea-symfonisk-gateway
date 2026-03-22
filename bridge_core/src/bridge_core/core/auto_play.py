@@ -62,12 +62,11 @@ class AutoPlayController:
         logger.info(f"Auto-playing newly available Bluetooth source {source_id} to target {target_id}")
 
         try:
-            # Create and start a new session
-            session = self._session_manager.create(
+            # Use canonical play() orchestration
+            await self._session_manager.play(
                 source_id=source_id,
                 target_id=target_id,
+                conflict_policy="takeover",
             )
-            # Use synchronous shim or directly await (SessionManager.start spawns a background asyncio task)
-            self._session_manager.start(session.session_id)
         except Exception as e:
             logger.error(f"Failed to auto-play source {source_id}: {e}")

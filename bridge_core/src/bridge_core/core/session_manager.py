@@ -908,7 +908,6 @@ class SessionManager:
                     return existing
                 if exclusive or existing.exclusive:
                     raise SessionConflictError(existing.session_id, target_id)
-
         session = Session(
             source_id=source_id,
             target_id=target_id,
@@ -935,7 +934,7 @@ class SessionManager:
         if not session:
             return False
 
-        if session.state == SessionState.PLAYING:
+        if session.state in {SessionState.PLAYING, SessionState.STARTING}:
             return True
 
         # Target Arbitration: Stop any incumbent sessions on the same target
@@ -1910,12 +1909,7 @@ class SessionManager:
         # If ownership is unknown or not_owned, and force_reclaim is False, we should ideally
         # have required explicit user resume. The 'force_reclaim' flag represents that.
 
-        try:
-            session.transition_to(SessionState.STARTING)
-            session.presentation_state = "buffering"
-        except ValueError:
-            return False
-
+        # No need to transition here, start_session will handle it
         # Re-run normal start flow
         return await self.start_session(session_id)
 
@@ -2103,3 +2097,60 @@ class SessionManager:
         """Delete a session."""
         await self.stop_session(session_id)
         return self._sessions.pop(session_id, None) is not None
+
+    async def play(
+        self,
+        source_id: str,
+        target_id: str,
+        conflict_policy: str = "takeover",
+        stream_profile: str = "auto",
+        auto_heal: bool = True,
+    ) -> Session:
+        """
+        Canonical orchestration method for playback.
+        Handles target arbitration and conflict policies.
+        """
+        # Find existing active session for target
+        existing: Session | None = None
+        for s in self._sessions.values():
+            if s.target_id == target_id and s.state not in {SessionState.STOPPED, SessionState.FAILED}:
+                existing = s
+                break
+
+        if existing:
+            if conflict_policy == "reject":
+                raise SessionConflictError(existing.session_id, target_id)
+
+            if conflict_policy == "reuse":
+                if existing.source_id != source_id:
+                    raise SessionConflictError(existing.session_id, target_id)
+
+                # If same source, resume if needed
+                if existing.state == SessionState.QUIESCED:
+                    await self.resume_session(existing.session_id)
+                elif existing.state != SessionState.PLAYING:
+                    await self.start_session(existing.session_id)
+                return existing
+
+            if conflict_policy == "takeover":
+                if existing.source_id == source_id:
+                    # Same as reuse for same source
+                    if existing.state == SessionState.QUIESCED:
+                        await self.resume_session(existing.session_id)
+                    elif existing.state != SessionState.PLAYING:
+                        await self.start_session(existing.session_id)
+                    return existing
+                else:
+                    # Takeover different source
+                    await self.stop_session(existing.session_id)
+                    # Create new session
+                    session = self.create(source_id, target_id, stream_profile, auto_heal)
+                    await self.start_session(session.session_id)
+                    return session
+
+            raise ValueError(f"Unknown conflict policy: {conflict_policy}")
+
+        # No existing session
+        session = self.create(source_id, target_id, stream_profile, auto_heal)
+        await self.start_session(session.session_id)
+        return session
