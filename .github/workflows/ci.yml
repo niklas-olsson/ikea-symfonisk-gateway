@@ -35,47 +35,61 @@ jobs:
           echo "  3. Are any test/coverage directories excluded?"
           echo "  4. Are any secrets/config files properly excluded?"
 
+  lint:
+    runs-on: ubuntu-latest
+    needs: gitignore-review
+    if: always() && needs.gitignore-review.result != 'failure'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --all-packages --dev
+      - name: Lint
+        run: uv run ruff check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    needs: gitignore-review
+    if: always() && needs.gitignore-review.result != 'failure'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --all-packages --dev
+      - name: Type check
+        run: uv run mypy .
+
   test:
     runs-on: ubuntu-latest
     needs: gitignore-review
     if: always() && needs.gitignore-review.result != 'failure'
-    strategy:
-      matrix:
-        python-version: ["3.12"]
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-
       - name: Set up Python
-        run: uv python install ${{ matrix.python-version }}
-
+        run: uv python install 3.12
       - name: Install dependencies
         run: uv sync --all-packages --dev
-        # Note: ffmpeg is required at runtime but mocked in tests, so not installed in CI
-
-      - name: Lint
-        run: uv run ruff check .
-
-      - name: Type check
-        run: uv run mypy .
-
       - name: Circular Import Check
         run: |
           uv pip install pylint
           uv run python scripts/check_circular_imports.py
-
       - name: Package Boundary Check
         run: uv run python scripts/check_package_boundaries.py
-
-      - name: Test
-        run: uv run pytest .
+      - name: Run Tests
+        # Use -n auto for parallel test execution via pytest-xdist
+        run: uv run pytest -n auto .
 
   build:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [lint, typecheck, test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
