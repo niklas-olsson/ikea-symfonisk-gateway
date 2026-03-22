@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from bridge_core.api.models import ErrorResponse
 from bridge_core.api.sessions import SessionResponse
-from bridge_core.core import SessionManager
+from bridge_core.core import SessionIntent, SessionManager
 from bridge_core.core.errors import QUIESCED_SESSION_CONFLICT, SessionConflictError
 
 router = APIRouter(prefix="/v1/play", tags=["play"])
@@ -17,6 +17,7 @@ class PlayRequest(BaseModel):
     conflict_policy: str = "takeover"
     stream_profile: str = "auto"
     auto_heal: bool = True
+    intent: SessionIntent = SessionIntent.MANUAL
 
 
 @router.post("", response_model=SessionResponse, responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}})
@@ -31,6 +32,7 @@ async def play(request: Request, body: PlayRequest) -> SessionResponse:
             conflict_policy=body.conflict_policy,
             stream_profile=body.stream_profile,
             auto_heal=body.auto_heal,
+            intent=body.intent,
         )
         source_health = source_registry.get_source_health(session.source_id)
         return SessionResponse(**session.to_dict(source_health=source_health))
