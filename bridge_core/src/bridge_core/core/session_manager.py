@@ -58,6 +58,12 @@ AUDIO_DEBUG_PACING_LOGS_ENABLED_DEFAULT = False
 WINDOWS_SOURCE_ACTIVITY_WATCHDOG_MS_DEFAULT = 15000
 
 
+STOP_REASON_SUPERSEDED = "superseded_by_new_session"
+STOP_REASON_RECLAIMED = "target_reclaimed"
+STOP_REASON_MANUAL = "manual_takeover"
+STOP_REASON_PREFERRED = "preferred_device_takeover"
+
+
 class SessionState(str, Enum):
     CREATED = "created"
     PREPARING = "preparing"
@@ -90,6 +96,7 @@ class Session:
         self.selected_stream_profile: str | None = None
         self.effective_stream_profile: str | None = None
         self.auto_heal = auto_heal
+        self.stop_reason: str | None = None
         self.exclusive = exclusive
         self.state: SessionState = SessionState.CREATED
         self.stream_url: str | None = None
@@ -135,7 +142,7 @@ class Session:
     def transition_to(self, new_state: SessionState) -> None:
         """Transitions the session to a new state if valid."""
         valid_transitions = {
-            SessionState.CREATED: [SessionState.PREPARING, SessionState.STARTING, SessionState.FAILED],
+            SessionState.CREATED: [SessionState.PREPARING, SessionState.STARTING, SessionState.FAILED, SessionState.STOPPING],
             SessionState.PREPARING: [SessionState.READY, SessionState.STOPPING, SessionState.FAILED],
             SessionState.READY: [SessionState.STARTING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.STARTING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.FAILED],
@@ -211,6 +218,7 @@ class Session:
             "created_at": self.created_at,
             "started_at": self.started_at,
             "stopped_at": self.stopped_at,
+            "stop_reason": self.stop_reason,
             "last_error": self.last_error.model_dump() if self.last_error else None,
             "media_status": {
                 "state": self.media_state,
@@ -877,6 +885,8 @@ class SessionManager:
         target_id: str | None = None,
         stream_profile: str = "auto",
         auto_heal: bool = True,
+        takeover: bool = False,
+        takeover_reason: str | None = None,
         exclusive: bool = False,
     ) -> Session:
         """Create a new playback session.
@@ -884,10 +894,11 @@ class SessionManager:
         Target Arbitration Matrix:
         -------------------------
         - Idle target: Created & Starts normally.
-        - Same target + same source + active: Returns existing session (idempotent).
-        - Same target + same source + quiesced: Returns existing session (resumable).
-        - Same target + different source + incumbent: Created (target takeover at start()).
-        - Same target + different source + incumbent (exclusive=True): SessionConflictError (409).
+        - Same target + same source + active/quiesced: Returns existing session (idempotent).
+        - Same target + different source + incumbent:
+          - takeover=True: stop incumbent and create new session.
+          - exclusive=True or incumbent.exclusive: SessionConflictError (409).
+          - otherwise: Create new session; start_session() handles arbitration.
         - Stale incumbent (FAILED/STOPPED): Created normally.
         """
         if not source_id and self._config_store:
@@ -900,14 +911,35 @@ class SessionManager:
         if not target_id:
             raise ValueError("No target_id provided and no preferred target set")
 
-        # Session reuse and conflict management
-        for existing in self._sessions.values():
-            if existing.target_id == target_id and existing.state not in (SessionState.STOPPED, SessionState.FAILED):
-                if existing.source_id == source_id:
-                    logger.info("Reusing existing session %s for target %s", existing.session_id, target_id)
-                    return existing
-                if exclusive or existing.exclusive:
-                    raise SessionConflictError(existing.session_id, target_id)
+        # Server-side target arbitration and reuse
+        for existing in list(self._sessions.values()):
+            if existing.target_id != target_id or existing.state in (SessionState.STOPPED, SessionState.FAILED):
+                continue
+
+            if existing.source_id == source_id:
+                logger.info("Reusing existing session %s for target %s", existing.session_id, target_id)
+                return existing
+
+            if takeover:
+                logger.info(
+                    "Taking over target %s from session %s (reason: %s)",
+                    target_id,
+                    existing.session_id,
+                    takeover_reason or STOP_REASON_SUPERSEDED,
+                )
+                # We need to make sure the loop is running to use create_task
+                try:
+                    loop = asyncio.get_running_loop()
+                    logger.info("Scheduling takeover stop for session %s in existing loop", existing.session_id)
+                    loop.create_task(self.stop_session(existing.session_id, stop_reason=takeover_reason or STOP_REASON_SUPERSEDED))
+                except RuntimeError:
+                    # Fallback for sync context
+                    logger.info("Running takeover stop for session %s synchronously", existing.session_id)
+                    asyncio.run(self.stop_session(existing.session_id, stop_reason=takeover_reason or STOP_REASON_SUPERSEDED))
+                continue
+
+            if exclusive or existing.exclusive:
+                raise SessionConflictError(existing.session_id, target_id)
         session = Session(
             source_id=source_id,
             target_id=target_id,
@@ -1460,6 +1492,7 @@ class SessionManager:
         activation_seen = startup_result == "active"
         activation_degraded_emitted = False
         transport_degraded_emitted = False
+        last_ownership_check_monotonic = 0.0
         transport_miss_started_at: float | None = None
         transport_recovery_started_at: float | None = None
 
@@ -1564,6 +1597,21 @@ class SessionManager:
 
                 if session.state == SessionState.PLAYING and not session.primary_established and self._primary_attach_grace_open(session):
                     self._set_media_state(session, "establishing_primary", None)
+
+                # Periodic ownership check (every 5 seconds)
+                if now - last_ownership_check_monotonic >= 5.0:
+                    last_ownership_check_monotonic = now
+                    adapter = self._target_registry.get_adapter_for_target(session.target_id)
+                    if adapter:
+                        ownership_res = await adapter.inspect_ownership(session.target_id)
+                        if ownership_res.status != OwnershipStatus.OWNED:
+                            logger.info(
+                                "Target %s ownership lost (reclaimed by external player), stopping session %s",
+                                session.target_id,
+                                session.session_id,
+                            )
+                            await self.stop_session(session.session_id, stop_reason=STOP_REASON_RECLAIMED)
+                            return
 
                 transport_should_degrade = (
                     session.state == SessionState.PLAYING
@@ -1913,7 +1961,7 @@ class SessionManager:
         # Re-run normal start flow
         return await self.start_session(session_id)
 
-    async def stop_session(self, session_id: str) -> bool:
+    async def stop_session(self, session_id: str, stop_reason: str | None = None) -> bool:
         """Stop a session and its pipeline."""
         session = self.get(session_id)
         if not session:
@@ -1927,6 +1975,8 @@ class SessionManager:
             return True
 
         try:
+            if stop_reason:
+                session.stop_reason = stop_reason
             session.transition_to(SessionState.STOPPING)
             session.presentation_state = "idle"
             session.presentation_detail = None

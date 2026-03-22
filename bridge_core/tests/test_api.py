@@ -126,17 +126,13 @@ def test_session_lifecycle(client: TestClient) -> None:
     assert all("media_status" in s for s in list_res.json()["sessions"])
 
     # 5. Stop session (even if not started)
-    # Note: Transition from CREATED to STOPPING is not valid in session_manager.py
-    # Valid from CREATED are: PREPARING, STARTING, FAILED
-    # Let's try to start it first, or just acknowledge that stop fails from CREATED.
-    # Actually, let's just test that it returns 400 with our structured error.
+    # Transition from CREATED to STOPPING is now allowed.
     stop_res = client.post(f"/v1/sessions/{session_id}/stop")
-    assert stop_res.status_code == 400
-    assert stop_res.json()["detail"]["code"] == "SESSION_STOP_FAILED"
+    assert stop_res.status_code == 200
 
-    # Check state is still created (because transition failed)
+    # Check state is stopped
     get_res = client.get(f"/v1/sessions/{session_id}")
-    assert get_res.json()["state"] == "created"
+    assert get_res.json()["state"] == "stopped"
 
 
 def test_get_session_404(client: TestClient) -> None:
