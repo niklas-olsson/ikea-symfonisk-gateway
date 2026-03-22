@@ -2313,15 +2313,30 @@ class SessionManager:
     async def play(
         self,
         source_id: str,
-        target_id: str,
+        target_id: str | None = None,
         conflict_policy: str = "takeover",
         stream_profile: str = "auto",
         auto_heal: bool = True,
+        takeover_reason: str | None = None,
     ) -> Session:
         """
         Canonical orchestration method for playback.
         Handles target arbitration and conflict policies.
         """
+        if not target_id:
+            # 1. Preferred target
+            if self._config_store:
+                target_id = self._config_store.get("preferred_target_id")
+
+            # 2. Deterministic fallback
+            if not target_id:
+                targets = self._target_registry.list_targets()
+                if not targets:
+                    raise ValueError("No targets available for playback")
+                # Sort targets by ID for deterministic fallback
+                sorted_targets = sorted(targets, key=lambda t: t.target_id)
+                target_id = sorted_targets[0].target_id
+
         # Find existing active session for target
         existing: Session | None = None
         for s in self._sessions.values():
@@ -2354,15 +2369,27 @@ class SessionManager:
                     return existing
                 else:
                     # Takeover different source
-                    await self.stop_session(existing.session_id)
+                    await self.stop_session(existing.session_id, stop_reason=takeover_reason or STOP_REASON_SUPERSEDED)
                     # Create new session
-                    session = await self.create(source_id, target_id, stream_profile, auto_heal)
+                    session = await self.create(
+                        source_id=source_id,
+                        target_id=target_id,
+                        stream_profile=stream_profile,
+                        auto_heal=auto_heal,
+                        takeover=True,
+                        takeover_reason=takeover_reason,
+                    )
                     await self.start_session(session.session_id)
                     return session
 
             raise ValueError(f"Unknown conflict policy: {conflict_policy}")
 
         # No existing session
-        session = await self.create(source_id, target_id, stream_profile, auto_heal)
+        session = await self.create(
+            source_id=source_id,
+            target_id=target_id,
+            stream_profile=stream_profile,
+            auto_heal=auto_heal,
+        )
         await self.start_session(session.session_id)
         return session
