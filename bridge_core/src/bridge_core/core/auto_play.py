@@ -51,24 +51,15 @@ class AutoPlayController:
 
         source_id = canonical_source_id
 
-        targets = self._target_registry.list_targets()
-        if not targets:
-            logger.warning(f"No playback target available to auto-play source {source_id}")
-            return
-
-        # Pick the first target available (could be improved with preferred target logic)
-        target_id = targets[0].target_id
-
-        logger.info(f"Auto-playing newly available Bluetooth source {source_id} to target {target_id}")
+        logger.info(f"Auto-playing newly available Bluetooth source {source_id}")
 
         try:
-            # Create and start a new session, taking over if necessary
-            session = await self._session_manager.create(
+            # Route through canonical play path with takeover semantics
+            await self._session_manager.play(
                 source_id=source_id,
-                target_id=target_id,
-                takeover=True,
+                target_id=None,  # Resolved by SessionManager (preferred -> deterministic)
+                conflict_policy="takeover",
                 takeover_reason=STOP_REASON_PREFERRED,
             )
-            await self._session_manager.start_session(session.session_id)
         except Exception as e:
             logger.error(f"Failed to auto-play source {source_id}: {e}")

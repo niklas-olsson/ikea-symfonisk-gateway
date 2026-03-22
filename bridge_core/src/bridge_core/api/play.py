@@ -13,7 +13,7 @@ router = APIRouter(prefix="/v1/play", tags=["play"])
 
 class PlayRequest(BaseModel):
     source_id: str
-    target_id: str
+    target_id: str | None = None
     conflict_policy: str = "takeover"
     stream_profile: str = "auto"
     auto_heal: bool = True
