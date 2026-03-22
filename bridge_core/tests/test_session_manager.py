@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from bridge_core.adapters.base import OwnershipResult, OwnershipStatus
+from bridge_core.core.errors import SessionConflictError
 from bridge_core.core.event_bus import EventBus, EventType
 from bridge_core.core.session_manager import SessionFrameSink, SessionManager, SessionState
 from bridge_core.core.source_registry import SourceRegistry
@@ -2331,3 +2332,36 @@ async def test_stable_profile_ignores_primary_detach_delivery_degradation(
     assert session.state == SessionState.PLAYING
     assert session.primary_detach_events_total == 0
     await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_play_canonical_orchestration(session_manager: SessionManager) -> None:
+    """Test the canonical play() method."""
+    # 1. Basic start
+    session = await session_manager.play(source_id="src_1", target_id="tgt_1")
+    assert session.source_id == "src_1"
+    assert session.target_id == "tgt_1"
+    assert session.state == SessionState.PLAYING
+
+    # 2. Reuse same source (idempotent)
+    session2 = await session_manager.play(source_id="src_1", target_id="tgt_1", conflict_policy="reuse")
+    assert session2.session_id == session.session_id
+    assert session2.state == SessionState.PLAYING
+
+    # 3. Reject conflict
+    with pytest.raises(SessionConflictError):
+        await session_manager.play(source_id="src_2", target_id="tgt_1", conflict_policy="reject")
+
+    # 4. Takeover different source
+    session3 = await session_manager.play(source_id="src_3", target_id="tgt_1", conflict_policy="takeover")
+    assert session3.session_id != session.session_id
+    assert session3.source_id == "src_3"
+    assert session.state == SessionState.STOPPED
+
+    # 5. Reuse/Takeover with quiesced session
+    session3.transition_to(SessionState.QUIESCED)
+    # Mock resume_session to avoid full restart logic in this test if desired,
+    # but our fixture already mocks start_session which is used by play.
+    session4 = await session_manager.play(source_id="src_3", target_id="tgt_1", conflict_policy="reuse")
+    assert session4.session_id == session3.session_id
+    assert session4.state == SessionState.PLAYING
