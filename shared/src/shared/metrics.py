@@ -1,7 +1,6 @@
 """Central metrics registry for the bridge."""
 
 import threading
-from typing import Any
 
 
 class MetricsRegistry:

@@ -17,7 +17,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from shared.metrics import MetricsRegistry
 
+from bridge_core.adapters.mock_renderer import MockRendererAdapter
 from bridge_core.api import (
     adapters_router,
     bluetooth_router,
@@ -38,8 +40,6 @@ from bridge_core.core import (
 )
 from bridge_core.stream.publisher import StreamPublisher
 from renderer_sonos import SonosRendererAdapter
-from bridge_core.adapters.mock_renderer import MockRendererAdapter
-from shared.metrics import MetricsRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -212,11 +212,11 @@ app.include_router(config_router)
 
 
 @app.middleware("http")
-async def count_api_requests(request: Request, call_next):
+async def count_api_requests(request: Request, call_next: object) -> object:
     """Middleware to count all incoming API requests."""
     if hasattr(app.state, "metrics"):
         app.state.metrics.increment("api_request_count")
-    response = await call_next(request)
+    response = await call_next(request)  # type: ignore[operator]
     return response
 
 

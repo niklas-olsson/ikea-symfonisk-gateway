@@ -1,9 +1,10 @@
 """Mock renderer adapter for benchmarking when no real speakers are available."""
 
-import asyncio
 from collections.abc import Sequence
 from typing import Any
+
 from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
+
 
 class MockTargetDescriptor(TargetDescriptor):
     def __init__(self, target_id: str, display_name: str):
@@ -14,34 +15,61 @@ class MockTargetDescriptor(TargetDescriptor):
         self.is_preferred = False
 
     @property
-    def target_id(self) -> str: return self._target_id
+    def target_id(self) -> str:
+        return self._target_id
+
     @property
-    def renderer(self) -> str: return "mock"
+    def renderer(self) -> str:
+        return "mock"
+
     @property
-    def target_type(self) -> str: return "speaker"
+    def target_type(self) -> str:
+        return "speaker"
+
     @property
-    def display_name(self) -> str: return self._display_name
+    def display_name(self) -> str:
+        return self._display_name
+
     @property
-    def members(self) -> list[str]: return [self._target_id]
+    def members(self) -> list[str]:
+        return [self._target_id]
+
     @property
-    def coordinator_id(self) -> str: return self._target_id
+    def coordinator_id(self) -> str:
+        return self._target_id
+
 
 class MockRendererAdapter(RendererAdapter):
-    def __init__(self, event_bus=None):
+    def __init__(self, event_bus: Any = None):
         self._event_bus = event_bus
-        self._targets = {
-            "mock-speaker": MockTargetDescriptor("mock-speaker", "Mock Speaker")
-        }
+        self._targets = {"mock-speaker": MockTargetDescriptor("mock-speaker", "Mock Speaker")}
 
-    def id(self) -> str: return "mock-renderer"
+    def id(self) -> str:
+        return "mock-renderer"
 
     async def list_targets(self) -> Sequence[TargetDescriptor]:
         return list(self._targets.values())
 
+    async def get_topology(self) -> dict[str, Any]:
+        return {
+            "renderer": "mock",
+            "targets": [
+                {
+                    "target_id": t.target_id,
+                    "display_name": t.display_name,
+                    "type": t.target_type,
+                    "members": t.members,
+                    "coordinator": t.coordinator_id,
+                }
+                for t in self._targets.values()
+            ],
+            "discovered": True,
+        }
+
     async def prepare_target(self, target_id: str) -> dict[str, Any]:
         return {"success": True}
 
-    async def play_stream(self, target_id: str, stream_url: str, metadata=None) -> dict[str, Any]:
+    async def play_stream(self, target_id: str, stream_url: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         return {"success": True}
 
     async def stop(self, target_id: str) -> dict[str, Any]:

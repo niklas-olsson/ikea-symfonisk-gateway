@@ -4,10 +4,10 @@
 import asyncio
 import json
 import os
-import subprocess
 import time
 import traceback
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -16,14 +16,17 @@ BRIDGE_PORT = os.environ.get("BRIDGE_PORT", "8732")
 BASE_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}"
 
 
-async def get_health():
+async def get_health() -> dict[str, Any]:
     """Fetch metrics from the health endpoint."""
     async with httpx.AsyncClient() as client:
         response = await client.get(f"{BASE_URL}/health")
-        return response.json()
+        data = response.json()
+        if not isinstance(data, dict):
+            return {}
+        return data
 
 
-async def wait_for_bridge():
+async def wait_for_bridge() -> bool:
     """Wait for the bridge to be ready."""
     print("Waiting for bridge to be ready...")
     for _ in range(30):
@@ -39,19 +42,21 @@ async def wait_for_bridge():
     return False
 
 
-async def collect_sample(duration_seconds=5):
+async def collect_sample(duration_seconds: int = 5) -> dict[str, Any] | None:
     """Collect resource usage over a duration."""
     samples = []
     start_time = time.time()
     while time.time() - start_time < duration_seconds:
         try:
             health = await get_health()
-            samples.append({
-                "cpu": health["system"]["cpu_usage_percent"],
-                "rss": health["system"]["rss_bytes"],
-                "threads": health["system"]["thread_count"],
-                "metrics": health["metrics"]
-            })
+            samples.append(
+                {
+                    "cpu": health["system"]["cpu_usage_percent"],
+                    "rss": health["system"]["rss_bytes"],
+                    "threads": health["system"]["thread_count"],
+                    "metrics": health["metrics"],
+                }
+            )
         except Exception as e:
             traceback.print_exc()
             print(f"Error collecting sample: {e}")
@@ -65,18 +70,13 @@ async def collect_sample(duration_seconds=5):
     final_threads = samples[-1]["threads"]
     final_metrics = samples[-1]["metrics"]
 
-    return {
-        "avg_cpu_percent": avg_cpu,
-        "final_rss_bytes": final_rss,
-        "final_thread_count": final_threads,
-        "final_metrics": final_metrics
-    }
+    return {"avg_cpu_percent": avg_cpu, "final_rss_bytes": final_rss, "final_thread_count": final_threads, "final_metrics": final_metrics}
 
 
-async def run_benchmark():
+async def run_benchmark() -> dict[str, Any]:
     """Run the benchmark suite."""
     if not await wait_for_bridge():
-        return
+        return {}
 
     results = {}
     try:
@@ -102,8 +102,7 @@ async def run_benchmark():
         print(f"Starting session (stable): {source_id} -> {target_id}")
         async with httpx.AsyncClient() as client:
             session_res = await client.post(
-                f"{BASE_URL}/v1/sessions",
-                json={"source_id": source_id, "target_id": target_id, "delivery_profile": "stable"}
+                f"{BASE_URL}/v1/sessions", json={"source_id": source_id, "target_id": target_id, "delivery_profile": "stable"}
             )
             session = session_res.json()
             session_id = session["session_id"]
@@ -125,10 +124,7 @@ async def run_benchmark():
         # State: Active-Experimental
         print(f"Starting session (experimental): {source_id} -> {target_id}")
         async with httpx.AsyncClient() as client:
-            session_res = await client.post(
-                f"{BASE_URL}/v1/sessions",
-                json={"source_id": source_id, "target_id": target_id}
-            )
+            session_res = await client.post(f"{BASE_URL}/v1/sessions", json={"source_id": source_id, "target_id": target_id})
             session = session_res.json()
             session_id = session["session_id"]
             # We might need to set the config for experimental profile
@@ -152,7 +148,7 @@ async def run_benchmark():
     return results
 
 
-async def main():
+async def main() -> None:
     try:
         results = await run_benchmark()
         output_path = Path("benchmarks/baseline_0.1.0.json")

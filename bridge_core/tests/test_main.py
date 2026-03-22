@@ -42,8 +42,8 @@ async def test_register_ingress_adapters_linux() -> None:
 
         register_ingress_adapters(registry, event_bus, host_platform="Linux")
 
-        linux_audio_cls.assert_called_once_with(event_bus)
-        linux_bluetooth_cls.assert_called_once_with(event_bus)
+        linux_audio_cls.assert_called_once_with(event_bus, metrics=None)
+        linux_bluetooth_cls.assert_called_once_with(event_bus, metrics=None)
         windows_audio_cls.assert_not_called()
         schedule_startup.assert_called_once_with(None, "linux_bluetooth_adapter")
 
