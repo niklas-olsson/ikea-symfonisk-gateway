@@ -100,6 +100,7 @@ class SymfoniskSessionStateSensor(SymfoniskSensor):
 
     _attr_name = "Playback State"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str | None:
@@ -120,6 +121,7 @@ class SymfoniskNegotiatedProfileSensor(SymfoniskSensor):
 
     _attr_name = "Stream Profile"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str | None:
@@ -165,6 +167,7 @@ class SymfoniskDeliveryProfileSensor(SymfoniskSensor):
 
     _attr_name = "Delivery Profile"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str | None:
