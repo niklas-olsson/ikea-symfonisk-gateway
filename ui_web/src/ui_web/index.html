@@ -899,7 +899,10 @@
 
         // ── Session functions ──────────────────────────────
 
-        async function fetchSources() {
+        async function fetchSources(isRefreshing = false) {
+            if (isRefreshing) {
+                sourceSelect.innerHTML = '<option value="">Discovering sources...</option>';
+            }
             try {
                 const res = await fetch('/v1/sources');
                 const { sources } = await res.json();
@@ -951,14 +954,17 @@
             }
         }
 
-        async function fetchTargets() {
+        async function fetchTargets(isRefreshing = false) {
+            if (isRefreshing) {
+                targetSelect.innerHTML = '<option value="">Discovering speakers...</option>';
+            }
             try {
                 const res = await fetch('/v1/targets');
                 const { targets } = await res.json();
                 const currentValue = targetSelect.value;
 
                 if (targets.length === 0) {
-                    targetSelect.innerHTML = '<option value="">No targets found. Check speaker power and click Refresh.</option>';
+                    targetSelect.innerHTML = '<option value="">No speakers found. Check power and click Refresh.</option>';
                 } else {
                     targetSelect.innerHTML = targets.map(t => {
                         let label = t.display_name;
@@ -990,6 +996,7 @@
 
         async function refreshSources() {
             addLog('SYSTEM', 'Refreshing sources...');
+            fetchSources(true);
             try {
                 await fetch('/v1/sources/refresh', { method: 'POST' });
                 await fetchSources();
@@ -1001,6 +1008,7 @@
 
         async function refreshTargets() {
             addLog('SYSTEM', 'Refreshing targets...');
+            fetchTargets(true);
             try {
                 await fetch('/v1/targets/refresh', { method: 'POST' });
                 await fetchTargets();
@@ -1249,22 +1257,25 @@
 
             // Errors & Availability
             const errors = status.readiness_errors || [];
+            const isUnsupported = !status.healthy && errors.some(e => e.includes('MISSING') || e.includes('UNSUPPORTED'));
+            const isDisabled = status.healthy && !powered;
+
             if (errors.length > 0 && !status.healthy) {
                 diagnostics.style.display = 'block';
                 errorList.innerHTML = errors.map(e =>
                     `<li>${e.replace(/_/g, ' ')}</li>`
                 ).join('');
-
-                // If not healthy and no devices, hide main controls to show polished unavailable state
-                if (!status.healthy && (!status.devices || status.devices.length === 0)) {
-                    mainControls.style.display = 'none';
-                    unavailableMsg.style.display = 'block';
-                } else {
-                    mainControls.style.display = 'block';
-                    unavailableMsg.style.display = 'none';
-                }
             } else {
                 diagnostics.style.display = 'none';
+            }
+
+            if (isUnsupported || isDisabled) {
+                mainControls.style.display = 'none';
+                unavailableMsg.style.display = 'block';
+                unavailableMsg.textContent = isUnsupported
+                    ? "Bluetooth is unsupported on this host."
+                    : "Bluetooth is disabled. Please enable it in system settings.";
+            } else {
                 mainControls.style.display = 'block';
                 unavailableMsg.style.display = 'none';
             }
@@ -1332,6 +1343,7 @@
                 addLog('BLUETOOTH', 'Pairing mode activated (90s)');
                 btStartCountdown();
                 await btFetchStatus();
+                refreshSources();
             } catch (err) {
                 addLog('BT-ERROR', 'Failed to open pairing: ' + err.message);
                 pairBtn.disabled = false;
@@ -1396,7 +1408,7 @@
             const list = document.getElementById('bt-device-list');
 
             if (!devices || devices.length === 0) {
-                list.innerHTML = '<div class="bt-empty">No devices discovered</div>';
+                list.innerHTML = '<div class="bt-empty">No devices found. Enter Pairing Mode to connect a device.</div>';
                 return;
             }
 
@@ -1540,7 +1552,7 @@
             const sessionEventTypes = [
                 'session.created', 'session.starting', 'session.started',
                 'session.stopped', 'session.failed', 'topology.changed',
-                'publisher.active', 'source.started'
+                'publisher.active', 'source.started', 'renderer.discovery.changed'
             ];
 
             sessionEventTypes.forEach(type => {
@@ -1571,6 +1583,9 @@
 
                     if (type === 'topology.changed') {
                         fetchSources();
+                        fetchTargets();
+                    }
+                    if (type === 'renderer.discovery.changed') {
                         fetchTargets();
                     }
                 });
@@ -1607,6 +1622,11 @@
                         type === 'bluetooth.device.untrusted' ||
                         type === 'bluetooth.device.discovered') {
                         btRefreshDevices();
+                        if (type === 'bluetooth.device.connected' ||
+                            type === 'bluetooth.device.disconnected' ||
+                            type === 'bluetooth.device.untrusted') {
+                            refreshSources();
+                        }
                     }
 
                     if (type === 'bluetooth.pairing_window.opened') {
@@ -1617,6 +1637,7 @@
                         btStopCountdown();
                         btFetchStatus();
                         btRefreshDevices();
+                        refreshSources();
                     }
 
                     if (type === 'bluetooth.source.available') {
@@ -1668,6 +1689,12 @@
         btFetchStatus();
         btRefreshDevices();
         setupSSE();
+
+        // Initial background refresh once startup settles
+        setTimeout(() => {
+            refreshSources();
+            refreshTargets();
+        }, 2000);
 
         playBtn.onclick = createAndStartSession;
         stopBtn.onclick = stopCurrentSession;
