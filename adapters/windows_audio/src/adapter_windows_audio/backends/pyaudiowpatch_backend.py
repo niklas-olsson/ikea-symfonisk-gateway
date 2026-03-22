@@ -90,8 +90,12 @@ class PyAudioWPatchBackend:
                 source_type=SourceType.SYSTEM_OUTPUT,
                 display_name="Default System Sound (windows)",
                 platform="windows",
-                capabilities=SourceCapabilities(sample_rates=[48000], channels=[2], bit_depths=[16]),
-                metadata=metadata,
+                capabilities=SourceCapabilities(sample_rates=[44100, 48000], channels=[2], bit_depths=[16]),
+                metadata={
+                    **metadata,
+                    "actual_sample_rate": self._diagnostics.actual_sample_rate,
+                    "attempted_rates": self._diagnostics.attempted_rates,
+                },
             )
         ]
 
@@ -174,20 +178,54 @@ class PyAudioWPatchBackend:
             False,
         )
 
-        try:
-            self._pa = self._pawp.PyAudio()
-            self._stream = self._pa.open(
-                format=self._pawp.paInt16,
-                channels=2,
-                rate=48000,
-                input=True,
-                input_device_index=device_info.get("index"),
-                frames_per_buffer=self._diagnostics.frames_per_buffer,
-                stream_callback=self._audio_callback,
+        self._pa = self._pawp.PyAudio()
+
+        # Determine candidate rates: [native_rate, 48000, 44100]
+        native_rate = int(device_info.get("defaultSampleRate", 48000))
+        candidate_rates = [native_rate]
+        for r in [48000, 44100]:
+            if r not in candidate_rates:
+                candidate_rates.append(r)
+
+        self._diagnostics.attempted_rates = candidate_rates
+
+        last_exc = None
+        for rate in candidate_rates:
+            try:
+                logger.info("Attempting to open Windows loopback at %s Hz", rate)
+                self._stream = self._pa.open(
+                    format=self._pawp.paInt16,
+                    channels=2,
+                    rate=rate,
+                    input=True,
+                    input_device_index=device_info.get("index"),
+                    frames_per_buffer=self._diagnostics.frames_per_buffer,
+                    stream_callback=self._audio_callback,
+                )
+                self._diagnostics.actual_sample_rate = rate
+                self._diagnostics.stream_opened = True
+                self._diagnostics.start_viability["stream_opened"] = True
+                self._diagnostics.start_viability["callback_registered"] = True
+                break
+            except Exception as exc:
+                logger.warning("Failed to open Windows loopback at %s Hz: %s", rate, exc)
+                last_exc = exc
+                continue
+
+        if self._stream is None:
+            self._last_error = str(last_exc)
+            self._diagnostics.last_callback_error = str(last_exc)
+            self._diagnostics.startup_substate = "stream_open_failed"
+            logger.error("All Windows loopback startup rates failed. Last error: %s", last_exc)
+            self._close_stream()
+            return StartResult(
+                success=False,
+                message=str(last_exc),
+                code="windows_loopback_start_failed",
+                backend=self.name(),
             )
-            self._diagnostics.stream_opened = True
-            self._diagnostics.start_viability["stream_opened"] = True
-            self._diagnostics.start_viability["callback_registered"] = True
+
+        try:
             if hasattr(self._stream, "start_stream"):
                 self._stream.start_stream()
             elif hasattr(self._stream, "start"):
@@ -196,8 +234,9 @@ class PyAudioWPatchBackend:
             self._diagnostics.start_viability["stream_started"] = True
             self._diagnostics.startup_substate = "stream_started_no_callbacks"
             logger.info(
-                "Windows loopback viability: backend=%s stream_opened=%s stream_started=%s callback_registered=%s",
+                "Windows loopback viability: backend=%s rate=%s stream_opened=%s stream_started=%s callback_registered=%s",
                 self.name(),
+                self._diagnostics.actual_sample_rate,
                 self._diagnostics.start_viability["stream_opened"],
                 self._diagnostics.start_viability["stream_started"],
                 self._diagnostics.start_viability["callback_registered"],
@@ -206,7 +245,7 @@ class PyAudioWPatchBackend:
             self._last_error = str(exc)
             self._diagnostics.last_callback_error = str(exc)
             self._diagnostics.startup_substate = "stream_open_failed"
-            logger.exception("Failed to start PyAudioWPatch loopback")
+            logger.exception("Failed to start PyAudioWPatch loopback stream")
             self._close_stream()
             return StartResult(
                 success=False,
@@ -332,6 +371,23 @@ class PyAudioWPatchBackend:
                 data_stereo = audio[:, :2].copy()
             else:
                 data_stereo = audio
+
+            # Normalize to 48000 Hz if necessary
+            actual_rate = self._diagnostics.actual_sample_rate or 48000
+            if actual_rate != 48000:
+                target_rate = 48000
+                num_target_samples = int(frame_count * target_rate / actual_rate)
+
+                # Resample each channel using linear interpolation
+                x_actual = np.arange(frame_count)
+                x_target = np.linspace(0, frame_count - 1, num_target_samples)
+
+                resampled_channels = []
+                for i in range(data_stereo.shape[1]):
+                    resampled_channels.append(np.interp(x_target, x_actual, data_stereo[:, i]))
+
+                data_stereo = np.column_stack(resampled_channels).astype(np.int16)
+                frame_count = num_target_samples
 
             if data_stereo.dtype.byteorder == ">" or (data_stereo.dtype.byteorder == "=" and sys.byteorder == "big"):
                 data_bytes = data_stereo.astype("<i2").tobytes()
