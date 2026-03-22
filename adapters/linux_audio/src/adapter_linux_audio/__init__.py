@@ -54,7 +54,14 @@ class LinuxAudioAdapter(IngressAdapter):
         import shutil
 
         if shutil.which("pactl"):
-            self._hotplug_task = asyncio.create_task(self._hotplug_loop())
+            try:
+                loop = asyncio.get_running_loop()
+                self._hotplug_task = loop.create_task(self._hotplug_loop())
+            except RuntimeError:
+                # No running loop, listener will not be started automatically.
+                # In a real app, the loop will be running by the time we need this,
+                # or it can be started manually.
+                logger.debug("No running event loop, hotplug listener not started.")
 
     async def _hotplug_loop(self) -> None:
         """Listens for PulseAudio events using pactl subscribe."""
