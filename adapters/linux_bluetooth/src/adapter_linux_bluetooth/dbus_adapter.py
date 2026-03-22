@@ -8,6 +8,8 @@ from typing import Any, cast
 from dbus_fast import BusType, Variant
 from dbus_fast.aio import MessageBus
 
+from shared.subprocess import SubprocessRunner
+
 logger = logging.getLogger(__name__)
 
 BLUEZ_SERVICE = "org.bluez"
@@ -20,12 +22,11 @@ OBJECT_MANAGER_INTERFACE = "org.freedesktop.DBus.ObjectManager"
 class BlueZAdapterController:
     """Controls a BlueZ Bluetooth adapter via DBus."""
 
-    def __init__(self, adapter_name: str = "hci0"):
+    def __init__(self, adapter_name: str = "hci0", runner: SubprocessRunner | None = None):
         self.adapter_name = adapter_name
         self.adapter_path = f"/org/bluez/{adapter_name}"
         self._bus: MessageBus | None = None
-        self._readiness_cache: list[str] = []
-        self._readiness_time: float = 0
+        self._runner = runner or SubprocessRunner()
 
     async def _get_bus(self) -> MessageBus:
         """Get or create the system message bus."""
@@ -187,12 +188,6 @@ class BlueZAdapterController:
 
     async def check_readiness(self) -> list[str]:
         """Check for common adapter issues (rfkill, permissions, missing service)."""
-        # Cache results for 30 seconds to avoid frequent subprocess calls
-        import time
-        now = time.time()
-        if now - self._readiness_time < 30:
-            return self._readiness_cache
-
         errors = []
 
         # 1. Check if DBus socket is accessible
@@ -217,9 +212,8 @@ class BlueZAdapterController:
         # 4. Check rfkill if possible
         if shutil.which("rfkill"):
             try:
-                import subprocess
-
-                result = subprocess.run(["rfkill", "list", "bluetooth"], capture_output=True, text=True)
+                # Cache rfkill status for 30 seconds
+                result = await self._runner.run_async(["rfkill", "list", "bluetooth"], ttl=30)
                 if "Soft blocked: yes" in result.stdout:
                     errors.append("adapter_soft_blocked")
                 if "Hard blocked: yes" in result.stdout:
@@ -227,6 +221,4 @@ class BlueZAdapterController:
             except Exception:
                 pass
 
-        self._readiness_cache = errors
-        self._readiness_time = now
         return errors

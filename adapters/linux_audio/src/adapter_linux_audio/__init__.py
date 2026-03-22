@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from bridge_core.core.event_bus import EventBus
 
+from shared.subprocess import SubprocessRunner
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
@@ -31,17 +33,16 @@ logger = logging.getLogger(__name__)
 class LinuxAudioAdapter(IngressAdapter):
     """Adapter for capturing system audio on Linux."""
 
-    def __init__(self, event_bus: EventBus | None = None, metrics: Any | None = None) -> None:
+    def __init__(self, event_bus: EventBus | None = None, metrics: Any | None = None, runner: SubprocessRunner | None = None) -> None:
         self._event_bus = event_bus
         self._metrics = metrics
+        self._runner = runner or SubprocessRunner(metrics=metrics)
         self._session_id: str | None = None
         self._running = False
         self._process: asyncio.subprocess.Process | None = None
         self._capture_task: asyncio.Task[None] | None = None
         self._frame_sink: FrameSink | None = None
         self._hotplug_task: asyncio.Task[None] | None = None
-        self._sources_cache: list[SourceDescriptor] = []
-        self._sources_time: float = 0
 
         # We start listening to hotplug events asynchronously when instantiated
         # or it can be started on demand
@@ -87,6 +88,10 @@ class LinuxAudioAdapter(IngressAdapter):
                 line_str = line.decode().strip()
                 if "Event 'new'" in line_str or "Event 'remove'" in line_str:
                     logger.debug(f"Audio source changed: {line_str}")
+                    # Invalidate discovery caches
+                    self._runner.invalidate_by_prefix(["pactl", "list"])
+                    self._runner.invalidate_by_prefix(["arecord", "-l"])
+
                     if self._event_bus:
                         from bridge_core.core.event_bus import EventType
 
@@ -121,25 +126,11 @@ class LinuxAudioAdapter(IngressAdapter):
 
     def list_sources(self) -> list[SourceDescriptor]:
         """Enumerate available PulseAudio and ALSA sources."""
-        # Cache results for 5 seconds to avoid frequent subprocess calls
-        import time
-        now = time.time()
-        if now - self._sources_time < 5:
-            if self._metrics:
-                self._metrics.increment("source_list_cache_hit_count")
-            return self._sources_cache
-
-        if self._metrics:
-            self._metrics.increment("source_list_cache_miss_count")
-
         sources = []
-        import subprocess
 
         # 1. Try to discover PulseAudio sources
         try:
-            if self._metrics:
-                self._metrics.increment("subprocess_execution_count")
-            result = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, check=True)
+            result = self._runner.run(["pactl", "list", "short", "sources"], ttl=5, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
                     continue
@@ -175,9 +166,7 @@ class LinuxAudioAdapter(IngressAdapter):
 
         # 2. Try to discover ALSA sources
         try:
-            if self._metrics:
-                self._metrics.increment("subprocess_execution_count")
-            result = subprocess.run(["arecord", "-l"], capture_output=True, text=True, check=True)
+            result = self._runner.run(["arecord", "-l"], ttl=5, check=True)
             for line in result.stdout.split("\n"):
                 if line.startswith("card "):
                     # e.g. card 0: PCH [HDA Intel PCH], device 0: ALC294 Analog [ALC294 Analog]
@@ -222,8 +211,6 @@ class LinuxAudioAdapter(IngressAdapter):
                 )
             )
 
-        self._sources_cache = sources
-        self._sources_time = now
         return sources
 
     def prepare(self, source_id: str) -> PrepareResult:

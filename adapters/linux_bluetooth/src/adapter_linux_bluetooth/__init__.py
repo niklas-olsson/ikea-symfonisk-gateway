@@ -12,6 +12,7 @@ import subprocess
 from typing import Any, Protocol, cast
 
 from bridge_core.core.event_bus import EventBus, EventType
+from shared.subprocess import SubprocessRunner
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
@@ -72,7 +73,7 @@ logger = logging.getLogger(__name__)
 class LinuxBluetoothAdapter(IngressAdapter):
     """Adapter for capturing Bluetooth audio on Linux."""
 
-    def __init__(self, event_bus: EventBus | None = None, metrics: Any | None = None) -> None:
+    def __init__(self, event_bus: EventBus | None = None, metrics: Any | None = None, runner: SubprocessRunner | None = None) -> None:
         self._event_bus = event_bus
         self._metrics = metrics
         self._session_id: str | None = None
@@ -82,6 +83,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
         self._frame_sink: FrameSink | None = None
 
         self._store = TrustedDeviceStore()
+        self._runner = runner or SubprocessRunner(metrics=metrics)
 
         is_linux = platform.system() == "Linux"
         self._adapter_controller: _BlueZAdapterController | None = None
@@ -90,7 +92,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
             from .dbus_adapter import BlueZAdapterController
             from .window import PairingWindowManager
 
-            self._adapter_controller = cast(_BlueZAdapterController, BlueZAdapterController())
+            self._adapter_controller = cast(_BlueZAdapterController, BlueZAdapterController(runner=self._runner))
             self._pairing_window = cast(
                 _PairingWindowManager,
                 PairingWindowManager(cast(Any, self._adapter_controller), self._store, event_bus),
@@ -168,17 +170,6 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     def list_sources(self) -> list[SourceDescriptor]:
         """Discover connected Bluetooth A2DP sources using pactl."""
-        # Cache results for 5 seconds to avoid frequent pactl calls
-        import time
-        now = time.time()
-        if now - self._sources_time < 5:
-            if self._metrics:
-                self._metrics.increment("source_list_cache_hit_count")
-            return self._sources_cache
-
-        if self._metrics:
-            self._metrics.increment("source_list_cache_miss_count")
-
         sources: list[SourceDescriptor] = []
         if not shutil.which("pactl"):
             return sources
@@ -188,9 +179,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
         try:
             backend_type = "PulseAudio"
             default_source = "auto_null.monitor"
-            if self._metrics:
-                self._metrics.increment("subprocess_execution_count")
-            info_res = subprocess.run(["pactl", "info"], capture_output=True, text=True)
+            info_res = self._runner.run(["pactl", "info"], ttl=5)
             for line in info_res.stdout.split("\n"):
                 if "PipeWire" in line:
                     backend_type = "PipeWire"
@@ -200,9 +189,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
             macs_found = set()
 
             # 1. Check for explicit pulse sources
-            if self._metrics:
-                self._metrics.increment("subprocess_execution_count")
-            result = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, check=True)
+            result = self._runner.run(["pactl", "list", "short", "sources"], ttl=5, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
                     continue
@@ -217,9 +204,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
             # 2. Check for explicit pulse cards (PipeWire Loopback fallback)
             if backend_type == "PipeWire":
-                if self._metrics:
-                    self._metrics.increment("subprocess_execution_count")
-                res = subprocess.run(["pactl", "list", "short", "cards"], capture_output=True, text=True)
+                res = self._runner.run(["pactl", "list", "short", "cards"], ttl=5)
                 for line in res.stdout.strip().split("\n"):
                     if not line:
                         continue
@@ -278,8 +263,6 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     self._event_bus.emit(EventType.TOPOLOGY_CHANGED, payload={"adapter_id": self.id()})
 
             self._source_id_map = new_source_id_map
-            self._sources_cache = sources
-            self._sources_time = now
             return sources
 
         except (subprocess.SubprocessError, FileNotFoundError) as e:

@@ -24,12 +24,20 @@ def test_list_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = LinuxAudioAdapter()
 
     # Mock subprocess.run to simulate pactl output
+    import subprocess
     class MockResult:
-        stdout = "1\talsa_output.pci-0000_00_1f.3.analog-stereo.monitor\tmodule-alsa-card.c\ts16le 2ch 48000Hz\n2\talsa_input.pci-0000_00_1f.3.analog-stereo\tmodule-alsa-card.c\ts16le 2ch 48000Hz"
+        def __init__(self, stdout="", stderr="", returncode=0, args=None):
+            self.stdout = stdout
+            self.stderr = stderr
+            self.returncode = returncode
+            self.args = args
 
-    def mock_run(*args: object, **kwargs: object) -> MockResult:
-        if args and isinstance(args[0], list) and "pactl" in args[0]:
-            return MockResult()
+    def mock_run(args, **kwargs):
+        if args and isinstance(args, list) and "pactl" in args:
+            return MockResult(
+                stdout="1\talsa_output.pci-0000_00_1f.3.analog-stereo.monitor\tmodule-alsa-card.c\ts16le 2ch 48000Hz\n2\talsa_input.pci-0000_00_1f.3.analog-stereo\tmodule-alsa-card.c\ts16le 2ch 48000Hz",
+                args=args
+            )
         raise FileNotFoundError()
 
     import subprocess
