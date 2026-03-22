@@ -19,6 +19,7 @@ class CreateSessionRequest(BaseModel):
     auto_heal: bool = True
     takeover: bool = False
     exclusive: bool = False
+    takeover_reason: str | None = None
 
 
 class SessionResponse(BaseModel):
@@ -62,6 +63,7 @@ async def create_session(request: Request, body: CreateSessionRequest) -> Sessio
             auto_heal=body.auto_heal,
             takeover=body.takeover,
             exclusive=body.exclusive,
+            takeover_reason=body.takeover_reason,
         )
         source_health = source_registry.get_source_health(session.source_id)
         return SessionResponse(**session.to_dict(source_health=source_health))
