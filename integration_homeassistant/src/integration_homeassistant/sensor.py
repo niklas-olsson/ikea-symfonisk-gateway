@@ -31,6 +31,8 @@ async def async_setup_entry(
             SymfoniskUptimeSensor(coordinator, entry),
             SymfoniskSessionStateSensor(coordinator, entry),
             SymfoniskDeliveryProfileSensor(coordinator, entry),
+            SymfoniskNegotiatedProfileSensor(coordinator, entry),
+            SymfoniskFailureReasonSensor(coordinator, entry),
         ]
     )
 
@@ -96,12 +98,54 @@ class SymfoniskSessionStateSensor(SymfoniskSensor):
         if not self.coordinator.data.sessions:
             return "no_active_session"
 
-        return self.coordinator.data.sessions[0].get("state")
+        return self.coordinator.data.sessions[0].get("presentation_state") or self.coordinator.data.sessions[0].get("state")
 
     @property
     def unique_id(self) -> str:
         """Return a unique ID."""
         return f"{self.coordinator.host}_session_state"
+
+
+class SymfoniskNegotiatedProfileSensor(SymfoniskSensor):
+    """Sensor for negotiated stream profile."""
+
+    _attr_name = "Negotiated Stream Profile"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the state of the sensor."""
+        if not self.coordinator.data.sessions:
+            return None
+
+        return self.coordinator.data.sessions[0].get("effective_stream_profile")
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"{self.coordinator.host}_negotiated_profile"
+
+
+class SymfoniskFailureReasonSensor(SymfoniskSensor):
+    """Sensor for session failure reason/action."""
+
+    _attr_name = "Failure Reason"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the state of the sensor."""
+        if not self.coordinator.data.sessions:
+            return None
+
+        session = self.coordinator.data.sessions[0]
+        last_error = session.get("last_error")
+        if last_error:
+            return last_error.get("action") or last_error.get("message")
+        return None
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"{self.coordinator.host}_failure_reason"
 
 
 class SymfoniskDeliveryProfileSensor(SymfoniskSensor):

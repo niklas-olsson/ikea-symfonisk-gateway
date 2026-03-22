@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 
+from homeassistant.components import frontend
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -35,6 +37,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Register static path for panel assets
+    panel_path = os.path.join(os.path.dirname(__file__), "www")
+    if os.path.exists(panel_path):
+        hass.http.register_static_path(
+            "/ikea_symfonisk_gateway_static",
+            panel_path,
+        )
+
+        # Register the Bridge panel in the sidebar
+        frontend.async_register_panel(
+            hass,
+            frontend_url_path="symfonisk_gateway",
+            webcomponent_name="symfonisk-gateway-panel",
+            sidebar_title="Bridge",
+            sidebar_icon="mdi:router-wireless",
+            module_url="/ikea_symfonisk_gateway_static/panel.js",
+            config={"host": entry.data[CONF_HOST], "port": entry.data[CONF_PORT]},
+        )
 
     async def handle_recover_session(call: ServiceCall) -> None:
         """Handle the recover_session service call."""
@@ -73,9 +94,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if target_coordinator:
             await target_coordinator.async_refresh_targets()
 
+    async def handle_refresh_discovery(call: ServiceCall) -> None:
+        """Handle the refresh_discovery service call."""
+        target_coordinator = coordinator
+        if entry_id := call.data.get("entry_id"):
+            target_coordinator = hass.data[DOMAIN].get(entry_id)
+
+        if target_coordinator:
+            await target_coordinator.async_refresh_discovery()
+
     hass.services.async_register(DOMAIN, "recover_session", handle_recover_session)
     hass.services.async_register(DOMAIN, "refresh_sources", handle_refresh_sources)
     hass.services.async_register(DOMAIN, "refresh_targets", handle_refresh_targets)
+    hass.services.async_register(DOMAIN, "refresh_discovery", handle_refresh_discovery)
 
     return True
 
@@ -85,9 +116,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
 
+    # Clean up panel
+    frontend.async_remove_panel(hass, "symfonisk_gateway")
+
     if not hass.data[DOMAIN]:
         hass.services.async_remove(DOMAIN, "recover_session")
         hass.services.async_remove(DOMAIN, "refresh_sources")
         hass.services.async_remove(DOMAIN, "refresh_targets")
+        hass.services.async_remove(DOMAIN, "refresh_discovery")
 
     return unload_ok

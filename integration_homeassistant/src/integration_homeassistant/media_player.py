@@ -52,8 +52,19 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
             return MediaPlayerState.IDLE
 
         active_session = self.coordinator.data.sessions[0]
-        state = active_session.get("state")
+        pres_state = active_session.get("presentation_state")
 
+        if pres_state == "playing":
+            return MediaPlayerState.PLAYING
+        if pres_state == "buffering":
+            return MediaPlayerState.BUFFERING
+        if pres_state == "error":
+            return MediaPlayerState.IDLE
+        if pres_state == "idle":
+            return MediaPlayerState.IDLE
+
+        # Fallback to internal state if presentation_state is not available
+        state = active_session.get("state")
         if state == "playing":
             return MediaPlayerState.PLAYING
         if state in ("starting", "preparing", "healing"):
@@ -91,6 +102,8 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
             "selected_stream_profile": session.get("selected_stream_profile"),
             "effective_stream_profile": session.get("effective_stream_profile"),
             "bridge_state": session.get("state"),
+            "presentation_state": session.get("presentation_state"),
+            "presentation_detail": session.get("presentation_detail"),
             "media_state": media_status.get("state"),
             "media_reason": media_status.get("reason"),
             "delivery_profile": media_status.get("delivery_profile"),

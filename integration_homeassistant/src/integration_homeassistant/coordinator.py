@@ -99,11 +99,23 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
 
             data = await resp.json()
             session_id = data["session_id"]
+            resume_available = data.get("resume_available", False)
 
-        async with session.post(f"{self.base_url}/v1/sessions/{session_id}/start") as resp:
-            if not resp.ok:
-                text = await resp.text()
-                raise Exception(f"Failed to start session: {text}")
+        if resume_available:
+            # Resume existing session
+            async with session.post(
+                f"{self.base_url}/v1/sessions/{session_id}/resume",
+                json={"force_reclaim": True},
+            ) as resp:
+                if not resp.ok:
+                    text = await resp.text()
+                    raise Exception(f"Failed to resume session: {text}")
+        else:
+            # Start new session
+            async with session.post(f"{self.base_url}/v1/sessions/{session_id}/start") as resp:
+                if not resp.ok:
+                    text = await resp.text()
+                    raise Exception(f"Failed to start session: {text}")
 
         await self.async_refresh()
         return session_id
@@ -156,5 +168,15 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
             if not resp.ok:
                 text = await resp.text()
                 raise Exception(f"Failed to refresh targets: {text}")
+
+        await self.async_refresh()
+
+    async def async_refresh_discovery(self) -> None:
+        """Trigger a full discovery refresh (sources and targets) on the bridge."""
+        session = async_get_clientsession(self.hass)
+        async with session.post(f"{self.base_url}/v1/discovery/refresh") as resp:
+            if not resp.ok:
+                text = await resp.text()
+                raise Exception(f"Failed to refresh discovery: {text}")
 
         await self.async_refresh()
