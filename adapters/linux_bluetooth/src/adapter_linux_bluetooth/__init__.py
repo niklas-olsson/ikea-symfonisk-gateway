@@ -74,8 +74,15 @@ logger = logging.getLogger(__name__)
 class LinuxBluetoothAdapter(IngressAdapter):
     """Adapter for capturing Bluetooth audio on Linux."""
 
-    def __init__(self, event_bus: EventBus | None = None, metrics: Any | None = None, runner: SubprocessRunner | None = None) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus | None = None,
+        config_store: Any | None = None,
+        metrics: Any | None = None,
+        runner: SubprocessRunner | None = None,
+    ) -> None:
         self._event_bus = event_bus
+        self._config_store = config_store
         self._metrics = metrics
         self._session_id: str | None = None
         self._running = False
@@ -601,12 +608,23 @@ class LinuxBluetoothAdapter(IngressAdapter):
         """Set the preferred device MAC."""
         self._store.set_preferred_device(mac)
 
+    def _is_configured(self) -> bool:
+        """Check if any preferred devices are configured."""
+        if not self._config_store:
+            return False
+        return bool(
+            self._config_store.get("preferred_source_id") or
+            self._config_store.get("preferred_target_id")
+        )
+
     async def _monitor_status(self) -> None:
         """Periodically check adapter status and emit events on change."""
         try:
             while True:
-                # Discover sources periodically to automatically emit BLUETOOTH_SOURCE_AVAILABLE
-                await asyncio.to_thread(self.list_sources)
+                # Only perform periodic list_sources (pactl-based) if the system is not yet configured
+                if not self._is_configured():
+                    # Discover sources periodically to automatically emit BLUETOOTH_SOURCE_AVAILABLE
+                    await asyncio.to_thread(self.list_sources)
 
                 status = await self.get_adapter_status()
 
@@ -625,6 +643,9 @@ class LinuxBluetoothAdapter(IngressAdapter):
                             payload=status,
                         )
                     self._last_status = status
+
+                # Use a small sleep at end of loop to prevent CPU spinning
+                # when configured (skipping list_sources)
                 await asyncio.sleep(5)
         except asyncio.CancelledError:
             pass

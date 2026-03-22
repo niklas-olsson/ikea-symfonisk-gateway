@@ -25,6 +25,7 @@ from bridge_core.api import (
     adapters_router,
     bluetooth_router,
     config_router,
+    discovery_router,
     events_router,
     health_router,
     sessions_router,
@@ -69,7 +70,12 @@ def _schedule_adapter_startup(startup_result: object, adapter_name: str) -> asyn
     return None
 
 
-def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventBus, host_platform: str | None = None) -> None:
+def register_ingress_adapters(
+    source_registry: SourceRegistry,
+    event_bus: EventBus,
+    config_store: ConfigStore | None = None,
+    host_platform: str | None = None,
+) -> None:
     """Register built-in ingress adapters for the current host platform."""
     synthetic_adapter = SyntheticAdapter()
     source_registry.register_adapter(
@@ -96,7 +102,12 @@ def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventB
             adapter_instance=linux_audio_adapter,
         )
 
-        linux_bluetooth_adapter = LinuxBluetoothAdapter(event_bus, metrics=metrics, runner=subprocess_runner)
+        linux_bluetooth_adapter = LinuxBluetoothAdapter(
+            event_bus,
+            config_store=config_store,
+            metrics=metrics,
+            runner=subprocess_runner,
+        )
         source_registry.register_adapter(
             adapter_id=linux_bluetooth_adapter.id(),
             platform=linux_bluetooth_adapter.platform(),
@@ -170,7 +181,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     mock_renderer = MockRendererAdapter(event_bus)
     await target_registry.register_adapter(mock_renderer)
 
-    register_ingress_adapters(source_registry, event_bus)
+    register_ingress_adapters(source_registry, event_bus, config_store=config_store)
 
     # Start registries and publisher
     target_registry.start()
@@ -206,6 +217,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(sources_router)
 app.include_router(targets_router)
+app.include_router(discovery_router)
 app.include_router(sessions_router)
 app.include_router(events_router)
 app.include_router(adapters_router)
