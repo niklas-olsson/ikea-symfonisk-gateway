@@ -93,6 +93,18 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
         """Return the preferred target ID from config."""
         return self.data.config.get("preferred_target_id")
 
+    def get_active_session(self) -> dict[str, Any] | None:
+        """Return the active session for the selected target."""
+        target_id = self.selected_target_id
+        if not target_id:
+            return None
+
+        for session in self.data.sessions:
+            if session.get("target_id") == target_id and session.get("state") != "stopped":
+                return session
+
+        return None
+
     async def start_session(self, source_id: str | None = None, target_id: str | None = None) -> str:
         """Start a new session or reuse/takeover an existing one."""
         session = async_get_clientsession(self.hass)

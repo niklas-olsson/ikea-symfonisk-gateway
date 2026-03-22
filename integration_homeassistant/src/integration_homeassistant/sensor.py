@@ -104,10 +104,11 @@ class SymfoniskSessionStateSensor(SymfoniskSensor):
     @property
     def native_value(self) -> str | None:
         """Return the state of the sensor."""
-        if not self.coordinator.data.sessions:
+        session = self.coordinator.get_active_session()
+        if not session:
             return "no_active_session"
 
-        return self.coordinator.data.sessions[0].get("presentation_state") or self.coordinator.data.sessions[0].get("state")
+        return session.get("presentation_state") or session.get("state")
 
     @property
     def unique_id(self) -> str:
@@ -124,10 +125,11 @@ class SymfoniskNegotiatedProfileSensor(SymfoniskSensor):
     @property
     def native_value(self) -> str | None:
         """Return the state of the sensor."""
-        if not self.coordinator.data.sessions:
+        session = self.coordinator.get_active_session()
+        if not session:
             return None
 
-        return self.coordinator.data.sessions[0].get("effective_stream_profile")
+        return session.get("effective_stream_profile")
 
     @property
     def unique_id(self) -> str:
@@ -145,10 +147,10 @@ class SymfoniskFailureReasonSensor(SymfoniskSensor):
     @property
     def native_value(self) -> str | None:
         """Return the state of the sensor."""
-        if not self.coordinator.data.sessions:
+        session = self.coordinator.get_active_session()
+        if not session:
             return None
 
-        session = self.coordinator.data.sessions[0]
         last_error = session.get("last_error")
         if last_error:
             return last_error.get("action") or last_error.get("message")
@@ -169,10 +171,10 @@ class SymfoniskDeliveryProfileSensor(SymfoniskSensor):
     @property
     def native_value(self) -> str | None:
         """Return the state of the sensor."""
-        if not self.coordinator.data.sessions:
+        session = self.coordinator.get_active_session()
+        if not session:
             return None
 
-        session = self.coordinator.data.sessions[0]
         media_status = session.get("media_status") or {}
         return media_status.get("effective_delivery_profile")
 
