@@ -383,6 +383,7 @@ class SessionManager:
             return
 
         logger.error(f"Session {session_id} encountered a fatal error: {error}")
+        session.presentation_state = "error"
         self._event_bus.emit(
             EventType.SESSION_FAILED,
             session_id=session_id,
@@ -923,6 +924,7 @@ class SessionManager:
 
         try:
             session.transition_to(SessionState.STARTING)
+            session.presentation_state = "buffering"
         except ValueError:
             return False
 
@@ -1128,6 +1130,8 @@ class SessionManager:
 
                     # Successful start
                     session.effective_stream_profile = attempt_profile
+                    session.presentation_state = "playing"
+                    session.presentation_detail = None
 
                     # Persist last known good profile
                     if self._config_store:
@@ -1160,6 +1164,7 @@ class SessionManager:
                 raise RuntimeError("Failed to start with any viable profile")
 
             session.transition_to(SessionState.PLAYING)
+            session.presentation_state = "playing"
             initial_media_state = "establishing_primary"
             self._set_media_state(session, initial_media_state, None)
             session.last_media_healthy_at = time.time()
@@ -1879,6 +1884,7 @@ class SessionManager:
 
         try:
             session.transition_to(SessionState.STARTING)
+            session.presentation_state = "buffering"
         except ValueError:
             return False
 
@@ -1900,6 +1906,8 @@ class SessionManager:
 
         try:
             session.transition_to(SessionState.STOPPING)
+            session.presentation_state = "idle"
+            session.presentation_detail = None
         except ValueError:
             # If transition fails, we might be in a state where we can't stop normally
             # but we should try to cleanup anyway if it's FAILED
@@ -1996,6 +2004,7 @@ class SessionManager:
             "client_detached_while_session_open",
             "media_plane_heal_failed",
         }:
+            session.presentation_state = "buffering"
             mode = "replay" if session.media_reason == "client_detached_while_session_open" else "swap"
             self._schedule_media_plane_heal(session_id, mode, session.media_reason, force=True)
             self._event_bus.emit(
@@ -2010,6 +2019,7 @@ class SessionManager:
             return
 
         session.transition_to(SessionState.HEALING)
+        session.presentation_state = "buffering"
         self._event_bus.emit(
             EventType.HEAL_ATTEMPTED,
             session_id=session_id,
@@ -2025,6 +2035,8 @@ class SessionManager:
 
             # 2. Transition back to PLAYING
             session.transition_to(SessionState.PLAYING)
+            session.presentation_state = "playing"
+            session.presentation_detail = None
             self._event_bus.emit(
                 EventType.HEAL_SUCCEEDED,
                 session_id=session_id,

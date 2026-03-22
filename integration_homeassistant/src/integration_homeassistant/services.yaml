@@ -13,6 +13,16 @@ recover_session:
       selector:
         text:
 
+refresh_discovery:
+  description: "Triggers a full discovery refresh of both audio sources and playback targets on the bridge."
+  fields:
+    entry_id:
+      description: "The config entry ID of the bridge (optional if only one bridge is configured)."
+      required: false
+      selector:
+        config_entry:
+          integration: ikea_symfonisk_gateway
+
 refresh_sources:
   description: "Triggers a manual refresh of available audio sources on the bridge."
   fields:
