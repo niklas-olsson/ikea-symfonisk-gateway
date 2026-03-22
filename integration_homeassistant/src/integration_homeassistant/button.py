@@ -49,7 +49,7 @@ class SymfoniskButton(CoordinatorEntity[SymfoniskCoordinator], ButtonEntity):
 class SymfoniskStartButton(SymfoniskButton):
     """Button to start a playback session."""
 
-    _attr_name = "Start Session"
+    _attr_name = "Start Playback"
 
     async def async_press(self) -> None:
         """Handle the button press."""
@@ -71,7 +71,7 @@ class SymfoniskStartButton(SymfoniskButton):
 class SymfoniskStopButton(SymfoniskButton):
     """Button to stop all playback sessions."""
 
-    _attr_name = "Stop All Sessions"
+    _attr_name = "Stop All Playback"
 
     async def async_press(self) -> None:
         """Handle the button press."""
