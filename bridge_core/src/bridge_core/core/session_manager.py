@@ -67,6 +67,7 @@ class SessionState(str, Enum):
     HEALING = "healing"
     DEGRADED = "degraded"
     QUIESCED = "quiesced"
+    SUPERSEDED = "superseded"
     STOPPING = "stopping"
     STOPPED = "stopped"
     FAILED = "failed"
@@ -133,29 +134,79 @@ class Session:
     def transition_to(self, new_state: SessionState) -> None:
         """Transitions the session to a new state if valid."""
         valid_transitions = {
-            SessionState.CREATED: [SessionState.PREPARING, SessionState.STARTING, SessionState.FAILED],
-            SessionState.PREPARING: [SessionState.READY, SessionState.STOPPING, SessionState.FAILED],
-            SessionState.READY: [SessionState.STARTING, SessionState.STOPPING, SessionState.FAILED],
-            SessionState.STARTING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.FAILED],
+            SessionState.CREATED: [
+                SessionState.PREPARING,
+                SessionState.STARTING,
+                SessionState.FAILED,
+                SessionState.SUPERSEDED,
+            ],
+            SessionState.PREPARING: [
+                SessionState.READY,
+                SessionState.STOPPING,
+                SessionState.FAILED,
+                SessionState.SUPERSEDED,
+            ],
+            SessionState.READY: [
+                SessionState.STARTING,
+                SessionState.STOPPING,
+                SessionState.FAILED,
+                SessionState.SUPERSEDED,
+            ],
+            SessionState.STARTING: [
+                SessionState.PLAYING,
+                SessionState.STOPPING,
+                SessionState.FAILED,
+                SessionState.SUPERSEDED,
+            ],
             SessionState.PLAYING: [
                 SessionState.HEALING,
                 SessionState.DEGRADED,
                 SessionState.STOPPING,
                 SessionState.FAILED,
                 SessionState.QUIESCED,
+                SessionState.SUPERSEDED,
             ],
-            SessionState.HEALING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.DEGRADED, SessionState.FAILED],
+            SessionState.HEALING: [
+                SessionState.PLAYING,
+                SessionState.STOPPING,
+                SessionState.DEGRADED,
+                SessionState.FAILED,
+                SessionState.SUPERSEDED,
+            ],
             SessionState.DEGRADED: [
                 SessionState.PLAYING,
                 SessionState.HEALING,
                 SessionState.STOPPING,
                 SessionState.FAILED,
                 SessionState.QUIESCED,
+                SessionState.STARTING,
+                SessionState.SUPERSEDED,
             ],
-            SessionState.QUIESCED: [SessionState.STARTING, SessionState.STOPPING, SessionState.FAILED],
-            SessionState.STOPPING: [SessionState.STOPPED, SessionState.FAILED],
-            SessionState.STOPPED: [SessionState.STARTING, SessionState.PREPARING, SessionState.FAILED],
-            SessionState.FAILED: [SessionState.PREPARING, SessionState.STARTING, SessionState.HEALING, SessionState.STOPPING],
+            SessionState.QUIESCED: [
+                SessionState.STARTING,
+                SessionState.STOPPING,
+                SessionState.FAILED,
+                SessionState.SUPERSEDED,
+            ],
+            SessionState.STOPPING: [
+                SessionState.STOPPED,
+                SessionState.FAILED,
+                SessionState.SUPERSEDED,
+            ],
+            SessionState.STOPPED: [
+                SessionState.STARTING,
+                SessionState.PREPARING,
+                SessionState.FAILED,
+                SessionState.SUPERSEDED,
+            ],
+            SessionState.FAILED: [
+                SessionState.PREPARING,
+                SessionState.STARTING,
+                SessionState.HEALING,
+                SessionState.STOPPING,
+                SessionState.SUPERSEDED,
+            ],
+            SessionState.SUPERSEDED: [],
         }
 
         if new_state not in valid_transitions.get(self.state, []):
@@ -868,12 +919,89 @@ class SessionManager:
                 self._clear_primary_detach_state(session)
             self._session_heals.pop(session_id, None)
 
-    def create(
+    def _find_session_for_target(self, target_id: str) -> Session | None:
+        """Find an active session for the given target."""
+        for session in self._sessions.values():
+            if session.target_id == target_id and session.state not in {SessionState.STOPPED, SessionState.SUPERSEDED}:
+                return session
+        return None
+
+    async def _resolve_target_conflict(
+        self,
+        target_id: str,
+        source_id: str,
+        takeover: bool = False,
+    ) -> Session | None:
+        """Resolve conflicts with existing sessions for the same target."""
+        incumbent = self._find_session_for_target(target_id)
+        if not incumbent:
+            return None
+
+        # 1. Stale incumbent ownership: reclaim target
+        adapter = self._target_registry.get_adapter_for_target(target_id)
+        if adapter:
+            try:
+                ownership_res = await adapter.inspect_ownership(target_id)
+                if ownership_res.status == OwnershipStatus.NOT_OWNED:
+                    logger.info(
+                        "Reclaiming target %s from stale session %s (Ownership: %s)",
+                        target_id,
+                        incumbent.session_id,
+                        ownership_res.status,
+                    )
+                    await self.stop_session(incumbent.session_id)
+                    with suppress(ValueError):
+                        incumbent.transition_to(SessionState.SUPERSEDED)
+                    return None
+            except Exception as e:
+                logger.warning("Failed to inspect ownership for target %s: %s", target_id, e)
+
+        # 2. Same source: return existing session idempotently
+        if incumbent.source_id == source_id:
+            if incumbent.state in {
+                SessionState.PLAYING,
+                SessionState.STARTING,
+                SessionState.PREPARING,
+                SessionState.HEALING,
+                SessionState.READY,
+            }:
+                logger.info("Returning existing active session %s idempotently", incumbent.session_id)
+                return incumbent
+
+            if incumbent.state == SessionState.QUIESCED:
+                logger.info("Resuming quiesced session %s for same source", incumbent.session_id)
+                await self.resume_session(incumbent.session_id, force_reclaim=True)
+                return incumbent
+
+            if incumbent.state == SessionState.DEGRADED:
+                logger.info("Restarting degraded session %s for same source", incumbent.session_id)
+                await self.stop_session(incumbent.session_id)
+                # Note: start_session will be called by the caller of create() usually,
+                # but we need to return the session in a state that can be started.
+                # stop_session leaves it in STOPPED state.
+                return incumbent
+
+            if incumbent.state == SessionState.FAILED:
+                logger.info("Returning failed session %s for retry", incumbent.session_id)
+                return incumbent
+
+        # 3. Different source
+        if takeover:
+            logger.info("Taking over target %s from session %s", target_id, incumbent.session_id)
+            await self.stop_session(incumbent.session_id)
+            with suppress(ValueError):
+                incumbent.transition_to(SessionState.SUPERSEDED)
+            return None
+
+        raise SessionConflictError(incumbent.session_id, target_id)
+
+    async def create(
         self,
         source_id: str | None = None,
         target_id: str | None = None,
         stream_profile: str = "auto",
         auto_heal: bool = True,
+        takeover: bool = False,
     ) -> Session:
         """Create a new session, using preferred devices if IDs are not provided."""
         if not source_id and self._config_store:
@@ -886,13 +1014,10 @@ class SessionManager:
         if not target_id:
             raise ValueError("No target_id provided and no preferred target set")
 
-        # Server-side target exclusivity
-        for existing in self._sessions.values():
-            if existing.target_id == target_id and existing.state != SessionState.STOPPED:
-                if existing.source_id == source_id and existing.state == SessionState.QUIESCED:
-                    logger.info("Reusing existing quiesced session %s for target %s", existing.session_id, target_id)
-                    return existing
-                raise SessionConflictError(existing.session_id, target_id)
+        # Resolve incumbents
+        reused = await self._resolve_target_conflict(target_id, source_id, takeover=takeover)
+        if reused:
+            return reused
 
         session = Session(
             source_id=source_id,

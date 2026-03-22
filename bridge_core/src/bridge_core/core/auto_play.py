@@ -63,7 +63,7 @@ class AutoPlayController:
 
         try:
             # Create and start a new session
-            session = self._session_manager.create(
+            session = await self._session_manager.create(
                 source_id=source_id,
                 target_id=target_id,
             )

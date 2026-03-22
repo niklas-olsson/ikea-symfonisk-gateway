@@ -61,7 +61,7 @@ def session_manager(
 
 @pytest.mark.asyncio
 async def test_startup_failed_media_engine_not_found(session_manager: SessionManager, mock_source_registry: MagicMock) -> None:
-    session = session_manager.create("source_1", "target_1")
+    session = await session_manager.create("source_1", "target_1")
 
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path") as mock_resolve:
         mock_resolve.side_effect = RuntimeError("FFmpeg not found")
@@ -78,7 +78,7 @@ async def test_startup_failed_media_engine_not_found(session_manager: SessionMan
 
 @pytest.mark.asyncio
 async def test_startup_failed_source_prepare(session_manager: SessionManager, mock_source_registry: MagicMock) -> None:
-    session = session_manager.create("source_1", "target_1")
+    session = await session_manager.create("source_1", "target_1")
     mock_source_registry.prepare_source.return_value = MagicMock(success=False, error="Permission denied", code=None)
 
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
@@ -92,7 +92,7 @@ async def test_startup_failed_source_prepare(session_manager: SessionManager, mo
 
 @pytest.mark.asyncio
 async def test_startup_failed_renderer_playback(session_manager: SessionManager, mock_target_registry: MagicMock) -> None:
-    session = session_manager.create("source_1", "target_1")
+    session = await session_manager.create("source_1", "target_1")
     # Need to mock StreamPipeline so it doesn't actually try to start subprocesses
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -116,7 +116,7 @@ async def test_startup_failed_renderer_playback(session_manager: SessionManager,
 
 @pytest.mark.asyncio
 async def test_startup_failed_frame_ingest_timeout(session_manager: SessionManager, mock_target_registry: MagicMock) -> None:
-    session = session_manager.create("source_1", "target_1")
+    session = await session_manager.create("source_1", "target_1")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -144,7 +144,7 @@ async def test_windows_system_output_silent_startup_proceeds(
     mock_source_registry: MagicMock,
     mock_target_registry: MagicMock,
 ) -> None:
-    session = session_manager.create("windows-audio-adapter:system:default", "target_1")
+    session = await session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
             source_id="windows-audio-adapter:system:default",
@@ -220,7 +220,7 @@ async def test_windows_system_output_viable_silent_startup_proceeds(
     mock_source_registry: MagicMock,
     mock_target_registry: MagicMock,
 ) -> None:
-    session = session_manager.create("windows-audio-adapter:system:default", "target_1")
+    session = await session_manager.create("windows-audio-adapter:system:default", "target_1")
     assert session_manager._config_store is not None
     session_manager._config_store.get.side_effect = lambda key, default=None: {  # type: ignore[attr-defined]
         "audio_live_startup_allow_silent_source": True,
@@ -295,7 +295,7 @@ async def test_windows_system_output_active_backend_state_proceeds(
     mock_source_registry: MagicMock,
     mock_target_registry: MagicMock,
 ) -> None:
-    session = session_manager.create("windows-audio-adapter:system:default", "target_1")
+    session = await session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
             source_id="windows-audio-adapter:system:default",
@@ -347,7 +347,7 @@ async def test_windows_system_output_active_frames_emitted_proceeds(
     mock_source_registry: MagicMock,
     mock_target_registry: MagicMock,
 ) -> None:
-    session = session_manager.create("windows-audio-adapter:system:default", "target_1")
+    session = await session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
             source_id="windows-audio-adapter:system:default",
@@ -398,7 +398,7 @@ async def test_windows_system_output_active_callbacks_with_signal_proceeds(
     mock_source_registry: MagicMock,
     mock_target_registry: MagicMock,
 ) -> None:
-    session = session_manager.create("windows-audio-adapter:system:default", "target_1")
+    session = await session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
             source_id="windows-audio-adapter:system:default",
@@ -449,7 +449,7 @@ async def test_windows_system_output_stalled_capture_fails(
     mock_source_registry: MagicMock,
     mock_target_registry: MagicMock,
 ) -> None:
-    session = session_manager.create("windows-audio-adapter:system:default", "target_1")
+    session = await session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
             source_id="windows-audio-adapter:system:default",
@@ -511,7 +511,7 @@ async def test_windows_system_output_callbacks_active_no_samples_fails(
     mock_source_registry: MagicMock,
     mock_target_registry: MagicMock,
 ) -> None:
-    session = session_manager.create("windows-audio-adapter:system:default", "target_1")
+    session = await session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
             source_id="windows-audio-adapter:system:default",
@@ -564,7 +564,7 @@ async def test_windows_system_output_samples_received_no_frames_emitted_fails(
     mock_source_registry: MagicMock,
     mock_target_registry: MagicMock,
 ) -> None:
-    session = session_manager.create("windows-audio-adapter:system:default", "target_1")
+    session = await session_manager.create("windows-audio-adapter:system:default", "target_1")
     mock_source_registry.resolve_source.return_value = MagicMock(
         source=SourceDescriptor(
             source_id="windows-audio-adapter:system:default",

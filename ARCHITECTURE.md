@@ -47,7 +47,7 @@ To maintain a clean architecture and avoid "dependency hell," the following rule
 - Changes are pushed via `EventBus` (`TOPOLOGY_CHANGED`, `RENDERER_DISCOVERY_CHANGED`).
 
 ### 2. Session Lifecycle (Creation -> Playback)
-1. **Creation**: `SessionManager.create()` initializes a `Session` object with a unique ID.
+1. **Creation**: `SessionManager.create()` initializes a `Session` object with a unique ID. This method is asynchronous and handles conflict resolution with existing sessions for the same target.
 2. **Start**: `SessionManager.start_session()`:
     - Calls `SourceRegistry.prepare_source()` and `start_source()`.
     - Initializes a `StreamPipeline` and `SessionFrameSink`.
