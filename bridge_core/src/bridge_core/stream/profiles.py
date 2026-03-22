@@ -87,41 +87,37 @@ def is_profile_supported(profile_id: str, source_caps: Any, target_caps: Any) ->
     if not profile:
         return False
 
-    # Check source support with robustness for Mocks or missing attributes
-    source_codecs = getattr(source_caps, "codecs", None)
-    if not isinstance(source_codecs, (list, tuple)):
-        source_codecs = ["pcm_s16le", "mp3", "aac"]
+    # Helper to get capability list with fallback
+    def get_cap(obj: Any, attr: str, default: list[Any]) -> list[Any] | tuple[Any, ...]:
+        val = getattr(obj, attr, None)
+        # Handle MagicMock: it's not a list/tuple, so we get the default
+        if isinstance(val, (list, tuple)):
+            return val
+        return default
+
+    # Check source support
+    source_codecs = get_cap(source_caps, "codecs", ["pcm_s16le", "mp3", "aac"])
     if profile.codec not in source_codecs:
         return False
 
-    source_sample_rates = getattr(source_caps, "sample_rates", None)
-    if not isinstance(source_sample_rates, (list, tuple)):
-        source_sample_rates = [44100, 48000]
+    source_sample_rates = get_cap(source_caps, "sample_rates", [44100, 48000])
     if profile.sample_rate not in source_sample_rates:
         return False
 
-    source_channels = getattr(source_caps, "channels", None)
-    if not isinstance(source_channels, (list, tuple)):
-        source_channels = [1, 2]
+    source_channels = get_cap(source_caps, "channels", [1, 2])
     if profile.channels not in source_channels:
         return False
 
     # Check target support
-    target_codecs = getattr(target_caps, "supported_codecs", None)
-    if not isinstance(target_codecs, (list, tuple)):
-        target_codecs = ["mp3", "aac", "pcm_s16le"]
+    target_codecs = get_cap(target_caps, "supported_codecs", ["mp3", "aac", "pcm_s16le"])
     if profile.codec not in target_codecs:
         return False
 
-    target_sample_rates = getattr(target_caps, "supported_sample_rates", None)
-    if not isinstance(target_sample_rates, (list, tuple)):
-        target_sample_rates = [44100, 48000]
+    target_sample_rates = get_cap(target_caps, "supported_sample_rates", [44100, 48000])
     if profile.sample_rate not in target_sample_rates:
         return False
 
-    target_channels = getattr(target_caps, "supported_channels", None)
-    if not isinstance(target_channels, (list, tuple)):
-        target_channels = [1, 2]
+    target_channels = get_cap(target_caps, "supported_channels", [1, 2])
     if profile.channels not in target_channels:
         return False
 
