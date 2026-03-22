@@ -10,6 +10,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -39,6 +40,11 @@ async def async_setup_entry(
 
 class SymfoniskSensor(CoordinatorEntity[SymfoniskCoordinator], SensorEntity):
     """Base class for Symfonisk sensors."""
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self.coordinator.last_update_success and self.coordinator.data.health.get("status") == "ok"
 
     def __init__(self, coordinator: SymfoniskCoordinator, entry: ConfigEntry) -> None:
         """Initialize."""
@@ -72,6 +78,7 @@ class SymfoniskUptimeSensor(SymfoniskSensor):
     """Sensor for bridge uptime."""
 
     _attr_name = "Uptime"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -88,9 +95,10 @@ class SymfoniskUptimeSensor(SymfoniskSensor):
 
 
 class SymfoniskSessionStateSensor(SymfoniskSensor):
-    """Sensor for active session state."""
+    """Sensor for active playback state."""
 
-    _attr_name = "Session State"
+    _attr_name = "Playback State"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:
@@ -109,7 +117,8 @@ class SymfoniskSessionStateSensor(SymfoniskSensor):
 class SymfoniskNegotiatedProfileSensor(SymfoniskSensor):
     """Sensor for negotiated stream profile."""
 
-    _attr_name = "Negotiated Stream Profile"
+    _attr_name = "Stream Profile"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:
@@ -126,9 +135,11 @@ class SymfoniskNegotiatedProfileSensor(SymfoniskSensor):
 
 
 class SymfoniskFailureReasonSensor(SymfoniskSensor):
-    """Sensor for session failure reason/action."""
+    """Sensor for playback failure reason/action."""
 
     _attr_name = "Failure Reason"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str | None:
@@ -151,7 +162,8 @@ class SymfoniskFailureReasonSensor(SymfoniskSensor):
 class SymfoniskDeliveryProfileSensor(SymfoniskSensor):
     """Sensor for active delivery profile."""
 
-    _attr_name = "Effective Delivery Profile"
+    _attr_name = "Delivery Profile"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:

@@ -1,5 +1,5 @@
-recover_session:
-  description: "Attempts to recover a failed or degraded session on the bridge."
+recover_playback:
+  description: "Attempts to recover a failed or degraded playback on the bridge."
   fields:
     entry_id:
       description: "The config entry ID of the bridge (optional if only one bridge is configured)."
@@ -8,10 +8,20 @@ recover_session:
         config_entry:
           integration: ikea_symfonisk_gateway
     session_id:
-      description: "The ID of the session to recover (optional, will attempt to recover the active session if not provided)."
+      description: "The ID of the playback session to recover (optional, will attempt to recover the active session if not provided)."
       required: false
       selector:
         text:
+
+stop_playback:
+  description: "Stops the current active playback session on the bridge."
+  fields:
+    entry_id:
+      description: "The config entry ID of the bridge (optional if only one bridge is configured)."
+      required: false
+      selector:
+        config_entry:
+          integration: ikea_symfonisk_gateway
 
 refresh_discovery:
   description: "Triggers a full discovery refresh of both audio sources and playback targets on the bridge."
