@@ -915,17 +915,77 @@
         let btPairingRemainingSeconds = 0;
         let btPreferredMac = null;
 
-        function debounce(func, wait) {
-            let timeout;
-            return function executedFunction(...args) {
-                const later = () => {
-                    clearTimeout(timeout);
-                    func(...args);
-                };
-                clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
-            };
-        }
+        const RefreshCoordinator = {
+            pending: new Set(),
+            inFlight: new Map(),
+            debounceTimer: null,
+            debounceMs: 500,
+
+            request(components, immediate = false) {
+                components.forEach(c => this.pending.add(c));
+
+                if (immediate) {
+                    return this.execute();
+                }
+
+                if (this.debounceTimer) {
+                    clearTimeout(this.debounceTimer);
+                }
+
+                this.debounceTimer = setTimeout(() => {
+                    this.execute();
+                }, this.debounceMs);
+            },
+
+            async execute() {
+                if (this.debounceTimer) {
+                    clearTimeout(this.debounceTimer);
+                    this.debounceTimer = null;
+                }
+
+                const work = Array.from(this.pending);
+                this.pending.clear();
+
+                const promises = [];
+
+                // Deduplicate and prioritize scans over simple fetches
+                const tasks = new Set();
+                if (work.includes('scanSources')) tasks.add('scanSources');
+                else if (work.includes('sources')) tasks.add('sources');
+
+                if (work.includes('scanTargets')) tasks.add('scanTargets');
+                else if (work.includes('targets')) tasks.add('targets');
+
+                if (work.includes('btStatus')) tasks.add('btStatus');
+                if (work.includes('btDevices')) tasks.add('btDevices');
+
+                for (const task of tasks) {
+                    if (this.inFlight.has(task)) {
+                        promises.push(this.inFlight.get(task));
+                        continue;
+                    }
+
+                    let promise;
+                    switch (task) {
+                        case 'scanSources': promise = refreshSources(); break;
+                        case 'sources': promise = fetchSources(); break;
+                        case 'scanTargets': promise = refreshTargets(); break;
+                        case 'targets': promise = fetchTargets(); break;
+                        case 'btStatus': promise = btFetchStatus(); break;
+                        case 'btDevices': promise = btRefreshDevices(); break;
+                    }
+
+                    if (promise) {
+                        const wrapped = promise.finally(() => this.inFlight.delete(task));
+                        this.inFlight.set(task, wrapped);
+                        promises.push(wrapped);
+                    }
+                }
+
+                return Promise.all(promises);
+            }
+        };
+
 
         function normalizeDeliveryProfile(value) {
             return value === 'experimental' ? 'experimental' : 'stable';
@@ -1131,7 +1191,7 @@
             fetchSources(true);
             try {
                 await fetch('/v1/sources/refresh', { method: 'POST' });
-                await fetchSources();
+                return await fetchSources();
             } catch (err) {
                 console.error('Refresh sources failed', err);
                 addLog('ERROR', 'Refresh sources failed');
@@ -1143,7 +1203,7 @@
             fetchTargets(true);
             try {
                 await fetch('/v1/targets/refresh', { method: 'POST' });
-                await fetchTargets();
+                return await fetchTargets();
             } catch (err) {
                 console.error('Refresh targets failed', err);
                 addLog('ERROR', 'Refresh targets failed');
@@ -1474,8 +1534,7 @@
 
                 addLog('BLUETOOTH', 'Pairing mode activated (90s)');
                 btStartCountdown();
-                await btFetchStatus();
-                refreshSources();
+                RefreshCoordinator.request(['btStatus', 'scanSources'], true);
             } catch (err) {
                 addLog('BT-ERROR', 'Failed to open pairing: ' + err.message);
                 pairBtn.disabled = false;
@@ -1487,7 +1546,7 @@
                 await fetch('/v1/bluetooth/pairing/close', { method: 'POST' });
                 addLog('BLUETOOTH', 'Pairing mode stopped');
                 btStopCountdown();
-                await btFetchStatus();
+                RefreshCoordinator.request(['btStatus'], true);
             } catch (err) {
                 addLog('BT-ERROR', 'Failed to close pairing: ' + err.message);
             }
@@ -1508,8 +1567,7 @@
 
                 if (btPairingRemainingSeconds <= 0) {
                     btStopCountdown();
-                    btFetchStatus();
-                    btRefreshDevices();
+                    RefreshCoordinator.request(['btStatus', 'btDevices']);
                 }
             }, 1000);
         }
@@ -1535,12 +1593,6 @@
                 console.error('Failed to fetch BT devices', err);
             }
         }
-
-        // ── Debounced versions for SSE/Background ──────────
-        const debouncedFetchSources = debounce(fetchSources, 500);
-        const debouncedFetchTargets = debounce(fetchTargets, 500);
-        const debouncedBtFetchStatus = debounce(btFetchStatus, 500);
-        const debouncedBtRefreshDevices = debounce(btRefreshDevices, 500);
 
         function btRenderDevices(devices) {
             const list = document.getElementById('bt-device-list');
@@ -1720,11 +1772,10 @@
                     }
 
                     if (type === 'topology.changed') {
-                        debouncedFetchSources();
-                        debouncedFetchTargets();
+                        RefreshCoordinator.request(['sources', 'targets']);
                     }
                     if (type === 'renderer.discovery.changed') {
-                        debouncedFetchTargets();
+                        RefreshCoordinator.request(['targets']);
                     }
                 });
             });
@@ -1750,7 +1801,7 @@
                     if (type === 'bluetooth.adapter.status.changed' ||
                         type === 'bluetooth.adapter.ready' ||
                         type === 'bluetooth.adapter.failed') {
-                        debouncedBtFetchStatus();
+                        RefreshCoordinator.request(['btStatus']);
                     }
 
                     if (type === 'bluetooth.device.paired' ||
@@ -1759,27 +1810,26 @@
                         type === 'bluetooth.device.trusted' ||
                         type === 'bluetooth.device.untrusted' ||
                         type === 'bluetooth.device.discovered') {
-                        debouncedBtRefreshDevices();
+                        const components = ['btDevices'];
                         if (type === 'bluetooth.device.connected' ||
                             type === 'bluetooth.device.disconnected' ||
                             type === 'bluetooth.device.untrusted') {
-                            refreshSources();
+                            components.push('scanSources');
                         }
+                        RefreshCoordinator.request(components);
                     }
 
                     if (type === 'bluetooth.pairing_window.opened') {
-                        btFetchStatus();
+                        RefreshCoordinator.request(['btStatus'], true);
                     }
 
                     if (type === 'bluetooth.pairing_window.closed') {
                         btStopCountdown();
-                        btFetchStatus();
-                        btRefreshDevices();
-                        refreshSources();
+                        RefreshCoordinator.request(['btStatus', 'btDevices', 'scanSources'], true);
                     }
 
                     if (type === 'bluetooth.source.available') {
-                        debouncedFetchSources();
+                        RefreshCoordinator.request(['sources']);
                     }
                 });
             });
@@ -1830,8 +1880,7 @@
 
         // Initial background refresh once startup settles
         setTimeout(() => {
-            refreshSources();
-            refreshTargets();
+            RefreshCoordinator.request(['scanSources', 'scanTargets'], true);
         }, 2000);
 
         playBtn.onclick = createAndStartSession;
@@ -1849,8 +1898,8 @@
                 addLog('ERROR', 'Failed to save delivery profile');
             });
         };
-        refreshSourcesBtn.onclick = refreshSources;
-        refreshTargetsBtn.onclick = refreshTargets;
+        refreshSourcesBtn.onclick = () => RefreshCoordinator.request(['scanSources'], true);
+        refreshTargetsBtn.onclick = () => RefreshCoordinator.request(['scanTargets'], true);
         document.getElementById('set-preferred-source').onclick = setPreferredSource;
         document.getElementById('set-preferred-target').onclick = setPreferredTarget;
 
@@ -1879,7 +1928,7 @@
         checkActiveSessions();
 
         // Poll BT status every 10s for adapter state changes
-        setInterval(debouncedBtFetchStatus, 10000);
+        setInterval(() => RefreshCoordinator.request(['btStatus']), 10000);
     </script>
 </body>
 
