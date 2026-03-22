@@ -874,6 +874,7 @@ class SessionManager:
         target_id: str | None = None,
         stream_profile: str = "auto",
         auto_heal: bool = True,
+        takeover: bool = False,
     ) -> Session:
         """Create a new session, using preferred devices if IDs are not provided."""
         if not source_id and self._config_store:
@@ -886,13 +887,44 @@ class SessionManager:
         if not target_id:
             raise ValueError("No target_id provided and no preferred target set")
 
-        # Server-side target exclusivity
-        for existing in self._sessions.values():
-            if existing.target_id == target_id and existing.state != SessionState.STOPPED:
-                if existing.source_id == source_id and existing.state == SessionState.QUIESCED:
-                    logger.info("Reusing existing quiesced session %s for target %s", existing.session_id, target_id)
-                    return existing
-                raise SessionConflictError(existing.session_id, target_id)
+        # Server-side target exclusivity and takeover logic
+        conflicting_session = next(
+            (s for s in self._sessions.values() if s.target_id == target_id and s.state != SessionState.STOPPED),
+            None,
+        )
+
+        if conflicting_session:
+            if conflicting_session.source_id == source_id:
+                logger.info(
+                    "Reusing existing session %s for target %s (source match)",
+                    conflicting_session.session_id,
+                    target_id,
+                )
+                return conflicting_session
+
+            # Automatic takeover of quiesced/recoverable sessions from other sources
+            if conflicting_session.state == SessionState.QUIESCED:
+                logger.info(
+                    "Automatic takeover of quiesced session %s on target %s by source %s",
+                    conflicting_session.session_id,
+                    target_id,
+                    source_id,
+                )
+                conflicting_session.transition_to(SessionState.STOPPING)
+                conflicting_session.transition_to(SessionState.STOPPED)
+                self.terminate(conflicting_session.session_id)
+            elif takeover:
+                logger.info(
+                    "Forced takeover of active session %s on target %s by source %s",
+                    conflicting_session.session_id,
+                    target_id,
+                    source_id,
+                )
+                conflicting_session.transition_to(SessionState.STOPPING)
+                conflicting_session.transition_to(SessionState.STOPPED)
+                self.terminate(conflicting_session.session_id)
+            else:
+                raise SessionConflictError(conflicting_session.session_id, target_id)
 
         session = Session(
             source_id=source_id,
@@ -919,7 +951,7 @@ class SessionManager:
         if not session:
             return False
 
-        if session.state == SessionState.PLAYING:
+        if session.state in {SessionState.STARTING, SessionState.PLAYING}:
             return True
 
         try:

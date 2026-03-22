@@ -53,14 +53,7 @@ class SymfoniskStartButton(SymfoniskButton):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        source_id = self.coordinator.selected_source_id
-        target_id = self.coordinator.selected_target_id
-
-        if not source_id or not target_id:
-            _LOGGER.error("Source or Target not selected in coordinator")
-            return
-
-        await self.coordinator.start_session(source_id, target_id)
+        await self.coordinator.start_session()
 
     @property
     def unique_id(self) -> str:
@@ -69,14 +62,18 @@ class SymfoniskStartButton(SymfoniskButton):
 
 
 class SymfoniskStopButton(SymfoniskButton):
-    """Button to stop all playback sessions."""
+    """Button to stop playback on the selected target."""
 
-    _attr_name = "Stop All Sessions"
+    _attr_name = "Stop Session"
 
     async def async_press(self) -> None:
         """Handle the button press."""
+        target_id = self.coordinator.selected_target_id
+        if not target_id:
+            return
+
         for session in self.coordinator.data.sessions:
-            if session.get("state") in ("playing", "starting", "preparing"):
+            if session.get("target_id") == target_id and session.get("state") != "stopped":
                 await self.coordinator.stop_session(session["session_id"])
 
     @property

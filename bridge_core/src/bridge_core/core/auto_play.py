@@ -66,6 +66,8 @@ class AutoPlayController:
             session = self._session_manager.create(
                 source_id=source_id,
                 target_id=target_id,
+                takeover=True,  # Auto-play should be able to takeover if configured for it,
+                                # though usually it will find an idle target first.
             )
             # Use synchronous shim or directly await (SessionManager.start spawns a background asyncio task)
             self._session_manager.start(session.session_id)

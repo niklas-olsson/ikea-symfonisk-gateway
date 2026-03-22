@@ -83,13 +83,24 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
         except (aiohttp.ClientError, TimeoutError) as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 
-    async def start_session(self, source_id: str, target_id: str) -> str:
-        """Start a new session."""
+    @property
+    def selected_source_id(self) -> str | None:
+        """Return the preferred source ID from config."""
+        return self.data.config.get("preferred_source_id")
+
+    @property
+    def selected_target_id(self) -> str | None:
+        """Return the preferred target ID from config."""
+        return self.data.config.get("preferred_target_id")
+
+    async def start_session(self, source_id: str | None = None, target_id: str | None = None) -> str:
+        """Start a new session or reuse/takeover an existing one."""
         session = async_get_clientsession(self.hass)
         payload = {
-            "source_id": source_id,
-            "target_id": target_id,
+            "source_id": source_id or self.selected_source_id,
+            "target_id": target_id or self.selected_target_id,
             "stream_profile": "auto",
+            "takeover": True,
         }
 
         async with session.post(f"{self.base_url}/v1/sessions", json=payload) as resp:

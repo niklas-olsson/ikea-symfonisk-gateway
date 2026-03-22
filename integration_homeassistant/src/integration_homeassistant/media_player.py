@@ -33,7 +33,7 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
     """Media player for SYMFONISK Gateway sessions."""
 
     _attr_name = "Bridge Session"
-    _attr_supported_features = MediaPlayerEntityFeature.STOP
+    _attr_supported_features = MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.STOP
 
     def __init__(self, coordinator: SymfoniskCoordinator, entry: ConfigEntry) -> None:
         """Initialize."""
@@ -45,13 +45,25 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
             "model": "SYMFONISK Gateway",
         }
 
+    def _get_session(self) -> dict[str, Any] | None:
+        """Return the session for the currently selected target."""
+        target_id = self.coordinator.selected_target_id
+        if not target_id:
+            return None
+
+        for session in self.coordinator.data.sessions:
+            if session.get("target_id") == target_id and session.get("state") != "stopped":
+                return session
+
+        return None
+
     @property
     def state(self) -> MediaPlayerState:
         """Return the state of the player."""
-        if not self.coordinator.data.sessions:
+        active_session = self._get_session()
+        if not active_session:
             return MediaPlayerState.IDLE
 
-        active_session = self.coordinator.data.sessions[0]
         pres_state = active_session.get("presentation_state")
 
         if pres_state == "playing":
@@ -79,19 +91,19 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
     @property
     def media_title(self) -> str | None:
         """Title of current playing media."""
-        if not self.coordinator.data.sessions:
+        session = self._get_session()
+        if not session:
             return None
 
-        session = self.coordinator.data.sessions[0]
         return f"Session {session.get('session_id')}"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return entity specific state attributes."""
-        if not self.coordinator.data.sessions:
+        session = self._get_session()
+        if not session:
             return {}
 
-        session = self.coordinator.data.sessions[0]
         media_status = session.get("media_status") or {}
         return {
             "session_id": session.get("session_id"),
@@ -114,11 +126,19 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
             "last_error": session.get("last_error"),
         }
 
+    async def async_media_play(self) -> None:
+        """Send play command."""
+        await self.coordinator.start_session()
+
     async def async_media_stop(self) -> None:
         """Send stop command."""
-        if self.coordinator.data.sessions:
-            session_id = self.coordinator.data.sessions[0]["session_id"]
-            await self.coordinator.stop_session(session_id)
+        target_id = self.coordinator.selected_target_id
+        if not target_id:
+            return
+
+        for session in self.coordinator.data.sessions:
+            if session.get("target_id") == target_id and session.get("state") != "stopped":
+                await self.coordinator.stop_session(session["session_id"])
 
     @property
     def unique_id(self) -> str:

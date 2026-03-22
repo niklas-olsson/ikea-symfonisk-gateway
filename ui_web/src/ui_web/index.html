@@ -1244,7 +1244,7 @@
                 const createRes = await fetch('/v1/sessions', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source_id, target_id })
+                    body: JSON.stringify({ source_id, target_id, takeover: true })
                 });
 
                 if (!createRes.ok) {

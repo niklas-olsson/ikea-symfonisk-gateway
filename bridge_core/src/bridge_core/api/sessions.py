@@ -17,6 +17,7 @@ class CreateSessionRequest(BaseModel):
     target_id: str | None = None
     stream_profile: str = "auto"
     auto_heal: bool = True
+    takeover: bool = False
 
 
 class SessionResponse(BaseModel):
@@ -56,6 +57,7 @@ async def create_session(request: Request, body: CreateSessionRequest) -> Sessio
             target_id=body.target_id,
             stream_profile=body.stream_profile,
             auto_heal=body.auto_heal,
+            takeover=body.takeover,
         )
         source_health = source_registry.get_source_health(session.source_id)
         return SessionResponse(**session.to_dict(source_health=source_health))

@@ -2331,3 +2331,63 @@ async def test_stable_profile_ignores_primary_detach_delivery_degradation(
     assert session.state == SessionState.PLAYING
     assert session.primary_detach_events_total == 0
     await manager.stop_session(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_session_reuse_same_source_target(session_manager: SessionManager) -> None:
+    """Test that creating a session for same source/target reuses existing session."""
+    session1 = session_manager.create(source_id="src_1", target_id="tgt_1")
+    await session_manager.start_session(session1.session_id)
+    assert session1.state == SessionState.PLAYING
+
+    session2 = session_manager.create(source_id="src_1", target_id="tgt_1")
+    assert session1.session_id == session2.session_id
+    assert session2.state == SessionState.PLAYING
+
+
+@pytest.mark.asyncio
+async def test_automatic_takeover_quiesced_session(session_manager: SessionManager) -> None:
+    """Test that a quiesced session is automatically taken over by a new source."""
+    session1 = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session1.transition_to(SessionState.PREPARING)
+    session1.transition_to(SessionState.READY)
+    session1.transition_to(SessionState.STARTING)
+    session1.transition_to(SessionState.PLAYING)
+    session1.transition_to(SessionState.QUIESCED)
+
+    # Creating with a different source should automatically terminate session1
+    session2 = session_manager.create(source_id="src_2", target_id="tgt_1")
+    assert session2.session_id != session1.session_id
+    assert session1.state == SessionState.STOPPED
+    assert session_manager.get(session1.session_id) is None
+
+
+@pytest.mark.asyncio
+async def test_forced_takeover_active_session(session_manager: SessionManager) -> None:
+    """Test that an active session can be taken over if takeover=True."""
+    session1 = session_manager.create(source_id="src_1", target_id="tgt_1")
+    await session_manager.start_session(session1.session_id)
+    assert session1.state == SessionState.PLAYING
+
+    # Different source, takeover=False (default) -> should fail
+    from bridge_core.core.errors import SessionConflictError
+
+    with pytest.raises(SessionConflictError):
+        session_manager.create(source_id="src_2", target_id="tgt_1", takeover=False)
+
+    # Different source, takeover=True -> should succeed and terminate session1
+    session2 = session_manager.create(source_id="src_2", target_id="tgt_1", takeover=True)
+    assert session2.session_id != session1.session_id
+    assert session1.state == SessionState.STOPPED
+    assert session_manager.get(session1.session_id) is None
+
+
+@pytest.mark.asyncio
+async def test_start_session_idempotent_starting(session_manager: SessionManager) -> None:
+    """Test that start_session is idempotent when session is in STARTING state."""
+    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session.transition_to(SessionState.STARTING)
+
+    # Should return True and not attempt to transition again (which would raise ValueError)
+    assert await session_manager.start_session(session.session_id) is True
+    assert session.state == SessionState.STARTING
