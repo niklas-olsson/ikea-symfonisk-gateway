@@ -57,8 +57,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={"host": entry.data[CONF_HOST], "port": entry.data[CONF_PORT]},
         )
 
-    async def handle_recover_session(call: ServiceCall) -> None:
-        """Handle the recover_session service call."""
+    async def handle_recover_playback(call: ServiceCall) -> None:
+        """Handle the recover_playback service call."""
         target_coordinator = coordinator
         if entry_id := call.data.get("entry_id"):
             target_coordinator = hass.data[DOMAIN].get(entry_id)
@@ -103,7 +103,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if target_coordinator:
             await target_coordinator.async_refresh_discovery()
 
-    hass.services.async_register(DOMAIN, "recover_session", handle_recover_session)
+    hass.services.async_register(DOMAIN, "recover_playback", handle_recover_playback)
     hass.services.async_register(DOMAIN, "refresh_sources", handle_refresh_sources)
     hass.services.async_register(DOMAIN, "refresh_targets", handle_refresh_targets)
     hass.services.async_register(DOMAIN, "refresh_discovery", handle_refresh_discovery)
@@ -120,7 +120,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend.async_remove_panel(hass, "symfonisk_gateway")
 
     if not hass.data[DOMAIN]:
-        hass.services.async_remove(DOMAIN, "recover_session")
+        hass.services.async_remove(DOMAIN, "recover_playback")
         hass.services.async_remove(DOMAIN, "refresh_sources")
         hass.services.async_remove(DOMAIN, "refresh_targets")
         hass.services.async_remove(DOMAIN, "refresh_discovery")
