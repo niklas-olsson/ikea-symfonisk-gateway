@@ -20,6 +20,7 @@ class SourceCapabilities(BaseModel):
     sample_rates: list[int] = [44100, 48000]
     channels: list[int] = [1, 2]
     bit_depths: list[int] = [16]
+    codecs: list[str] = ["pcm_s16le", "mp3", "aac"]
 
 
 class SourceDescriptor(BaseModel):
@@ -33,6 +34,7 @@ class SourceDescriptor(BaseModel):
     is_preferred: bool = False
     is_active: bool = False
     is_available: bool = True
+    last_known_good_profile: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

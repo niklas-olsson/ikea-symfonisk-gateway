@@ -15,7 +15,7 @@ router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 class CreateSessionRequest(BaseModel):
     source_id: str | None = None
     target_id: str | None = None
-    stream_profile: str = "mp3_48k_stereo_320"
+    stream_profile: str = "auto"
     auto_heal: bool = True
 
 
@@ -24,6 +24,9 @@ class SessionResponse(BaseModel):
     source_id: str
     target_id: str
     stream_profile: str
+    requested_stream_profile: str
+    selected_stream_profile: str | None = None
+    effective_stream_profile: str | None = None
     auto_heal: bool
     state: str
     stream_url: str | None = None

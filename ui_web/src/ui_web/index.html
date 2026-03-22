@@ -1334,7 +1334,7 @@
             return text.replace(/^●\s*/, '').replace(/^★\s*/, '').replace(/^\[OFFLINE\]\s*/, '').split(' (')[0];
         }
 
-        function updateSessionUI(state, label, errorAction = null) {
+        function updateSessionUI(state, label, errorAction = null, profile = null) {
             sessionState.textContent = label;
             sessionState.className = `status-tag status-${state.toLowerCase()}`;
 
@@ -1359,7 +1359,16 @@
             if (!sourceName || !targetName) {
                 subtextEl.textContent = 'Select source and target';
             } else if (state === 'ACTIVE') {
-                subtextEl.textContent = `Playing: ${sourceName} → ${targetName}`;
+                let text = `Playing: ${sourceName} → ${targetName}`;
+                if (profile) {
+                    const profileLabels = {
+                        'pcm_wav_48k_stereo_16': 'High (PCM)',
+                        'aac_48k_stereo_256': 'Medium (AAC)',
+                        'mp3_48k_stereo_320': 'Standard (MP3)'
+                    };
+                    text += ` (${profileLabels[profile] || profile})`;
+                }
+                subtextEl.textContent = text;
             } else if (state === 'ERROR') {
                 subtextEl.textContent = `Failed: ${sourceName} → ${targetName}`;
             } else {
@@ -1737,7 +1746,7 @@
 
                     if (data.session_id === currentSessionId || !currentSessionId) {
                         if (type === 'session.started') {
-                            updateSessionUI('ACTIVE', 'Playing');
+                            updateSessionUI('ACTIVE', 'Playing', null, data.effective_stream_profile);
                             playBtn.disabled = true;
                             stopBtn.disabled = false;
                             currentSessionId = data.session_id;
@@ -1898,7 +1907,7 @@
                     currentSessionId = active.session_id;
                     const errorAction = active.last_error?.action || null;
                     const stateType = active.state === 'failed' ? 'ERROR' : 'ACTIVE';
-                    updateSessionUI(stateType, active.state.charAt(0).toUpperCase() + active.state.slice(1), errorAction);
+                    updateSessionUI(stateType, active.state.charAt(0).toUpperCase() + active.state.slice(1), errorAction, active.effective_stream_profile);
 
                     if (active.state === 'failed') {
                         playBtn.disabled = false;
