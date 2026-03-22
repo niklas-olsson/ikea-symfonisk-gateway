@@ -1230,6 +1230,7 @@
         async function createAndStartSession() {
             const source_id = sourceSelect.value;
             const target_id = targetSelect.value;
+            const targetName = getSelectedText(targetSelect);
 
             if (!source_id || !target_id) {
                 addLog('SYSTEM', 'Select a source and target first');
@@ -1237,7 +1238,7 @@
             }
 
             playBtn.disabled = true;
-            addLog('SYSTEM', 'Starting playback...');
+            addLog('SYSTEM', `Starting playback on ${targetName}...`);
 
             try {
                 await persistDeliveryProfile();
@@ -1265,16 +1266,14 @@
                 currentSessionId = session.session_id;
 
                 addLog('SYSTEM', `Playback started (Session: ${currentSessionId})`);
-
                 stopBtn.disabled = false;
                 updateSessionUI('ACTIVE', 'Starting');
             } catch (err) {
-                console.error('Session failed', err);
+                console.error('Playback failed', err);
                 addLog('ERROR', err.message);
                 playBtn.disabled = false;
 
-                // Try to extract action if available from previous fetch failure
-                let action = err.message || 'Failed to start session. Check your connections and try again.';
+                let action = err.message || 'Failed to start playback. Check your connections and try again.';
                 updateSessionUI('ERROR', 'Failed', action);
             }
         }

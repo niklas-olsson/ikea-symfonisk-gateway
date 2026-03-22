@@ -8,8 +8,9 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, UnitOfTime
+from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -100,6 +101,7 @@ class SymfoniskSessionStateSensor(SymfoniskSensor):
 
     _attr_name = "Playback State"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str | None:
@@ -120,6 +122,7 @@ class SymfoniskNegotiatedProfileSensor(SymfoniskSensor):
 
     _attr_name = "Stream Profile"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str | None:
@@ -165,6 +168,7 @@ class SymfoniskDeliveryProfileSensor(SymfoniskSensor):
 
     _attr_name = "Delivery Profile"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str | None:

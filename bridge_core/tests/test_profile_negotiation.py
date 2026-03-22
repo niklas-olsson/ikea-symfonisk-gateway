@@ -95,9 +95,7 @@ def target_registry() -> MagicMock:
     registry.play_stream = AsyncMock(return_value={"success": True})
     registry.stop_target = AsyncMock(return_value={"success": True})
     registry.get_adapter_for_target.return_value = MagicMock()
-    registry.get_adapter_for_target.return_value.inspect_ownership = AsyncMock(
-        return_value=OwnershipResult(OwnershipStatus.OWNED)
-    )
+    registry.get_adapter_for_target.return_value.inspect_ownership = AsyncMock(return_value=OwnershipResult(OwnershipStatus.OWNED))
     return registry
 
 

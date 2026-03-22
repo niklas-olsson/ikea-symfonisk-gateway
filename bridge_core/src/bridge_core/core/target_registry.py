@@ -53,10 +53,7 @@ class TargetRegistry:
         """Check if any preferred devices are configured."""
         if not self._config_store:
             return False
-        return bool(
-            self._config_store.get("preferred_source_id") or
-            self._config_store.get("preferred_target_id")
-        )
+        return bool(self._config_store.get("preferred_source_id") or self._config_store.get("preferred_target_id"))
 
     async def _background_refresh(self) -> None:
         """Periodically refresh targets from all adapters."""
@@ -145,8 +142,8 @@ class TargetRegistry:
                 old_target = self._targets.get(tid)
 
                 # Use normalized comparison for deep property checks
-                norm_old = normalize_for_comparison(old_target.to_dict()) if old_target and hasattr(old_target, 'to_dict') else None
-                norm_new = normalize_for_comparison(target.to_dict()) if hasattr(target, 'to_dict') else None
+                norm_old = normalize_for_comparison(old_target.to_dict()) if old_target and hasattr(old_target, "to_dict") else None
+                norm_new = normalize_for_comparison(target.to_dict()) if hasattr(target, "to_dict") else None
 
                 if not old_target or not getattr(old_target, "is_available", True) or norm_old != norm_new:
                     changed = True
