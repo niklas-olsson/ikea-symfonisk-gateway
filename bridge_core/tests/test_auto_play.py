@@ -1,16 +1,17 @@
 """Tests for AutoPlayController."""
 
 import asyncio
+from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from bridge_core.core.auto_play import AutoPlayController
-from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
-from bridge_core.core.session_manager import SessionManager, SessionState, STOP_REASON_PREFERRED
+from bridge_core.core.config_store import ConfigStore
+from bridge_core.core.event_bus import EventBus, EventType
+from bridge_core.core.session_manager import STOP_REASON_PREFERRED, SessionManager
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
-from bridge_core.core.config_store import ConfigStore
-from ingress_sdk.types import SourceDescriptor, SourceType, SourceCapabilities
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def event_bus() -> EventBus:
 
 
 @pytest.fixture
-def config_store(tmp_path) -> ConfigStore:
+def config_store(tmp_path: Path) -> ConfigStore:
     return ConfigStore(db_path=tmp_path / "config.db")
 
 
@@ -53,7 +54,7 @@ def session_manager(
     manager._config_store = config_store
 
     # Mock create to return a session
-    async def mock_create(**kwargs):
+    async def mock_create(**kwargs: Any) -> MagicMock:
         session = MagicMock()
         session.session_id = "sess_123"
         return session
@@ -105,6 +106,7 @@ async def test_autoplay_triggers_on_bluetooth_source_available(
     assert kwargs["conflict_policy"] == "takeover"
     assert kwargs["takeover_reason"] == STOP_REASON_PREFERRED
 
+
 @pytest.mark.asyncio
 async def test_session_manager_resolves_preferred_target(
     event_bus: EventBus,
@@ -124,9 +126,10 @@ async def test_session_manager_resolves_preferred_target(
     preferred_target = "tgt_preferred"
     config_store.set("preferred_target_id", preferred_target)
 
-    with patch.object(manager, "create", new_callable=AsyncMock) as mock_create, \
-         patch.object(manager, "start_session", new_callable=AsyncMock) as mock_start:
-
+    with (
+        patch.object(manager, "create", new_callable=AsyncMock) as mock_create,
+        patch.object(manager, "start_session", new_callable=AsyncMock),
+    ):
         mock_create.return_value = MagicMock(session_id="sess_123")
 
         await manager.play(source_id="src_1", target_id=None)
@@ -134,6 +137,7 @@ async def test_session_manager_resolves_preferred_target(
         mock_create.assert_called_once()
         args, kwargs = mock_create.call_args
         assert kwargs["target_id"] == preferred_target
+
 
 @pytest.mark.asyncio
 async def test_session_manager_uses_deterministic_fallback(
@@ -159,9 +163,10 @@ async def test_session_manager_uses_deterministic_fallback(
     target_a.target_id = "tgt_a"
     target_registry.list_targets.return_value = [target_b, target_a]
 
-    with patch.object(manager, "create", new_callable=AsyncMock) as mock_create, \
-         patch.object(manager, "start_session", new_callable=AsyncMock) as mock_start:
-
+    with (
+        patch.object(manager, "create", new_callable=AsyncMock) as mock_create,
+        patch.object(manager, "start_session", new_callable=AsyncMock),
+    ):
         mock_create.return_value = MagicMock(session_id="sess_123")
 
         await manager.play(source_id="src_1", target_id=None)
