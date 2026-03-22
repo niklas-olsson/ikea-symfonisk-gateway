@@ -56,6 +56,17 @@ class TargetDescriptor(ABC):
     def is_available(self, value: bool) -> None:
         self._is_available = value
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for API responses and comparison."""
+        return {
+            "target_id": self.target_id,
+            "renderer": self.renderer,
+            "target_type": self.target_type,
+            "display_name": self.display_name,
+            "members": self.members,
+            "coordinator_id": self.coordinator_id,
+        }
+
 
 class RendererAdapter(ABC):
     """Abstract base class for renderer adapters."""
