@@ -81,6 +81,7 @@ class Session:
         target_id: str,
         stream_profile: str = "auto",
         auto_heal: bool = True,
+        exclusive: bool = False,
     ):
         self.session_id = f"sess_{uuid4().hex[:12]}"
         self.source_id = source_id
@@ -89,6 +90,7 @@ class Session:
         self.selected_stream_profile: str | None = None
         self.effective_stream_profile: str | None = None
         self.auto_heal = auto_heal
+        self.exclusive = exclusive
         self.state: SessionState = SessionState.CREATED
         self.stream_url: str | None = None
         self.adapter_session_id: str | None = None
@@ -199,6 +201,7 @@ class Session:
             "selected_stream_profile": self.selected_stream_profile,
             "effective_stream_profile": self.effective_stream_profile,
             "auto_heal": self.auto_heal,
+            "exclusive": self.exclusive,
             "state": self.state.value,
             "presentation_state": presentation_state,
             "presentation_detail": presentation_detail,
@@ -874,8 +877,19 @@ class SessionManager:
         target_id: str | None = None,
         stream_profile: str = "auto",
         auto_heal: bool = True,
+        exclusive: bool = False,
     ) -> Session:
-        """Create a new session, using preferred devices if IDs are not provided."""
+        """Create a new playback session.
+
+        Target Arbitration Matrix:
+        -------------------------
+        - Idle target: Created & Starts normally.
+        - Same target + same source + active: Returns existing session (idempotent).
+        - Same target + same source + quiesced: Returns existing session (resumable).
+        - Same target + different source + incumbent: Created (target takeover at start()).
+        - Same target + different source + incumbent (exclusive=True): SessionConflictError (409).
+        - Stale incumbent (FAILED/STOPPED): Created normally.
+        """
         if not source_id and self._config_store:
             source_id = self._config_store.get("preferred_source_id")
         if not target_id and self._config_store:
@@ -886,19 +900,21 @@ class SessionManager:
         if not target_id:
             raise ValueError("No target_id provided and no preferred target set")
 
-        # Server-side target exclusivity
+        # Session reuse and conflict management
         for existing in self._sessions.values():
-            if existing.target_id == target_id and existing.state != SessionState.STOPPED:
-                if existing.source_id == source_id and existing.state == SessionState.QUIESCED:
-                    logger.info("Reusing existing quiesced session %s for target %s", existing.session_id, target_id)
+            if existing.target_id == target_id and existing.state not in (SessionState.STOPPED, SessionState.FAILED):
+                if existing.source_id == source_id:
+                    logger.info("Reusing existing session %s for target %s", existing.session_id, target_id)
                     return existing
-                raise SessionConflictError(existing.session_id, target_id)
+                if exclusive or existing.exclusive:
+                    raise SessionConflictError(existing.session_id, target_id)
 
         session = Session(
             source_id=source_id,
             target_id=target_id,
             stream_profile=stream_profile,
             auto_heal=auto_heal,
+            exclusive=exclusive,
         )
         self._sessions[session.session_id] = session
         source_health = self._source_registry.get_source_health(session.source_id)
@@ -921,6 +937,18 @@ class SessionManager:
 
         if session.state == SessionState.PLAYING:
             return True
+
+        # Target Arbitration: Stop any incumbent sessions on the same target
+        incumbents = [
+            s.session_id
+            for s in self._sessions.values()
+            if s.target_id == session.target_id
+            and s.session_id != session.session_id
+            and s.state not in (SessionState.STOPPED, SessionState.FAILED)
+        ]
+        for incumbent_id in incumbents:
+            logger.info("Session %s taking over target %s from incumbent %s", session_id, session.target_id, incumbent_id)
+            await self.stop_session(incumbent_id)
 
         try:
             session.transition_to(SessionState.STARTING)

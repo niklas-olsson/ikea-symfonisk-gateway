@@ -17,6 +17,7 @@ class CreateSessionRequest(BaseModel):
     target_id: str | None = None
     stream_profile: str = "auto"
     auto_heal: bool = True
+    exclusive: bool = False
 
 
 class SessionResponse(BaseModel):
@@ -28,6 +29,7 @@ class SessionResponse(BaseModel):
     selected_stream_profile: str | None = None
     effective_stream_profile: str | None = None
     auto_heal: bool
+    exclusive: bool
     state: str
     stream_url: str | None = None
     adapter_session_id: str | None = None
@@ -56,6 +58,7 @@ async def create_session(request: Request, body: CreateSessionRequest) -> Sessio
             target_id=body.target_id,
             stream_profile=body.stream_profile,
             auto_heal=body.auto_heal,
+            exclusive=body.exclusive,
         )
         source_health = source_registry.get_source_health(session.source_id)
         return SessionResponse(**session.to_dict(source_health=source_health))
