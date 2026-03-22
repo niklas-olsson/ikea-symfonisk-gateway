@@ -27,9 +27,7 @@ def source_registry() -> MagicMock:
 def target_registry() -> MagicMock:
     registry = MagicMock(spec=TargetRegistry)
     registry.get_adapter_for_target.return_value = MagicMock()
-    registry.get_adapter_for_target.return_value.inspect_ownership = AsyncMock(
-        return_value=OwnershipResult(OwnershipStatus.OWNED)
-    )
+    registry.get_adapter_for_target.return_value.inspect_ownership = AsyncMock(return_value=OwnershipResult(OwnershipStatus.OWNED))
     registry.stop_target = AsyncMock(return_value={"success": True})
     return registry
 
@@ -112,9 +110,7 @@ async def test_stale_incumbent_ownership_reclaim(session_manager: SessionManager
     session_manager.update_state(s1.session_id, SessionState.PLAYING)
 
     # Mock ownership as NOT_OWNED (stale)
-    target_registry.get_adapter_for_target.return_value.inspect_ownership.return_value = OwnershipResult(
-        OwnershipStatus.NOT_OWNED
-    )
+    target_registry.get_adapter_for_target.return_value.inspect_ownership.return_value = OwnershipResult(OwnershipStatus.NOT_OWNED)
 
     with patch.object(session_manager, "stop_session", AsyncMock(return_value=True)) as mock_stop:
         s2 = await session_manager.create(source_id="src_2", target_id="tgt_1")

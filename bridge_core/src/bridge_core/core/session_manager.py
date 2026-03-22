@@ -1097,7 +1097,9 @@ class SessionManager:
                     conflicting_session.session_id,
                     source_id,
                 )
-                stop_reason = takeover_reason or (STOP_REASON_RECLAIMED if ownership_status == OwnershipStatus.NOT_OWNED else STOP_REASON_SUPERSEDED)
+                stop_reason = takeover_reason or (
+                    STOP_REASON_RECLAIMED if ownership_status == OwnershipStatus.NOT_OWNED else STOP_REASON_SUPERSEDED
+                )
                 await self.stop_session(conflicting_session.session_id, stop_reason=stop_reason)
                 with suppress(ValueError):
                     conflicting_session.transition_to(SessionState.SUPERSEDED)

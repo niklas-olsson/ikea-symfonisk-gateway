@@ -55,9 +55,7 @@ def target_registry() -> MagicMock:
     registry.stop_target = AsyncMock(return_value={"success": True})
 
     mock_adapter = MagicMock()
-    mock_adapter.inspect_ownership = AsyncMock(
-        return_value=MagicMock(status="owned")
-    )
+    mock_adapter.inspect_ownership = AsyncMock(return_value=MagicMock(status="owned"))
     registry.get_adapter_for_target.return_value = mock_adapter
 
     return registry
@@ -180,6 +178,7 @@ async def test_start_session_ignores_failed_incumbent(session_manager: SessionMa
         # Should NOT have called stop_session for session_a because it was already FAILED
         # (It would only call it if it was not in STOPPED or FAILED)
         assert session_a.session_id not in [call.args[0] for call in stop_spy.call_args_list]
+
 
 @pytest.mark.asyncio
 async def test_incumbent_exclusivity_blocks_new_session(session_manager: SessionManager) -> None:
