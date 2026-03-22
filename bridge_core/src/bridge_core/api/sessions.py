@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from bridge_core.api.models import ErrorResponse
 from bridge_core.core import SessionManager
 from bridge_core.core.errors import SESSION_CONFLICT, SessionConflictError, SessionError
-from bridge_core.core.session_manager import STOP_REASON_MANUAL
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
@@ -62,7 +61,6 @@ async def create_session(request: Request, body: CreateSessionRequest) -> Sessio
             stream_profile=body.stream_profile,
             auto_heal=body.auto_heal,
             takeover=body.takeover,
-            takeover_reason=STOP_REASON_MANUAL if body.takeover else None,
             exclusive=body.exclusive,
         )
         source_health = source_registry.get_source_health(session.source_id)

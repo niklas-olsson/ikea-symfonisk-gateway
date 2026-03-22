@@ -6,7 +6,7 @@ import pytest
 from bridge_core.adapters.base import OwnershipResult, OwnershipStatus
 from bridge_core.core.errors import SessionConflictError
 from bridge_core.core.event_bus import EventBus
-from bridge_core.core.session_manager import STOP_REASON_SUPERSEDED, SessionManager, SessionState
+from bridge_core.core.session_manager import STOP_REASON_RECLAIMED, STOP_REASON_SUPERSEDED, SessionManager, SessionState
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
 
@@ -120,4 +120,4 @@ async def test_stale_incumbent_ownership_reclaim(session_manager: SessionManager
         s2 = await session_manager.create(source_id="src_2", target_id="tgt_1")
         assert s1.session_id != s2.session_id
         assert s1.state == SessionState.SUPERSEDED
-        mock_stop.assert_awaited_once_with(s1.session_id)
+        mock_stop.assert_awaited_once_with(s1.session_id, stop_reason=STOP_REASON_RECLAIMED)

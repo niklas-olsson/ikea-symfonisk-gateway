@@ -1031,8 +1031,7 @@ class SessionManager:
         - Same target + same source + active/quiesced: Returns existing session (idempotent).
         - Same target + different source + incumbent:
           - takeover=True: stop incumbent and create new session.
-          - exclusive=True or incumbent.exclusive: SessionConflictError (409).
-          - otherwise: Create new session; start_session() handles arbitration.
+          - otherwise: SessionConflictError (409).
         - Stale incumbent (FAILED/STOPPED): Created normally.
         """
         if not source_id and self._config_store:
@@ -1045,16 +1044,64 @@ class SessionManager:
         if not target_id:
             raise ValueError("No target_id provided and no preferred target set")
 
-        # Resolve incumbents
-        reused = await self._resolve_target_conflict(
-            target_id,
-            source_id,
-            takeover=takeover,
-            takeover_reason=takeover_reason,
-            exclusive=exclusive,
+        # Server-side target exclusivity and takeover logic
+        conflicting_session = next(
+            (s for s in self._sessions.values() if s.target_id == target_id and s.state != SessionState.STOPPED),
+            None,
         )
-        if reused:
-            return reused
+
+        if conflicting_session:
+            if conflicting_session.source_id == source_id:
+                if conflicting_session.state in {
+                    SessionState.CREATED,
+                    SessionState.PLAYING,
+                    SessionState.STARTING,
+                    SessionState.PREPARING,
+                    SessionState.HEALING,
+                    SessionState.READY,
+                }:
+                    logger.info("Reusing existing session %s for target %s (source match)", conflicting_session.session_id, target_id)
+                    return conflicting_session
+
+                if conflicting_session.state == SessionState.QUIESCED:
+                    logger.info("Resuming quiesced session %s for same source", conflicting_session.session_id)
+                    await self.resume_session(conflicting_session.session_id, force_reclaim=True)
+                    return conflicting_session
+
+                if conflicting_session.state == SessionState.DEGRADED:
+                    logger.info("Restarting degraded session %s for same source", conflicting_session.session_id)
+                    await self.stop_session(conflicting_session.session_id)
+                    return conflicting_session
+
+                if conflicting_session.state == SessionState.FAILED:
+                    logger.info("Returning failed session %s for retry", conflicting_session.session_id)
+                    return conflicting_session
+
+            # Cross-source arbitration keeps create() permissive by default.
+            adapter = self._target_registry.get_adapter_for_target(target_id)
+            ownership_status = OwnershipStatus.UNKNOWN
+            if adapter:
+                try:
+                    ownership_res = await adapter.inspect_ownership(target_id)
+                    ownership_status = ownership_res.status
+                except Exception as e:
+                    logger.warning("Failed to inspect ownership for target %s during create(): %s", target_id, e)
+
+            if exclusive or conflicting_session.exclusive:
+                raise SessionConflictError(conflicting_session.session_id, target_id)
+
+            if ownership_status == OwnershipStatus.NOT_OWNED or takeover:
+                logger.info(
+                    "Taking over target %s from session %s by source %s",
+                    target_id,
+                    conflicting_session.session_id,
+                    source_id,
+                )
+                stop_reason = takeover_reason or (STOP_REASON_RECLAIMED if ownership_status == OwnershipStatus.NOT_OWNED else STOP_REASON_SUPERSEDED)
+                await self.stop_session(conflicting_session.session_id, stop_reason=stop_reason)
+                with suppress(ValueError):
+                    conflicting_session.transition_to(SessionState.SUPERSEDED)
+                self.terminate(conflicting_session.session_id)
         session = Session(
             source_id=source_id,
             target_id=target_id,
@@ -1081,7 +1128,7 @@ class SessionManager:
         if not session:
             return False
 
-        if session.state in {SessionState.PLAYING, SessionState.STARTING}:
+        if session.state in {SessionState.STARTING, SessionState.PLAYING}:
             return True
 
         # Target Arbitration: Stop any incumbent sessions on the same target
@@ -2247,7 +2294,7 @@ class SessionManager:
         if not session:
             return
 
-        if session.state not in [SessionState.STOPPED, SessionState.FAILED]:
+        if session.state not in [SessionState.STOPPED, SessionState.FAILED, SessionState.SUPERSEDED]:
             self.stop(session_id)
 
         self._sessions.pop(session_id, None)

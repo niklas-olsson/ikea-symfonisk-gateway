@@ -50,6 +50,18 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
             "model": "SYMFONISK Gateway",
         }
 
+    def _get_session(self) -> dict[str, Any] | None:
+        """Return the session for the currently selected target."""
+        target_id = self.coordinator.selected_target_id
+        if not target_id:
+            return None
+
+        for session in self.coordinator.data.sessions:
+            if session.get("target_id") == target_id and session.get("state") != "stopped":
+                return session
+
+        return None
+
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
@@ -58,10 +70,10 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
     @property
     def state(self) -> MediaPlayerState:
         """Return the state of the player."""
-        if not self.coordinator.data.sessions:
+        active_session = self._get_session()
+        if not active_session:
             return MediaPlayerState.IDLE
 
-        active_session = self.coordinator.data.sessions[0]
         pres_state = active_session.get("presentation_state")
 
         if pres_state == "playing":
@@ -123,10 +135,10 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return entity specific state attributes."""
-        if not self.coordinator.data.sessions:
+        session = self._get_session()
+        if not session:
             return {}
 
-        session = self.coordinator.data.sessions[0]
         media_status = session.get("media_status") or {}
         return {
             "session_id": session.get("session_id"),
@@ -156,9 +168,13 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
 
     async def async_media_stop(self) -> None:
         """Send stop command."""
-        if self.coordinator.data.sessions:
-            session_id = self.coordinator.data.sessions[0]["session_id"]
-            await self.coordinator.stop_session(session_id)
+        target_id = self.coordinator.selected_target_id
+        if not target_id:
+            return
+
+        for session in self.coordinator.data.sessions:
+            if session.get("target_id") == target_id and session.get("state") != "stopped":
+                await self.coordinator.stop_session(session["session_id"])
 
     async def async_select_source(self, source: str) -> None:
         """Select input source."""

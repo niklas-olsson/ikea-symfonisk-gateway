@@ -2341,7 +2341,6 @@ async def test_stable_profile_ignores_primary_detach_delivery_degradation(
     await manager.stop_session(session.session_id)
 
 
-@pytest.mark.asyncio
 async def test_play_canonical_orchestration(session_manager: SessionManager) -> None:
     """Test the canonical play() method."""
     # 1. Basic start

@@ -85,21 +85,22 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
 
     @property
     def selected_source_id(self) -> str | None:
-        """Return the currently selected source ID."""
+        """Return the preferred source ID from config."""
         return self.data.config.get("preferred_source_id")
 
     @property
     def selected_target_id(self) -> str | None:
-        """Return the currently selected target ID."""
+        """Return the preferred target ID from config."""
         return self.data.config.get("preferred_target_id")
 
-    async def start_session(self, source_id: str, target_id: str) -> str:
-        """Start a new session."""
+    async def start_session(self, source_id: str | None = None, target_id: str | None = None) -> str:
+        """Start a new session or reuse/takeover an existing one."""
         session = async_get_clientsession(self.hass)
         payload = {
-            "source_id": source_id,
-            "target_id": target_id,
+            "source_id": source_id or self.selected_source_id,
+            "target_id": target_id or self.selected_target_id,
             "stream_profile": "auto",
+            "takeover": True,
         }
 
         async with session.post(f"{self.base_url}/v1/sessions", json=payload) as resp:
@@ -130,6 +131,12 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
         await self.async_request_refresh()
         return session_id
 
+    async def async_stop_playback(self) -> None:
+        """Stop all active playback sessions."""
+        for session in self.data.sessions:
+            if session.get("state") in ("playing", "starting", "preparing", "healing"):
+                await self.stop_session(session["session_id"])
+
     async def stop_session(self, session_id: str) -> None:
         """Stop a session."""
         session = async_get_clientsession(self.hass)
@@ -139,12 +146,6 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
                 raise Exception(f"Failed to stop session: {text}")
 
         await self.async_request_refresh()
-
-    async def async_stop_playback(self) -> None:
-        """Stop all active playback sessions."""
-        for session in self.data.sessions:
-            if session.get("state") in ("playing", "starting", "preparing"):
-                await self.stop_session(session["session_id"])
 
     async def async_set_config(self, key: str, value: Any) -> None:
         """Set a configuration value on the bridge."""

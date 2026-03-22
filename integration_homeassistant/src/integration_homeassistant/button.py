@@ -78,8 +78,6 @@ class SymfoniskStartButton(SymfoniskButton):
 
 
 class SymfoniskStopButton(SymfoniskButton):
-    """Button to stop the current playback session."""
-
     _attr_name = "Stop Playback"
     _attr_entity_category = EntityCategory.CONFIG
 
