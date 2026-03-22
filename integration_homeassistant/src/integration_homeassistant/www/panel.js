@@ -165,11 +165,11 @@ class SymfoniskGatewayPanel extends HTMLElement {
   }
 
   _handleStop() {
-    this._hass.callService('ikea_symfonisk_gateway', 'stop_all_sessions', {});
+    this._hass.callService('ikea_symfonisk_gateway', 'stop_playback', {});
   }
 
   _handleRecover() {
-    this._hass.callService('ikea_symfonisk_gateway', 'recover_session', {});
+    this._hass.callService('ikea_symfonisk_gateway', 'recover_playback', {});
   }
 
   _handleScan() {

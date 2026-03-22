@@ -28,6 +28,7 @@ from bridge_core.api import (
     discovery_router,
     events_router,
     health_router,
+    play_router,
     sessions_router,
     sources_router,
     targets_router,
@@ -219,6 +220,7 @@ app.include_router(sources_router)
 app.include_router(targets_router)
 app.include_router(discovery_router)
 app.include_router(sessions_router)
+app.include_router(play_router)
 app.include_router(events_router)
 app.include_router(adapters_router)
 app.include_router(bluetooth_router)

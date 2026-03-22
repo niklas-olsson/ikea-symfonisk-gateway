@@ -57,22 +57,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={"host": entry.data[CONF_HOST], "port": entry.data[CONF_PORT]},
         )
 
-    def get_target_coordinator(call: ServiceCall) -> SymfoniskCoordinator | None:
-        """Helper to find the target coordinator for a service call."""
-        if entry_id := call.data.get("entry_id"):
-            return hass.data[DOMAIN].get(entry_id)
-
-        # Default to first available coordinator if not specified
-        if hass.data[DOMAIN]:
-            return next(iter(hass.data[DOMAIN].values()))
-
-        return None
-
-    async def handle_recover_session(call: ServiceCall) -> None:
-        """Handle the recover_session service call."""
+    async def handle_recover_playback(call: ServiceCall) -> None:
+        """Handle the recover_playback service call."""
         target_coordinator = get_target_coordinator(call)
         if not target_coordinator:
-            _LOGGER.error("No coordinator found for recover_session")
+            _LOGGER.error("No coordinator found for recover_playback")
             return
 
         session_id = call.data.get("session_id")
@@ -83,6 +72,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await target_coordinator.async_recover_session(session_id)
         else:
             _LOGGER.warning("No session_id provided and no active session found to recover")
+
+    def get_target_coordinator(call: ServiceCall) -> SymfoniskCoordinator | None:
+        """Helper to find the target coordinator for a service call."""
+        if entry_id := call.data.get("entry_id"):
+            return hass.data[DOMAIN].get(entry_id)
+
+        # Default to first available coordinator if not specified
+        if hass.data[DOMAIN]:
+            return next(iter(hass.data[DOMAIN].values()))
+
+        return None
 
     async def handle_refresh_sources(call: ServiceCall) -> None:
         """Handle the refresh_sources service call."""
@@ -99,23 +99,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if target_coordinator := get_target_coordinator(call):
             await target_coordinator.async_refresh_discovery()
 
-    async def handle_stop_all_sessions(call: ServiceCall) -> None:
-        """Handle the stop_all_sessions service call."""
+    async def handle_stop_playback(call: ServiceCall) -> None:
+        """Handle the stop_playback service call."""
         target_coordinator = get_target_coordinator(call)
         if not target_coordinator:
-            _LOGGER.error("No coordinator found for stop_all_sessions")
+            _LOGGER.error("No coordinator found for stop_playback")
             return
 
         for session in target_coordinator.data.sessions:
             if session.get("state") in ("playing", "starting", "preparing", "healing"):
                 await target_coordinator.stop_session(session["session_id"])
 
-    if not hass.services.has_service(DOMAIN, "recover_session"):
-        hass.services.async_register(DOMAIN, "recover_session", handle_recover_session)
+    if not hass.services.has_service(DOMAIN, "recover_playback"):
+        hass.services.async_register(DOMAIN, "recover_playback", handle_recover_playback)
         hass.services.async_register(DOMAIN, "refresh_sources", handle_refresh_sources)
         hass.services.async_register(DOMAIN, "refresh_targets", handle_refresh_targets)
         hass.services.async_register(DOMAIN, "refresh_discovery", handle_refresh_discovery)
-        hass.services.async_register(DOMAIN, "stop_all_sessions", handle_stop_all_sessions)
+        hass.services.async_register(DOMAIN, "stop_playback", handle_stop_playback)
+        # Compatibility aliases for older dashboards and panels.
+        hass.services.async_register(DOMAIN, "recover_session", handle_recover_playback)
+        hass.services.async_register(DOMAIN, "stop_all_sessions", handle_stop_playback)
 
     return True
 
@@ -129,10 +132,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend.async_remove_panel(hass, "symfonisk_gateway")
 
     if not hass.data[DOMAIN]:
+        hass.services.async_remove(DOMAIN, "recover_playback")
         hass.services.async_remove(DOMAIN, "recover_session")
         hass.services.async_remove(DOMAIN, "refresh_sources")
         hass.services.async_remove(DOMAIN, "refresh_targets")
         hass.services.async_remove(DOMAIN, "refresh_discovery")
+        hass.services.async_remove(DOMAIN, "stop_playback")
         hass.services.async_remove(DOMAIN, "stop_all_sessions")
 
     return unload_ok
