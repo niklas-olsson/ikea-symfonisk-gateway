@@ -325,6 +325,7 @@ class SessionManager:
         target_registry: TargetRegistry,
         stream_publisher: Any | None = None,
         config_store: ConfigStore | None = None,
+        metrics: Any | None = None,
     ) -> None:
         self._sessions: dict[str, Session] = {}
         self._event_bus = event_bus
@@ -332,6 +333,7 @@ class SessionManager:
         self._target_registry = target_registry
         self._stream_publisher = stream_publisher
         self._config_store = config_store
+        self._metrics = metrics
         self._frame_sinks: dict[str, SessionFrameSink] = {}
         self._session_monitors: dict[str, asyncio.Task[None]] = {}
         self._session_heals: dict[str, asyncio.Task[None]] = {}
@@ -575,6 +577,7 @@ class SessionManager:
             target_id=session.target_id,
             ffmpeg_path=ffmpeg_path,
             on_error=lambda e: self._handle_session_error(session.session_id, e),
+            metrics=self._metrics,
             **self._build_pipeline_kwargs(session.source_id, profile=session.effective_delivery_profile),
         )
 

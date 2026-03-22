@@ -74,9 +74,10 @@ class SourceRegistry:
         "synthetic_test_source": "synthetic",
     }
 
-    def __init__(self, event_bus: EventBus, config_store: Any | None = None) -> None:
+    def __init__(self, event_bus: EventBus, config_store: Any | None = None, metrics: Any | None = None) -> None:
         self._event_bus = event_bus
         self._config_store = config_store
+        self._metrics = metrics
         self._session_manager: Any | None = None
         self._adapters: dict[str, AdapterInfo] = {}
         self._sources: dict[str, SourceDescriptor] = {}
@@ -97,6 +98,8 @@ class SourceRegistry:
 
     async def _handle_topology_changed(self, event: BridgeEvent) -> None:
         """Handle topology changed events from adapters."""
+        if self._metrics:
+            self._metrics.increment("topology_event_received_count")
         if not event.payload:
             return
 

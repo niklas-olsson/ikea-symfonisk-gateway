@@ -13,7 +13,7 @@ from adapter_linux_audio import LinuxAudioAdapter
 from adapter_linux_bluetooth import LinuxBluetoothAdapter
 from adapter_synthetic import SyntheticAdapter
 from adapter_windows_audio import WindowsAudioAdapter
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -38,6 +38,8 @@ from bridge_core.core import (
 )
 from bridge_core.stream.publisher import StreamPublisher
 from renderer_sonos import SonosRendererAdapter
+from bridge_core.adapters.mock_renderer import MockRendererAdapter
+from shared.metrics import MetricsRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +83,8 @@ def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventB
     normalized_platform = (host_platform or platform.system()).lower()
 
     if normalized_platform == "linux":
-        linux_audio_adapter = LinuxAudioAdapter(event_bus)
+        metrics = getattr(source_registry, "_metrics", None)
+        linux_audio_adapter = LinuxAudioAdapter(event_bus, metrics=metrics)
         source_registry.register_adapter(
             adapter_id=linux_audio_adapter.id(),
             platform=linux_audio_adapter.platform(),
@@ -91,7 +94,7 @@ def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventB
             adapter_instance=linux_audio_adapter,
         )
 
-        linux_bluetooth_adapter = LinuxBluetoothAdapter(event_bus)
+        linux_bluetooth_adapter = LinuxBluetoothAdapter(event_bus, metrics=metrics)
         source_registry.register_adapter(
             adapter_id=linux_bluetooth_adapter.id(),
             platform=linux_bluetooth_adapter.platform(),
@@ -121,6 +124,10 @@ def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventB
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifespan."""
+    # Initialize metrics first
+    metrics = MetricsRegistry()
+    app.state.metrics = metrics
+
     # Resolve configuration directory and ports
     config_dir = Path(os.environ.get("BRIDGE_CONFIG_DIR", "config"))
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -128,8 +135,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Initialize core components
     config_store = ConfigStore(db_path=config_dir / "config.db")
-    event_bus = EventBus()
-    source_registry = SourceRegistry(event_bus, config_store=config_store)
+    event_bus = EventBus(metrics=metrics)
+    source_registry = SourceRegistry(event_bus, config_store=config_store, metrics=metrics)
     target_registry = TargetRegistry(event_bus, config_store=config_store)
     publisher = StreamPublisher(port=stream_port)
     session_manager = SessionManager(
@@ -138,6 +145,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         target_registry,
         publisher,
         config_store=config_store,
+        metrics=metrics,
     )
     source_registry.set_session_manager(session_manager)
     target_registry.set_session_manager(session_manager)
@@ -155,6 +163,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Register adapters
     sonos_adapter = SonosRendererAdapter(event_bus)
     await target_registry.register_adapter(sonos_adapter)
+
+    # Register mock renderer for local benchmarking if Sonos is not available
+    mock_renderer = MockRendererAdapter(event_bus)
+    await target_registry.register_adapter(mock_renderer)
 
     register_ingress_adapters(source_registry, event_bus)
 
@@ -197,6 +209,16 @@ app.include_router(events_router)
 app.include_router(adapters_router)
 app.include_router(bluetooth_router)
 app.include_router(config_router)
+
+
+@app.middleware("http")
+async def count_api_requests(request: Request, call_next):
+    """Middleware to count all incoming API requests."""
+    if hasattr(app.state, "metrics"):
+        app.state.metrics.increment("api_request_count")
+    response = await call_next(request)
+    return response
+
 
 # Resolve the path to the web UI
 # We expect the ui_web package to be installed or available in the path
