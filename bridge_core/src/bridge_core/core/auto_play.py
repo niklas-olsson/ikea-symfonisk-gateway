@@ -69,7 +69,6 @@ class AutoPlayController:
                 takeover=True,
                 takeover_reason=STOP_REASON_PREFERRED,
             )
-            # Use synchronous shim or directly await (SessionManager.start spawns a background asyncio task)
-            self._session_manager.start(session.session_id)
+            await self._session_manager.start_session(session.session_id)
         except Exception as e:
             logger.error(f"Failed to auto-play source {source_id}: {e}")

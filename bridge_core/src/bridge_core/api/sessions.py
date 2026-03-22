@@ -19,6 +19,7 @@ class CreateSessionRequest(BaseModel):
     stream_profile: str = "auto"
     auto_heal: bool = True
     takeover: bool = False
+    exclusive: bool = False
 
 
 class SessionResponse(BaseModel):
@@ -30,6 +31,7 @@ class SessionResponse(BaseModel):
     selected_stream_profile: str | None = None
     effective_stream_profile: str | None = None
     auto_heal: bool
+    exclusive: bool
     state: str
     stream_url: str | None = None
     adapter_session_id: str | None = None
@@ -61,6 +63,7 @@ async def create_session(request: Request, body: CreateSessionRequest) -> Sessio
             auto_heal=body.auto_heal,
             takeover=body.takeover,
             takeover_reason=STOP_REASON_MANUAL if body.takeover else None,
+            exclusive=body.exclusive,
         )
         source_health = source_registry.get_source_health(session.source_id)
         return SessionResponse(**session.to_dict(source_health=source_health))
