@@ -57,14 +57,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={"host": entry.data[CONF_HOST], "port": entry.data[CONF_PORT]},
         )
 
+    def get_target_coordinator(call: ServiceCall) -> SymfoniskCoordinator | None:
+        """Helper to find the target coordinator for a service call."""
+        if entry_id := call.data.get("entry_id"):
+            return hass.data[DOMAIN].get(entry_id)
+
+        # Default to first available coordinator if not specified
+        if hass.data[DOMAIN]:
+            return next(iter(hass.data[DOMAIN].values()))
+
+        return None
+
     async def handle_recover_session(call: ServiceCall) -> None:
         """Handle the recover_session service call."""
-        target_coordinator = coordinator
-        if entry_id := call.data.get("entry_id"):
-            target_coordinator = hass.data[DOMAIN].get(entry_id)
-
+        target_coordinator = get_target_coordinator(call)
         if not target_coordinator:
-            _LOGGER.error("Coordinator not found for entry_id: %s", entry_id)
+            _LOGGER.error("No coordinator found for recover_session")
             return
 
         session_id = call.data.get("session_id")
@@ -78,35 +86,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def handle_refresh_sources(call: ServiceCall) -> None:
         """Handle the refresh_sources service call."""
-        target_coordinator = coordinator
-        if entry_id := call.data.get("entry_id"):
-            target_coordinator = hass.data[DOMAIN].get(entry_id)
-
-        if target_coordinator:
+        if target_coordinator := get_target_coordinator(call):
             await target_coordinator.async_refresh_sources()
 
     async def handle_refresh_targets(call: ServiceCall) -> None:
         """Handle the refresh_targets service call."""
-        target_coordinator = coordinator
-        if entry_id := call.data.get("entry_id"):
-            target_coordinator = hass.data[DOMAIN].get(entry_id)
-
-        if target_coordinator:
+        if target_coordinator := get_target_coordinator(call):
             await target_coordinator.async_refresh_targets()
 
     async def handle_refresh_discovery(call: ServiceCall) -> None:
         """Handle the refresh_discovery service call."""
-        target_coordinator = coordinator
-        if entry_id := call.data.get("entry_id"):
-            target_coordinator = hass.data[DOMAIN].get(entry_id)
-
-        if target_coordinator:
+        if target_coordinator := get_target_coordinator(call):
             await target_coordinator.async_refresh_discovery()
 
-    hass.services.async_register(DOMAIN, "recover_session", handle_recover_session)
-    hass.services.async_register(DOMAIN, "refresh_sources", handle_refresh_sources)
-    hass.services.async_register(DOMAIN, "refresh_targets", handle_refresh_targets)
-    hass.services.async_register(DOMAIN, "refresh_discovery", handle_refresh_discovery)
+    async def handle_stop_all_sessions(call: ServiceCall) -> None:
+        """Handle the stop_all_sessions service call."""
+        target_coordinator = get_target_coordinator(call)
+        if not target_coordinator:
+            _LOGGER.error("No coordinator found for stop_all_sessions")
+            return
+
+        for session in target_coordinator.data.sessions:
+            if session.get("state") in ("playing", "starting", "preparing", "healing"):
+                await target_coordinator.stop_session(session["session_id"])
+
+    if not hass.services.has_service(DOMAIN, "recover_session"):
+        hass.services.async_register(DOMAIN, "recover_session", handle_recover_session)
+        hass.services.async_register(DOMAIN, "refresh_sources", handle_refresh_sources)
+        hass.services.async_register(DOMAIN, "refresh_targets", handle_refresh_targets)
+        hass.services.async_register(DOMAIN, "refresh_discovery", handle_refresh_discovery)
+        hass.services.async_register(DOMAIN, "stop_all_sessions", handle_stop_all_sessions)
 
     return True
 
@@ -124,5 +133,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, "refresh_sources")
         hass.services.async_remove(DOMAIN, "refresh_targets")
         hass.services.async_remove(DOMAIN, "refresh_discovery")
+        hass.services.async_remove(DOMAIN, "stop_all_sessions")
 
     return unload_ok

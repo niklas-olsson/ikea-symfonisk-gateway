@@ -69,14 +69,15 @@ class SymfoniskStartButton(SymfoniskButton):
 
 
 class SymfoniskStopButton(SymfoniskButton):
-    """Button to stop all playback sessions."""
+    """Button to stop the current playback session."""
 
-    _attr_name = "Stop All Sessions"
+    _attr_name = "Stop Playback"
 
     async def async_press(self) -> None:
         """Handle the button press."""
+        # Target all active sessions on this bridge for a "household stop"
         for session in self.coordinator.data.sessions:
-            if session.get("state") in ("playing", "starting", "preparing"):
+            if session.get("state") in ("playing", "starting", "preparing", "healing"):
                 await self.coordinator.stop_session(session["session_id"])
 
     @property
