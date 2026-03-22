@@ -21,6 +21,7 @@ SOURCE_START_FAILED = "source_start_failed"
 FRAME_INGEST_FAILED = "frame_ingest_failed"
 SOURCE_ADAPTER_PLATFORM_MISMATCH = "source_adapter_platform_mismatch"
 QUIESCED_SESSION_CONFLICT = "quiesced_session_conflict"
+SESSION_CONFLICT = "session_conflict"
 LINUX_AUDIO_BACKEND_MISSING = "linux_audio_backend_missing"
 BLUETOOTH_PACTL_MISSING = "missing_pactl"
 BLUETOOTH_AUDIO_TOOLS_MISSING = "missing_audio_tools"
@@ -70,6 +71,11 @@ ERROR_DETAILS = {
         "message": "A conflicting quiesced session exists for this target.",
         "subsystem": "session_manager",
         "action": "The target is currently allocated to another source in a detached state. Stop the other session or use its original source.",
+    },
+    SESSION_CONFLICT: {
+        "message": "A conflict with an existing session occurred for the selected target.",
+        "subsystem": "session_manager",
+        "action": "The target is already in use. You can either stop the existing session or use the takeover option if supported.",
     },
     LINUX_AUDIO_BACKEND_MISSING: {
         "message": "Required Linux audio capture tools (parec or arecord) are missing.",

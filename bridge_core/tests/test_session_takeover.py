@@ -65,8 +65,8 @@ async def test_session_preferred_device_takeover(session_manager: SessionManager
     """Test that preferred device takeover reason is recorded."""
     queue = event_bus.subscribe(EventType.SESSION_STOPPED)
 
-    session_manager.create(source_id="src_1", target_id="tgt_1")
-    session_manager.create(
+    await session_manager.create(source_id="src_1", target_id="tgt_1")
+    await session_manager.create(
         source_id="src_2",
         target_id="tgt_1",
         takeover=True,
@@ -92,11 +92,11 @@ async def test_session_manual_takeover(session_manager: SessionManager, event_bu
     queue = event_bus.subscribe(EventType.SESSION_STOPPED)
 
     # 1. Create first session
-    sess1 = session_manager.create(source_id="src_1", target_id="tgt_1")
+    sess1 = await session_manager.create(source_id="src_1", target_id="tgt_1")
     assert sess1.state == SessionState.CREATED
 
     # 2. Create second session on same target with takeover=True
-    sess2 = session_manager.create(
+    sess2 = await session_manager.create(
         source_id="src_2",
         target_id="tgt_1",
         takeover=True,
@@ -116,7 +116,7 @@ async def test_session_manual_takeover(session_manager: SessionManager, event_bu
     assert event.session_id == sess1.session_id
     assert event.payload["stop_reason"] == STOP_REASON_MANUAL
     assert sess1.stop_reason == STOP_REASON_MANUAL
-    assert sess1.state == SessionState.STOPPED  # type: ignore[comparison-overlap]
+    assert sess1.state == SessionState.SUPERSEDED  # type: ignore[comparison-overlap]
 
     # 4. Verify sess2 is created
     assert sess2.session_id != sess1.session_id
@@ -129,8 +129,8 @@ async def test_session_superseded_default_reason(session_manager: SessionManager
     """Test that default takeover reason is superseded_by_new_session."""
     queue = event_bus.subscribe(EventType.SESSION_STOPPED)
 
-    session_manager.create(source_id="src_1", target_id="tgt_1")
-    session_manager.create(source_id="src_2", target_id="tgt_1", takeover=True)
+    await session_manager.create(source_id="src_1", target_id="tgt_1")
+    await session_manager.create(source_id="src_2", target_id="tgt_1", takeover=True)
 
     event = None
     for _ in range(20):
@@ -169,7 +169,7 @@ async def test_target_reclaimed_during_monitoring(
     )
     source_registry.probe_source_health.return_value = MagicMock(healthy=True, details={})
 
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
 
     # 2. Mock ownership loss (NOT_OWNED)
     target_registry.get_adapter_for_target.return_value.inspect_ownership.return_value = OwnershipResult(

@@ -103,7 +103,7 @@ def session_manager(
 async def test_target_takeover_at_start(session_manager: SessionManager) -> None:
     """Test that starting a new session stops an incumbent session on the same target."""
     # 1. Create and start Session A
-    session_a = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session_a = await session_manager.create(source_id="src_1", target_id="tgt_1")
     await session_manager.start_session(session_a.session_id)
     assert session_a.state == SessionState.PLAYING
 
@@ -120,7 +120,7 @@ async def test_target_takeover_at_start(session_manager: SessionManager) -> None
         adapter_info=MagicMock(adapter=MagicMock()),
     )
 
-    session_b = session_manager.create(source_id="src_2", target_id="tgt_1")
+    session_b = await session_manager.create(source_id="src_2", target_id="tgt_1")
     assert session_b.session_id != session_a.session_id
     assert session_b.state == SessionState.CREATED
 
@@ -135,21 +135,21 @@ async def test_target_takeover_at_start(session_manager: SessionManager) -> None
 async def test_target_exclusivity_at_create(session_manager: SessionManager) -> None:
     """Test that exclusive=True still fails at create time if target is busy."""
     # 1. Create and start Session A
-    session_a = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session_a = await session_manager.create(source_id="src_1", target_id="tgt_1")
     await session_manager.start_session(session_a.session_id)
 
     # 2. Try to create Session B with exclusive=True
     with pytest.raises(SessionConflictError):
-        session_manager.create(source_id="src_2", target_id="tgt_1", exclusive=True)
+        await session_manager.create(source_id="src_2", target_id="tgt_1", exclusive=True)
 
 
 @pytest.mark.asyncio
 async def test_session_reuse_idempotency(session_manager: SessionManager) -> None:
     """Test that create() returns existing session if source and target match."""
-    session_a = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session_a = await session_manager.create(source_id="src_1", target_id="tgt_1")
 
     # Create again with same source/target
-    session_b = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session_b = await session_manager.create(source_id="src_1", target_id="tgt_1")
 
     assert session_a.session_id == session_b.session_id
 
@@ -158,7 +158,7 @@ async def test_session_reuse_idempotency(session_manager: SessionManager) -> Non
 async def test_start_session_ignores_failed_incumbent(session_manager: SessionManager) -> None:
     """Test that start_session doesn't explicitly stop FAILED incumbents because arbitration only targets active ones."""
     # Create Session A and fail it
-    session_a = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session_a = await session_manager.create(source_id="src_1", target_id="tgt_1")
     session_manager.update_state(session_a.session_id, SessionState.FAILED)
 
     # Mock source_2
@@ -173,7 +173,7 @@ async def test_start_session_ignores_failed_incumbent(session_manager: SessionMa
         adapter_info=MagicMock(adapter=MagicMock()),
     )
 
-    session_b = session_manager.create(source_id="src_2", target_id="tgt_1")
+    session_b = await session_manager.create(source_id="src_2", target_id="tgt_1")
 
     with patch.object(session_manager, "stop_session", wraps=session_manager.stop_session) as stop_spy:
         await session_manager.start_session(session_b.session_id)
@@ -185,9 +185,9 @@ async def test_start_session_ignores_failed_incumbent(session_manager: SessionMa
 async def test_incumbent_exclusivity_blocks_new_session(session_manager: SessionManager) -> None:
     """Test that an existing exclusive session blocks creation of a new non-exclusive session."""
     # 1. Create exclusive Session A
-    session_a = session_manager.create(source_id="src_1", target_id="tgt_1", exclusive=True)
+    session_a = await session_manager.create(source_id="src_1", target_id="tgt_1", exclusive=True)
     assert session_a.exclusive is True
 
     # 2. Try to create Session B (non-exclusive) for same target
     with pytest.raises(SessionConflictError):
-        session_manager.create(source_id="src_2", target_id="tgt_1", exclusive=False)
+        await session_manager.create(source_id="src_2", target_id="tgt_1", exclusive=False)

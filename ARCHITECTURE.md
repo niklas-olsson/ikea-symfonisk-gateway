@@ -47,7 +47,7 @@ To maintain a clean architecture and avoid "dependency hell," the following rule
 - Changes are pushed via `EventBus` (`TOPOLOGY_CHANGED`, `RENDERER_DISCOVERY_CHANGED`).
 
 ### 2. Session Lifecycle (Creation -> Playback)
-1. **Creation**: `SessionManager.create()` initializes a `Session` object with a unique ID. Target exclusivity is not enforced at create time by default, allowing multiple sessions to exist for the same target if they have different sources.
+1. **Creation**: `SessionManager.create()` initializes a `Session` object with a unique ID, resolves incumbent conflicts for the same target, and reuses or supersedes sessions according to the current arbitration policy.
 2. **Start**: `SessionManager.start_session()`:
     - **Target Arbitration**: If another session is already using the same target, it is automatically stopped before the new session begins.
     - Calls `SourceRegistry.prepare_source()` and `start_source()`.

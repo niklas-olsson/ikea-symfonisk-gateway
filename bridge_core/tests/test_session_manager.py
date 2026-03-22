@@ -91,7 +91,7 @@ def session_manager(
 @pytest.mark.asyncio
 async def test_session_recovery(session_manager: SessionManager) -> None:
     """Test session recovery from FAILED and DEGRADED states."""
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
     session.transition_to(SessionState.PREPARING)
     session.transition_to(SessionState.READY)
     await session_manager.start_session(session.session_id)
@@ -114,7 +114,7 @@ async def test_session_recovery(session_manager: SessionManager) -> None:
 async def test_session_lifecycle(session_manager: SessionManager, event_bus: EventBus) -> None:
     """Test full successful session lifecycle."""
     # 1. Create
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
     assert session.session_id.startswith("sess_")
     assert session.state == SessionState.CREATED
     assert session.source_id == "src_1"
@@ -139,7 +139,7 @@ async def test_session_lifecycle(session_manager: SessionManager, event_bus: Eve
 @pytest.mark.asyncio
 async def test_invalid_transitions(session_manager: SessionManager) -> None:
     """Test that invalid state transitions raise ValueError."""
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
 
     # Cannot jump from CREATED to PLAYING
     with pytest.raises(ValueError, match="Invalid transition"):
@@ -156,7 +156,7 @@ async def test_event_emission(session_manager: SessionManager, event_bus: EventB
     queue = event_bus.subscribe()
 
     # Create session
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
 
     # Wait for event
     event = await asyncio.wait_for(queue.get(), timeout=1.0)
@@ -217,7 +217,7 @@ async def test_event_emission(session_manager: SessionManager, event_bus: EventB
 @pytest.mark.asyncio
 async def test_terminate_playing_session(session_manager: SessionManager) -> None:
     """Test that terminating a playing session stops it first."""
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
     await session_manager.start_session(session.session_id)
 
     session_id = session.session_id
@@ -231,7 +231,7 @@ async def test_terminate_playing_session(session_manager: SessionManager) -> Non
 @pytest.mark.asyncio
 async def test_idempotent_start_stop(session_manager: SessionManager) -> None:
     """Test that starting/stopping is idempotent."""
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
 
     # Start twice
     assert await session_manager.start_session(session.session_id) is True
@@ -249,7 +249,7 @@ async def test_idempotent_start_stop(session_manager: SessionManager) -> None:
 @pytest.mark.asyncio
 async def test_cancellation_during_start(session_manager: SessionManager) -> None:
     """Test that session can be stopped while starting."""
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
     session.transition_to(SessionState.STARTING)
 
     # Should be allowed to stop from STARTING
@@ -289,7 +289,7 @@ async def test_windows_source_verification_happens_before_renderer_work(
         target_registry=target_registry,
         stream_publisher=stream_publisher,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -341,7 +341,7 @@ async def test_windows_source_verification_succeeds_without_jitter_buffer_activi
         target_registry=target_registry,
         stream_publisher=stream_publisher,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -390,7 +390,7 @@ async def test_session_manager_passes_pipeline_runtime_config(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="src_1", target_id="tgt_1")
+    session = await manager.create(source_id="src_1", target_id="tgt_1")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -467,7 +467,8 @@ async def test_delivery_profile_defaults_to_stable_for_linux_and_windows_sources
         assert kwargs["primary_client_max_backlog_ms"] == 1500
 
 
-def test_source_override_profile_beats_global_profile(
+@pytest.mark.asyncio
+async def test_source_override_profile_beats_global_profile(
     event_bus: EventBus,
     source_registry: MagicMock,
     target_registry: MagicMock,
@@ -484,7 +485,8 @@ def test_source_override_profile_beats_global_profile(
     assert manager._resolve_delivery_profile_for_source("src_2") == "stable"
 
 
-def test_invalid_source_override_falls_back_to_global_then_stable(
+@pytest.mark.asyncio
+async def test_invalid_source_override_falls_back_to_global_then_stable(
     event_bus: EventBus,
     source_registry: MagicMock,
     target_registry: MagicMock,
@@ -506,7 +508,8 @@ def test_invalid_source_override_falls_back_to_global_then_stable(
     assert manager._resolve_delivery_profile_for_source("src_1") == "stable"
 
 
-def test_malformed_profile_override_map_is_ignored_safely(
+@pytest.mark.asyncio
+async def test_malformed_profile_override_map_is_ignored_safely(
     event_bus: EventBus,
     source_registry: MagicMock,
     target_registry: MagicMock,
@@ -522,7 +525,8 @@ def test_malformed_profile_override_map_is_ignored_safely(
     assert manager._resolve_delivery_profile_for_source("src_1") == "experimental"
 
 
-def test_legacy_live_keys_do_not_poison_stable_when_profile_unset(
+@pytest.mark.asyncio
+async def test_legacy_live_keys_do_not_poison_stable_when_profile_unset(
     event_bus: EventBus,
     source_registry: MagicMock,
     target_registry: MagicMock,
@@ -540,7 +544,8 @@ def test_legacy_live_keys_do_not_poison_stable_when_profile_unset(
     assert kwargs["transport_heartbeat_window_ms"] == 1000
 
 
-def test_global_advanced_override_applies_without_changing_selected_profile(
+@pytest.mark.asyncio
+async def test_global_advanced_override_applies_without_changing_selected_profile(
     event_bus: EventBus,
     source_registry: MagicMock,
     target_registry: MagicMock,
@@ -634,7 +639,7 @@ async def test_windows_silent_source_viability_allows_startup(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -698,7 +703,7 @@ async def test_pipeline_runtime_config_only_uses_live_defaults_for_windows_syste
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="src_1", target_id="tgt_1")
+    session = await manager.create(source_id="src_1", target_id="tgt_1")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -766,7 +771,7 @@ async def test_silent_viability_startup_degrades_if_never_active(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
 
     with (
         patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
@@ -847,7 +852,7 @@ async def test_transport_heartbeat_loss_degrades_session(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
 
     heartbeat_ok = {
         "real_frames_written": 3,
@@ -937,7 +942,7 @@ async def test_transport_heartbeat_recovery_restores_playing(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
 
     heartbeat_dead = {
         "real_frames_written": 3,
@@ -1035,7 +1040,7 @@ async def test_silence_keepalive_with_encoded_output_stays_playing(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1")
 
     heartbeat_idle = {
         "real_frames_written": 0,
@@ -1192,7 +1197,7 @@ async def test_client_detach_does_not_degrade_healthy_stream(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
 
     healthy = {
         "real_frames_written": 3,
@@ -1320,7 +1325,7 @@ async def test_normal_reconnect_churn_remains_non_fatal(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
 
     healthy = {
         "real_frames_written": 3,
@@ -1467,7 +1472,7 @@ async def test_last_effective_delivery_path_loss_degrades_and_replays(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
 
     healthy = {
         "real_frames_written": 3,
@@ -1621,7 +1626,7 @@ async def test_stalled_subscriber_eviction_does_not_degrade_when_effective_path_
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
 
     healthy = {
         "real_frames_written": 3,
@@ -1735,7 +1740,7 @@ async def test_encoder_loss_triggers_pipeline_swap_without_restarting_source(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
 
     alive = {
         "real_frames_written": 3,
@@ -1837,7 +1842,7 @@ async def test_primary_pause_resume_survives_without_heal(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
 
     def primary_snapshot(*, real_frames: int, keepalive_active: bool) -> dict[str, Any]:
         now = time.monotonic()
@@ -1968,7 +1973,7 @@ async def test_primary_extended_silence_survives_without_heal(
         stream_publisher=stream_publisher,
         config_store=config_store,
     )
-    session = manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
+    session = await manager.create(source_id="windows-audio-adapter:system:default", target_id="tgt_1", auto_heal=True)
 
     def idle_snapshot() -> dict[str, Any]:
         now = time.monotonic()
@@ -2135,7 +2140,7 @@ async def test_primary_detach_recovers_within_grace_without_replay(
         "audio_experimental_primary_detach_grace_ms": 1000,
     }.get(key, default)
     manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
-    session = manager.create(source_id="src_1", target_id="tgt_1")
+    session = await manager.create(source_id="src_1", target_id="tgt_1")
 
     healthy = _primary_delivery_snapshot(delivery_alive=True)
     detached = _primary_delivery_snapshot(delivery_alive=False)
@@ -2200,7 +2205,7 @@ async def test_primary_detach_beyond_grace_with_auto_heal_false_degrades_without
         "audio_experimental_primary_detach_grace_ms": 200,
     }.get(key, default)
     manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
-    session = manager.create(source_id="src_1", target_id="tgt_1", auto_heal=False)
+    session = await manager.create(source_id="src_1", target_id="tgt_1", auto_heal=False)
 
     healthy = _primary_delivery_snapshot(delivery_alive=True)
     detached = _primary_delivery_snapshot(delivery_alive=False)
@@ -2235,8 +2240,9 @@ async def test_primary_detach_beyond_grace_with_auto_heal_false_degrades_without
     await manager.stop_session(session.session_id)
 
 
-def test_media_status_prefers_session_profile_fields_over_pipeline_diagnostics(session_manager: SessionManager) -> None:
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+@pytest.mark.asyncio
+async def test_media_status_prefers_session_profile_fields_over_pipeline_diagnostics(session_manager: SessionManager) -> None:
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
     session.delivery_profile = "experimental"
     session.effective_delivery_profile = "stable"
     session.auto_fell_back_to_stable = True
@@ -2260,8 +2266,9 @@ def test_media_status_prefers_session_profile_fields_over_pipeline_diagnostics(s
     assert media_status["fallback_reason"] == "repeated_primary_detach"
 
 
-def test_auto_fallback_records_reason_and_sets_authoritative_session_fields(session_manager: SessionManager) -> None:
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+@pytest.mark.asyncio
+async def test_auto_fallback_records_reason_and_sets_authoritative_session_fields(session_manager: SessionManager) -> None:
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
     session.effective_delivery_profile = "experimental"
     now = time.monotonic()
     session.recent_primary_detach_times_monotonic.extend([now - 10, now - 5])
@@ -2302,7 +2309,7 @@ async def test_stable_profile_ignores_primary_detach_delivery_degradation(
         "audio_primary_attach_grace_ms": 100,
     }.get(key, default)
     manager = SessionManager(event_bus, source_registry, target_registry, stream_publisher, config_store=config_store)
-    session = manager.create(source_id="src_1", target_id="tgt_1", auto_heal=True)
+    session = await manager.create(source_id="src_1", target_id="tgt_1", auto_heal=True)
 
     healthy = _primary_delivery_snapshot(delivery_alive=True)
     detached = _primary_delivery_snapshot(delivery_alive=False)

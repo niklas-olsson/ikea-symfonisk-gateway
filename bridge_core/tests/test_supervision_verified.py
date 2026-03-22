@@ -52,7 +52,7 @@ async def test_supervised_push_frame_failure(
     """
     Verify that a failure in push_frame is now supervised and triggers session failure.
     """
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
 
     # Mock resolve_ffmpeg_path to avoid FFmpeg requirement
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
@@ -100,7 +100,7 @@ async def test_supervised_pipeline_task_failure(
     """
     Verify that a failure in pipeline background tasks is now supervised.
     """
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
 
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
         with patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls:
@@ -146,7 +146,7 @@ async def test_adapter_on_error_propagation(session_manager: SessionManager, eve
     """
     Verify that adapter calling on_error propagates to SessionManager.
     """
-    session = session_manager.create(source_id="src_1", target_id="tgt_1")
+    session = await session_manager.create(source_id="src_1", target_id="tgt_1")
 
     with patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
         with patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls:
