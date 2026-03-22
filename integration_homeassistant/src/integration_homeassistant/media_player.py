@@ -36,9 +36,8 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
     """Media player for SYMFONISK Gateway sessions."""
 
     _attr_name = "Playback"
-    _attr_supported_features = (
-        MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.STOP | MediaPlayerEntityFeature.SELECT_SOURCE
-    )
+    _attr_icon = "mdi:cast-audio"
+    _attr_supported_features = MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.STOP | MediaPlayerEntityFeature.SELECT_SOURCE
 
     def __init__(self, coordinator: SymfoniskCoordinator, entry: ConfigEntry) -> None:
         """Initialize."""
@@ -111,9 +110,8 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
     @property
     def media_title(self) -> str | None:
         """Title of current playing media."""
-        source_name = self.source or "No Source"
-        target_name = self.target_name or "No Speaker"
-
+        source_name = self.source or "None"
+        target_name = self.target_name or "None"
         active_session = self.coordinator.get_active_session()
         if not active_session:
             return f"Ready: {source_name} ➔ {target_name}"

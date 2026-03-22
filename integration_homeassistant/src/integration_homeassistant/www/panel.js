@@ -18,17 +18,19 @@ class SymfoniskGatewayPanel extends HTMLElement {
   _updateState(oldHass) {
     if (!this._hass || !this._config) return;
 
-    // Find our entities
-    const mediaPlayerId = Object.keys(this._hass.states).find(id => id.startsWith('media_player.') && this._hass.states[id].attributes.friendly_name === 'SYMFONISK Bridge') || Object.keys(this._hass.states).find(id => id.startsWith('media_player.bridge_session'));
-    const sessionStateId = Object.keys(this._hass.states).find(id => id.endsWith('session_state'));
-    const profileId = Object.keys(this._hass.states).find(id => id.endsWith('delivery_profile'));
-    const failureReasonId = Object.keys(this._hass.states).find(id => id.endsWith('failure_reason'));
+    // Find our entities robustly by checking for our custom attributes
+    const mediaPlayerId = Object.keys(this._hass.states).find(id => {
+        if (!id.startsWith('media_player.')) return false;
+        const stateObj = this._hass.states[id];
+        return stateObj.attributes && (
+            stateObj.attributes.friendly_name === 'SYMFONISK Bridge' ||
+            stateObj.attributes.session_id !== undefined ||
+            stateObj.attributes.bridge_state !== undefined
+        );
+    });
 
     const state = {
         mediaPlayer: this._hass.states[mediaPlayerId],
-        sessionState: this._hass.states[sessionStateId],
-        profile: this._hass.states[profileId],
-        failureReason: this._hass.states[failureReasonId],
     };
 
     if (JSON.stringify(state) !== JSON.stringify(this._state)) {
@@ -118,37 +120,52 @@ class SymfoniskGatewayPanel extends HTMLElement {
 
   _updateUI() {
     if (!this._state) return;
-    const { mediaPlayer, sessionState, profile, failureReason } = this._state;
+    const { mediaPlayer } = this._state;
 
     const statusTag = this.shadowRoot.getElementById('session-status');
     const sessionText = this.shadowRoot.getElementById('session-text');
     const sessionDetails = this.shadowRoot.getElementById('session-details');
     const recoverBtn = this.shadowRoot.getElementById('recover-btn');
 
-    const presState = sessionState ? sessionState.state : 'idle';
-    statusTag.textContent = presState;
-    statusTag.className = `status-tag status-${presState}`;
-
     if (mediaPlayer && mediaPlayer.attributes) {
         const attr = mediaPlayer.attributes;
+        const presState = attr.presentation_state || 'idle';
         const detail = attr.presentation_detail || '';
         const streamProfile = attr.effective_stream_profile || '';
+        const lastError = attr.last_error;
+
+        statusTag.textContent = presState;
+        statusTag.className = `status-tag status-${presState}`;
 
         if (presState === 'playing') {
-            sessionText.textContent = mediaPlayer.attributes.media_title || `Streaming to speakers`;
+            sessionText.textContent = attr.media_title || `Streaming to speakers`;
             sessionDetails.textContent = `Profile: ${streamProfile}`;
+            recoverBtn.style.display = 'none';
         } else if (presState === 'idle' && detail.includes('detached')) {
             sessionText.textContent = `Playback Detached (Idle)`;
             sessionDetails.textContent = `Detail: ${detail}`;
-        } else if (presState === 'error') {
+            recoverBtn.style.display = 'none';
+        } else if (presState === 'error' || attr.bridge_state === 'failed') {
             sessionText.textContent = `Playback Failed`;
-            sessionDetails.textContent = failureReason ? failureReason.state : 'Unknown error';
+            sessionDetails.textContent = lastError ? (lastError.action || lastError.message) : 'Unknown error';
             recoverBtn.style.display = '';
+            statusTag.textContent = 'error';
+            statusTag.className = 'status-tag status-error';
+        } else if (presState === 'buffering') {
+            sessionText.textContent = `Starting playback...`;
+            sessionDetails.textContent = '';
+            recoverBtn.style.display = 'none';
         } else {
             sessionText.textContent = `Ready to play`;
             sessionDetails.textContent = '';
             recoverBtn.style.display = 'none';
         }
+    } else {
+        statusTag.textContent = 'idle';
+        statusTag.className = 'status-tag status-idle';
+        sessionText.textContent = 'No active playback';
+        sessionDetails.textContent = '';
+        recoverBtn.style.display = 'none';
     }
   }
 

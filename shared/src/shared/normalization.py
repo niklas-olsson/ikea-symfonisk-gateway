@@ -29,11 +29,7 @@ def normalize_for_comparison(data: Any) -> Any:
 
     if isinstance(data, dict):
         # Filter out volatile keys and recurse
-        return {
-            k: normalize_for_comparison(v)
-            for k, v in data.items()
-            if k not in volatile_keys
-        }
+        return {k: normalize_for_comparison(v) for k, v in data.items() if k not in volatile_keys}
 
     if isinstance(data, (list, tuple)):
         # Recurse into elements
