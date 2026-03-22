@@ -35,7 +35,6 @@ from bridge_core.stream.profiles import (
     AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT,
     DELIVERY_PROFILE_DEFAULTS,
     STREAM_PROFILE_ORDER,
-    STREAM_PROFILES,
     DeliveryProfile,
     DeliveryProfileDefaults,
     is_profile_supported,

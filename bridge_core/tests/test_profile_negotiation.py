@@ -1,29 +1,62 @@
 """Tests for stream profile negotiation and fallback."""
 
-import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from bridge_core.core.event_bus import EventBus
-from bridge_core.core.session_manager import SessionManager, SessionState
-from bridge_core.core.source_registry import SourceRegistry
+from bridge_core.core.session_manager import SessionManager
+from bridge_core.core.source_registry import SourceBinding, SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
+from bridge_core.adapters.base import TargetDescriptor
 from bridge_core.stream.pipeline import StreamPipeline
 from ingress_sdk.types import PrepareResult, SourceCapabilities, SourceDescriptor, SourceType, StartResult
 
 
-class MockTargetDescriptor:
-    def __init__(self, tid, codecs=None):
-        self.target_id = tid
-        self.renderer = "mock"
-        self.target_type = "speaker"
-        self.display_name = "Mock Target"
-        self.members = [tid]
-        self.coordinator_id = tid
-        self.supported_codecs = codecs or ["mp3", "aac", "pcm_s16le"]
-        self.supported_sample_rates = [48000]
-        self.supported_channels = [2]
-        self.max_bitrate_kbps = None
+class MockTargetDescriptor(TargetDescriptor):
+    def __init__(self, tid: str, codecs: list[str] | None = None) -> None:
+        self._tid = tid
+        self._codecs = codecs or ["mp3", "aac", "pcm_s16le"]
+
+    @property
+    def target_id(self) -> str:
+        return self._tid
+
+    @property
+    def renderer(self) -> str:
+        return "mock"
+
+    @property
+    def target_type(self) -> str:
+        return "speaker"
+
+    @property
+    def display_name(self) -> str:
+        return "Mock Target"
+
+    @property
+    def members(self) -> list[str]:
+        return [self._tid]
+
+    @property
+    def coordinator_id(self) -> str:
+        return self._tid
+
+    @property
+    def supported_codecs(self) -> list[str]:
+        return self._codecs
+
+    @property
+    def supported_sample_rates(self) -> list[int]:
+        return [48000]
+
+    @property
+    def supported_channels(self) -> list[int]:
+        return [2]
+
+    @property
+    def max_bitrate_kbps(self) -> int | None:
+        return None
 
 
 @pytest.fixture
@@ -36,14 +69,20 @@ def source_registry() -> MagicMock:
     registry = MagicMock(spec=SourceRegistry)
     registry.prepare_source.return_value = PrepareResult(success=True, source_id="src_1")
     registry.start_source.return_value = StartResult(success=True, session_id="adapter_sess_1")
-    registry.resolve_source.return_value = MagicMock(
-        source=SourceDescriptor(
-            source_id="src_1",
-            source_type=SourceType.SYSTEM_AUDIO,
-            display_name="Source 1",
-            platform="linux",
-            capabilities=SourceCapabilities(codecs=["pcm_s16le", "mp3", "aac"]),
-        )
+
+    source_desc = SourceDescriptor(
+        source_id="src_1",
+        source_type=SourceType.SYSTEM_AUDIO,
+        display_name="Source 1",
+        platform="linux",
+        capabilities=SourceCapabilities(codecs=["pcm_s16le", "mp3", "aac"]),
+    )
+
+    # Use a real SourceBinding (dataclass) instead of a mock to avoid weird attribute access issues
+    registry.resolve_source.return_value = SourceBinding(
+        source=source_desc,
+        adapter_info=MagicMock(),
+        local_source_id="src_1"
     )
     return registry
 
@@ -82,7 +121,7 @@ def session_manager(
 
 
 @pytest.mark.asyncio
-async def test_negotiate_highest_viable_profile(session_manager, target_registry):
+async def test_negotiate_highest_viable_profile(session_manager: SessionManager, target_registry: MagicMock) -> None:
     """Test that 'auto' picks the highest profile supported by both."""
     session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
@@ -90,6 +129,7 @@ async def test_negotiate_highest_viable_profile(session_manager, target_registry
          patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.start = AsyncMock()
+        mock_pipeline.get_diagnostics_snapshot.return_value = {}
 
         success = await session_manager.start_session(session.session_id)
 
@@ -98,7 +138,7 @@ async def test_negotiate_highest_viable_profile(session_manager, target_registry
 
 
 @pytest.mark.asyncio
-async def test_negotiate_restricted_target(session_manager, target_registry):
+async def test_negotiate_restricted_target(session_manager: SessionManager, target_registry: MagicMock) -> None:
     """Test negotiation when target only supports a lower quality codec."""
     target_registry.get_target.return_value = MockTargetDescriptor("tgt_1", codecs=["mp3"])
     session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
@@ -107,6 +147,7 @@ async def test_negotiate_restricted_target(session_manager, target_registry):
          patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.start = AsyncMock()
+        mock_pipeline.get_diagnostics_snapshot.return_value = {}
 
         success = await session_manager.start_session(session.session_id)
 
@@ -115,7 +156,7 @@ async def test_negotiate_restricted_target(session_manager, target_registry):
 
 
 @pytest.mark.asyncio
-async def test_fallback_ladder_on_failure(session_manager):
+async def test_fallback_ladder_on_failure(session_manager: SessionManager) -> None:
     """Test that if the highest profile fails, it tries the next one."""
     session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
@@ -123,9 +164,11 @@ async def test_fallback_ladder_on_failure(session_manager):
     pipeline_pcm = MagicMock(spec=StreamPipeline)
     pipeline_pcm.start = AsyncMock(side_effect=RuntimeError("PCM failed"))
     pipeline_pcm.stop = AsyncMock()
+    pipeline_pcm.get_diagnostics_snapshot.return_value = {}
 
     pipeline_aac = MagicMock(spec=StreamPipeline)
     pipeline_aac.start = AsyncMock()
+    pipeline_aac.get_diagnostics_snapshot.return_value = {}
 
     with patch("bridge_core.core.session_manager.StreamPipeline", side_effect=[pipeline_pcm, pipeline_aac]), \
          patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
@@ -137,7 +180,7 @@ async def test_fallback_ladder_on_failure(session_manager):
 
 
 @pytest.mark.asyncio
-async def test_last_known_good_reuse(session_manager, config_store):
+async def test_last_known_good_reuse(session_manager: SessionManager, config_store: MagicMock) -> None:
     """Test that LKG profile is prioritized in 'auto' mode."""
     config_store.get.return_value = "aac_48k_stereo_256"
     session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
@@ -146,6 +189,7 @@ async def test_last_known_good_reuse(session_manager, config_store):
          patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.start = AsyncMock()
+        mock_pipeline.get_diagnostics_snapshot.return_value = {}
 
         success = await session_manager.start_session(session.session_id)
 
@@ -155,7 +199,7 @@ async def test_last_known_good_reuse(session_manager, config_store):
 
 
 @pytest.mark.asyncio
-async def test_strict_manual_override_validation(session_manager, target_registry):
+async def test_strict_manual_override_validation(session_manager: SessionManager, target_registry: MagicMock) -> None:
     """Test that manual override fails if unsupported, without fallback."""
     target_registry.get_target.return_value = MockTargetDescriptor("tgt_1", codecs=["mp3"])
     # Request PCM when target only supports MP3
@@ -164,11 +208,12 @@ async def test_strict_manual_override_validation(session_manager, target_registr
     success = await session_manager.start_session(session.session_id)
 
     assert success is False
+    assert session.last_error is not None
     assert "not supported" in session.last_error.message
 
 
 @pytest.mark.asyncio
-async def test_persistence_on_success(session_manager, config_store):
+async def test_persistence_on_success(session_manager: SessionManager, config_store: MagicMock) -> None:
     """Test that successful start persists the profile."""
     session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
@@ -176,6 +221,7 @@ async def test_persistence_on_success(session_manager, config_store):
          patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.start = AsyncMock()
+        mock_pipeline.get_diagnostics_snapshot.return_value = {}
 
         await session_manager.start_session(session.session_id)
 
