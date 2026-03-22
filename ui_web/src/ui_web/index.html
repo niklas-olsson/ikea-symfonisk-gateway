@@ -53,7 +53,7 @@
 
         main {
             width: 100%;
-            max-width: 720px;
+            max-width: 800px;
             display: flex;
             flex-direction: column;
             gap: var(--spacing-32);
@@ -87,14 +87,53 @@
             border: 1px solid oklch(100% 0 0 / 5%);
         }
 
-        .controls {
+        .selection-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: var(--spacing-24);
         }
 
         @media (max-width: 600px) {
-            .controls {
+            .selection-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .actions-row {
+            display: flex;
+            gap: var(--spacing-16);
+        }
+
+        .status-row {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-12);
+            padding: var(--spacing-24);
+            background-color: var(--bg);
+            border-radius: var(--radius);
+            border: 1px solid oklch(100% 0 0 / 5%);
+        }
+
+        .status-main {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .session-subtext {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        .advanced-controls-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-24);
+        }
+
+        @media (max-width: 600px) {
+            .advanced-controls-grid {
                 grid-template-columns: 1fr;
             }
         }
@@ -563,6 +602,83 @@
             </div>
         </header>
 
+        <!-- ── Playback Controls ───────────────────────────── -->
+        <section class="card">
+            <div class="selection-row">
+                <div class="field">
+                    <label for="source-select">Audio Source</label>
+                    <select id="source-select">
+                        <option value="">Loading sources...</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="target-select">Playback Target</label>
+                    <select id="target-select">
+                        <option value="">Loading targets...</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="actions-row">
+                <button id="play-btn">▶ Play</button>
+                <button id="stop-btn" class="secondary" disabled>■ Stop</button>
+            </div>
+
+            <div class="status-row">
+                <div class="status-main">
+                    <div style="display: flex; align-items: center; gap: var(--spacing-16);">
+                        <label>Session</label>
+                        <span id="session-state" class="status-tag status-idle">Idle</span>
+                    </div>
+                    <button id="recover-btn" class="small-text" style="display: none;" onclick="recoverSession()">Recover</button>
+                </div>
+                <div id="session-subtext" class="session-subtext">Select a source and speaker to begin</div>
+            </div>
+
+            <div id="session-error-container" style="display: none; padding: var(--spacing-16) var(--spacing-24); background-color: oklch(from var(--error) l c h / 10%); border-radius: var(--radius); border: 1px solid oklch(from var(--error) l c h / 20%);">
+                <div style="display: flex; flex-direction: column; gap: var(--spacing-4);">
+                    <label style="color: var(--error);">Recommendation</label>
+                    <p id="session-error-action" style="font-size: 0.9rem; color: var(--text);"></p>
+                </div>
+            </div>
+
+            <!-- Advanced Control -->
+            <details style="margin-top: var(--spacing-8);">
+                <summary style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: var(--spacing-4) 0;">
+                    Advanced Control
+                </summary>
+                <div style="padding-top: var(--spacing-16); display: flex; flex-direction: column; gap: var(--spacing-24);">
+                    <div class="advanced-controls-grid">
+                        <div class="field">
+                            <label>Source Management</label>
+                            <div class="field-actions" style="margin-top: var(--spacing-4);">
+                                <button id="set-preferred-source" class="small-text">★ Set Preferred</button>
+                                <button id="refresh-sources" class="small-text">Refresh</button>
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label>Speaker Management</label>
+                            <div class="field-actions" style="margin-top: var(--spacing-4);">
+                                <button id="set-preferred-target" class="small-text">★ Set Preferred</button>
+                                <button id="refresh-targets" class="small-text">Refresh</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label for="delivery-profile-select">Delivery Profile</label>
+                        <select id="delivery-profile-select" style="margin-top: var(--spacing-8);">
+                            <option value="stable">Stable</option>
+                            <option value="experimental">Experimental</option>
+                        </select>
+                        <label id="delivery-profile-note" for="delivery-profile-select" style="text-transform: none; letter-spacing: 0; font-size: 0.8rem; display: none; color: var(--text-muted); margin-top: var(--spacing-4);">
+                            Experimental: Lower latency, reduced buffering. May fall back to Stable if connection is unstable.
+                        </label>
+                    </div>
+                </div>
+            </details>
+        </section>
+
         <!-- ── Bluetooth Panel ─────────────────────────────── -->
         <section id="bt-panel" class="card bt-card">
             <div class="bt-header">
@@ -575,105 +691,46 @@
                 </div>
             </div>
 
-            <!-- Readiness Errors -->
-            <div id="bt-errors" class="bt-errors" style="display: none;">
-                <ul id="bt-error-list"></ul>
-            </div>
-
-            <!-- Pairing Controls -->
-            <div class="bt-pairing-section">
-                <div class="bt-pairing-controls">
-                    <button id="bt-pair-btn" class="bt-primary" onclick="btOpenPairing()">Enter Pairing Mode</button>
-                    <button id="bt-pair-stop-btn" class="bt-danger" onclick="btClosePairing()" style="display: none;">Stop Pairing</button>
-                    <div id="bt-countdown" class="bt-countdown" style="display: none;">
-                        <div class="bt-countdown-bar">
-                            <div id="bt-countdown-fill" class="bt-countdown-fill" style="width: 100%;"></div>
-                        </div>
-                        <span id="bt-countdown-text">90s</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Device List -->
-            <div class="bt-devices-section">
-                <div class="bt-devices-header">
-                    <label>Devices</label>
-                    <button class="small-text" onclick="btRefreshDevices()">Refresh</button>
-                </div>
-                <div id="bt-device-list" class="bt-device-list">
-                    <div class="bt-empty">No devices discovered</div>
-                </div>
-            </div>
-        </section>
-
-        <!-- ── Session Controls ────────────────────────────── -->
-        <section class="card">
-            <div class="controls">
-                <div class="field">
-                    <div class="field-header">
-                        <label for="source-select">Audio Source</label>
-                        <div class="field-actions">
-                            <button id="set-preferred-source" class="small-text">★ Set Preferred</button>
-                            <button id="refresh-sources" class="small-text">Refresh</button>
-                        </div>
-                    </div>
-                    <select id="source-select">
-                        <option value="">Loading sources...</option>
-                    </select>
-                </div>
-                <div class="field">
-                    <div class="field-header">
-                        <label for="target-select">Playback Target</label>
-                        <div class="field-actions">
-                            <button id="set-preferred-target" class="small-text">★ Set Preferred</button>
-                            <button id="refresh-targets" class="small-text">Refresh</button>
-                        </div>
-                    </div>
-                    <select id="target-select">
-                        <option value="">Loading targets...</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="actions">
-                <button id="play-btn">▶ Play</button>
-                <button id="stop-btn" class="secondary" disabled>■ Stop</button>
-            </div>
-
-            <!-- Advanced Settings -->
-            <details style="margin-top: var(--spacing-8);">
-                <summary style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: var(--spacing-4) 0;">
-                    Advanced Settings
+            <!-- Hardware Diagnostics -->
+            <details id="bt-diagnostics" style="display: none;">
+                <summary style="font-size: 0.75rem; color: var(--error); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: var(--spacing-4) 0;">
+                    Hardware Diagnostics
                 </summary>
-                <div style="padding-top: var(--spacing-16); display: flex; flex-direction: column; gap: var(--spacing-16);">
-                    <div class="field">
-                        <div class="field-header">
-                            <label for="delivery-profile-select">Delivery Profile</label>
-                        </div>
-                        <select id="delivery-profile-select">
-                            <option value="stable">Stable</option>
-                            <option value="experimental">Experimental</option>
-                        </select>
-                        <label id="delivery-profile-note" for="delivery-profile-select" style="text-transform: none; letter-spacing: 0; font-size: 0.8rem; display: none; color: var(--text-muted);">
-                            Experimental: Lower latency, reduced buffering. May fall back to Stable if connection is unstable.
-                        </label>
-                    </div>
+                <div id="bt-errors" class="bt-errors" style="margin-top: var(--spacing-12);">
+                    <ul id="bt-error-list"></ul>
                 </div>
             </details>
 
-            <div class="status-bar">
-                <div style="display: flex; align-items: center; gap: var(--spacing-16);">
-                    <span>Session</span>
-                    <span id="session-state" class="status-tag status-idle">Idle</span>
+            <div id="bt-main-controls">
+                <!-- Pairing Controls -->
+                <div class="bt-pairing-section">
+                    <div class="bt-pairing-controls">
+                        <button id="bt-pair-btn" class="bt-primary" onclick="btOpenPairing()">Enter Pairing Mode</button>
+                        <button id="bt-pair-stop-btn" class="bt-danger" onclick="btClosePairing()" style="display: none;">Stop Pairing</button>
+                        <div id="bt-countdown" class="bt-countdown" style="display: none;">
+                            <div class="bt-countdown-bar">
+                                <div id="bt-countdown-fill" class="bt-countdown-fill" style="width: 100%;"></div>
+                            </div>
+                            <span id="bt-countdown-text">90s</span>
+                        </div>
+                    </div>
                 </div>
-                <button id="recover-btn" class="small-text" style="display: none;" onclick="recoverSession()">Recover</button>
+
+                <!-- Device List -->
+                <div class="bt-devices-section">
+                    <div class="bt-devices-header">
+                        <label>Devices</label>
+                        <button class="small-text" onclick="btRefreshDevices()">Refresh</button>
+                    </div>
+                    <div id="bt-device-list" class="bt-device-list">
+                        <div class="bt-empty">No devices discovered</div>
+                    </div>
+                </div>
             </div>
 
-            <div id="session-error-container" style="display: none; padding: var(--spacing-16) var(--spacing-24); background-color: oklch(from var(--error) l c h / 10%); border-radius: var(--radius); border: 1px solid oklch(from var(--error) l c h / 20%);">
-                <div style="display: flex; flex-direction: column; gap: var(--spacing-4);">
-                    <label style="color: var(--error);">Recommendation</label>
-                    <p id="session-error-action" style="font-size: 0.9rem; color: var(--text);"></p>
-                </div>
+            <!-- Unavailable Message -->
+            <div id="bt-unavailable-msg" style="display: none; padding: var(--spacing-24); text-align: center; color: var(--text-muted); font-size: 0.9rem; background: oklch(100% 0 0 / 2%); border-radius: var(--radius);">
+                Bluetooth is currently disabled or unsupported on this hardware.
             </div>
         </section>
 
@@ -858,6 +915,7 @@
                 }
 
                 syncDeliveryProfileSelection();
+                updateSessionUI(sessionState.textContent.toUpperCase() === 'IDLE' ? 'IDLE' : (sessionState.textContent.toUpperCase() === 'FAILED' ? 'ERROR' : 'ACTIVE'), sessionState.textContent);
             } catch (err) {
                 console.error('Failed to fetch sources', err);
                 addLog('ERROR', 'Failed to fetch sources');
@@ -894,6 +952,7 @@
                         if (firstAvailable) targetSelect.value = firstAvailable.target_id;
                     }
                 }
+                updateSessionUI(sessionState.textContent.toUpperCase() === 'IDLE' ? 'IDLE' : (sessionState.textContent.toUpperCase() === 'FAILED' ? 'ERROR' : 'ACTIVE'), sessionState.textContent);
             } catch (err) {
                 console.error('Failed to fetch targets', err);
                 addLog('ERROR', 'Failed to fetch targets');
@@ -1055,6 +1114,13 @@
             }
         }
 
+        function getSelectedText(selectEl) {
+            if (!selectEl || selectEl.selectedIndex === -1) return null;
+            const text = selectEl.options[selectEl.selectedIndex].text;
+            // Clean up common prefixes used in labels
+            return text.replace(/^●\s*/, '').replace(/^★\s*/, '').replace(/^\[OFFLINE\]\s*/, '').split(' (')[0];
+        }
+
         function updateSessionUI(state, label, errorAction = null) {
             sessionState.textContent = label;
             sessionState.className = `status-tag status-${state.toLowerCase()}`;
@@ -1062,6 +1128,7 @@
             const errorContainer = document.getElementById('session-error-container');
             const errorText = document.getElementById('session-error-action');
             const recoverBtn = document.getElementById('recover-btn');
+            const subtextEl = document.getElementById('session-subtext');
 
             if (state === 'ERROR' && errorAction) {
                 errorContainer.style.display = 'block';
@@ -1070,6 +1137,20 @@
             } else if (state !== 'ERROR') {
                 errorContainer.style.display = 'none';
                 recoverBtn.style.display = 'none';
+            }
+
+            // Update subtext
+            const sourceName = getSelectedText(sourceSelect);
+            const targetName = getSelectedText(targetSelect);
+
+            if (!sourceName || !targetName) {
+                subtextEl.textContent = 'Select a source and speaker to begin';
+            } else if (state === 'ACTIVE') {
+                subtextEl.textContent = `Streaming from ${sourceName} to ${targetName}`;
+            } else if (state === 'ERROR') {
+                subtextEl.textContent = `Failed to stream from ${sourceName} to ${targetName}`;
+            } else {
+                subtextEl.textContent = `Ready to stream from ${sourceName} to ${targetName}`;
             }
         }
 
@@ -1118,10 +1199,12 @@
 
         function btUpdateStatusUI(status) {
             const indicators = document.getElementById('bt-indicators');
-            const errorsDiv = document.getElementById('bt-errors');
+            const diagnostics = document.getElementById('bt-diagnostics');
             const errorList = document.getElementById('bt-error-list');
             const panel = document.getElementById('bt-panel');
             const pairBtn = document.getElementById('bt-pair-btn');
+            const mainControls = document.getElementById('bt-main-controls');
+            const unavailableMsg = document.getElementById('bt-unavailable-msg');
 
             // Indicators
             const props = status.properties || {};
@@ -1136,15 +1219,26 @@
             if (pairingOpen) indicatorsHTML += `<span class="bt-indicator warning">Pairing</span>`;
             indicators.innerHTML = indicatorsHTML;
 
-            // Errors
+            // Errors & Availability
             const errors = status.readiness_errors || [];
             if (errors.length > 0 && !status.healthy) {
-                errorsDiv.style.display = 'block';
+                diagnostics.style.display = 'block';
                 errorList.innerHTML = errors.map(e =>
                     `<li>${e.replace(/_/g, ' ')}</li>`
                 ).join('');
+
+                // If not healthy and no devices, hide main controls to show polished unavailable state
+                if (!status.healthy && (!status.devices || status.devices.length === 0)) {
+                    mainControls.style.display = 'none';
+                    unavailableMsg.style.display = 'block';
+                } else {
+                    mainControls.style.display = 'block';
+                    unavailableMsg.style.display = 'none';
+                }
             } else {
-                errorsDiv.style.display = 'none';
+                diagnostics.style.display = 'none';
+                mainControls.style.display = 'block';
+                unavailableMsg.style.display = 'none';
             }
 
             // Pairing UI state
@@ -1531,7 +1625,13 @@
 
         playBtn.onclick = createAndStartSession;
         stopBtn.onclick = stopCurrentSession;
-        sourceSelect.onchange = syncDeliveryProfileSelection;
+        sourceSelect.onchange = () => {
+            syncDeliveryProfileSelection();
+            updateSessionUI(sessionState.textContent.toUpperCase() === 'IDLE' ? 'IDLE' : (sessionState.textContent.toUpperCase() === 'FAILED' ? 'ERROR' : 'ACTIVE'), sessionState.textContent);
+        };
+        targetSelect.onchange = () => {
+            updateSessionUI(sessionState.textContent.toUpperCase() === 'IDLE' ? 'IDLE' : (sessionState.textContent.toUpperCase() === 'FAILED' ? 'ERROR' : 'ACTIVE'), sessionState.textContent);
+        };
         deliveryProfileSelect.onchange = () => {
             persistDeliveryProfile().catch(err => {
                 console.error('Failed to persist delivery profile', err);
