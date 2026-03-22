@@ -103,10 +103,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if target_coordinator:
             await target_coordinator.async_refresh_discovery()
 
+    async def handle_start_playback(call: ServiceCall) -> None:
+        """Handle the start_playback service call."""
+        target_coordinator = coordinator
+        if entry_id := call.data.get("entry_id"):
+            target_coordinator = hass.data[DOMAIN].get(entry_id)
+
+        if not target_coordinator:
+            _LOGGER.error("Coordinator not found for entry_id: %s", entry_id)
+            return
+
+        source_id = call.data.get("source_id") or target_coordinator.selected_source_id
+        target_id = call.data.get("target_id") or target_coordinator.selected_target_id
+
+        if not source_id or not target_id:
+            _LOGGER.error("Source or Target not selected and no defaults available")
+            return
+
+        await target_coordinator.start_session(source_id, target_id)
+
+    async def handle_stop_playback(call: ServiceCall) -> None:
+        """Handle the stop_playback service call."""
+        target_coordinator = coordinator
+        if entry_id := call.data.get("entry_id"):
+            target_coordinator = hass.data[DOMAIN].get(entry_id)
+
+        if target_coordinator:
+            await target_coordinator.async_stop_playback()
+
     hass.services.async_register(DOMAIN, "recover_session", handle_recover_session)
     hass.services.async_register(DOMAIN, "refresh_sources", handle_refresh_sources)
     hass.services.async_register(DOMAIN, "refresh_targets", handle_refresh_targets)
     hass.services.async_register(DOMAIN, "refresh_discovery", handle_refresh_discovery)
+    hass.services.async_register(DOMAIN, "start_playback", handle_start_playback)
+    hass.services.async_register(DOMAIN, "stop_playback", handle_stop_playback)
 
     return True
 
@@ -124,5 +154,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, "refresh_sources")
         hass.services.async_remove(DOMAIN, "refresh_targets")
         hass.services.async_remove(DOMAIN, "refresh_discovery")
+        hass.services.async_remove(DOMAIN, "start_playback")
+        hass.services.async_remove(DOMAIN, "stop_playback")
 
     return unload_ok

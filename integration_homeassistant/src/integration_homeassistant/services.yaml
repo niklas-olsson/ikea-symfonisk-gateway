@@ -42,3 +42,33 @@ refresh_targets:
       selector:
         config_entry:
           integration: ikea_symfonisk_gateway
+
+start_playback:
+  description: "Starts playback on the bridge using current or explicit selections."
+  fields:
+    entry_id:
+      description: "The config entry ID of the bridge (optional if only one bridge is configured)."
+      required: false
+      selector:
+        config_entry:
+          integration: ikea_symfonisk_gateway
+    source_id:
+      description: "Optional explicit source ID to use for playback."
+      required: false
+      selector:
+        text:
+    target_id:
+      description: "Optional explicit target ID (speaker) to use for playback."
+      required: false
+      selector:
+        text:
+
+stop_playback:
+  description: "Stops all active playback sessions on the bridge."
+  fields:
+    entry_id:
+      description: "The config entry ID of the bridge (optional if only one bridge is configured)."
+      required: false
+      selector:
+        config_entry:
+          integration: ikea_symfonisk_gateway

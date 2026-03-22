@@ -130,6 +130,22 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
 
         await self.async_refresh()
 
+    async def async_stop_playback(self) -> None:
+        """Stop all active playback sessions."""
+        for session in self.data.sessions:
+            if session.get("state") in ("playing", "starting", "preparing"):
+                await self.stop_session(session["session_id"])
+
+    @property
+    def selected_source_id(self) -> str | None:
+        """Return the currently selected source ID from config."""
+        return self.data.config.get("preferred_source_id")
+
+    @property
+    def selected_target_id(self) -> str | None:
+        """Return the currently selected target ID from config."""
+        return self.data.config.get("preferred_target_id")
+
     async def async_set_config(self, key: str, value: Any) -> None:
         """Set a configuration value on the bridge."""
         session = async_get_clientsession(self.hass)

@@ -35,6 +35,8 @@ async def async_setup_entry(
 class SymfoniskButton(CoordinatorEntity[SymfoniskCoordinator], ButtonEntity):
     """Base class for Symfonisk buttons."""
 
+    _attr_entity_registry_visible_default = False
+
     def __init__(self, coordinator: SymfoniskCoordinator, entry: ConfigEntry) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -75,9 +77,7 @@ class SymfoniskStopButton(SymfoniskButton):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        for session in self.coordinator.data.sessions:
-            if session.get("state") in ("playing", "starting", "preparing"):
-                await self.coordinator.stop_session(session["session_id"])
+        await self.coordinator.async_stop_playback()
 
     @property
     def unique_id(self) -> str:
