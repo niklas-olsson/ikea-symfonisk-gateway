@@ -63,15 +63,19 @@ def session_manager(
     original_start_session = manager.start_session
 
     async def mocked_start_session(session_id: str) -> bool:
-        session = manager.get(session_id)
-        if session:
-            session.pipeline = MagicMock(spec=StreamPipeline)
-            session.pipeline.start = AsyncMock()
-            session.pipeline.stop = AsyncMock()
-            session.pipeline.push_frame = AsyncMock()
-            session.pipeline.jitter_buffer = MagicMock()
-            session.pipeline.jitter_buffer.size_ms = 10.0
-        return await original_start_session(session_id)
+        with patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"), \
+             patch("bridge_core.core.session_manager.negotiate_stream_profile", return_value="mp3_48k_stereo_320"), \
+             patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls:
+
+            mock_pipeline = mock_pipeline_cls.return_value
+            mock_pipeline.start = AsyncMock()
+            mock_pipeline.stop = AsyncMock()
+            mock_pipeline.push_frame = AsyncMock()
+            mock_pipeline.jitter_buffer = MagicMock()
+            mock_pipeline.jitter_buffer.size_ms = 10.0
+            mock_pipeline.get_diagnostics_snapshot.return_value = {}
+
+            return await original_start_session(session_id)
 
     manager.start_session = mocked_start_session  # type: ignore[method-assign]
     return manager

@@ -89,7 +89,7 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
         payload = {
             "source_id": source_id,
             "target_id": target_id,
-            "stream_profile": "mp3_48k_stereo_320",
+            "stream_profile": "auto",
         }
 
         async with session.post(f"{self.base_url}/v1/sessions", json=payload) as resp:

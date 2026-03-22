@@ -69,7 +69,7 @@ async def test_platform_mismatch_fails(session_manager: SessionManager, source_r
     assert session.state in [SessionState.FAILED, SessionState.STOPPED]
     assert session.last_error is not None
     assert session.last_error.code == "source_start_failed"
-    assert "Source not found" in session.last_error.message
+    assert "Source or target not found" in session.last_error.message
 
 
 @pytest.mark.asyncio
@@ -97,10 +97,11 @@ async def test_platform_any_works(session_manager: SessionManager, source_regist
         adapter_instance=linux_adapter,
     )
 
-    # 2. Mock FFmpeg resolution to avoid failure
+    # 2. Mock FFmpeg resolution and negotiation to avoid failure
     import bridge_core.core.session_manager as sm
 
     sm.resolve_ffmpeg_path = MagicMock(return_value="/usr/bin/ffmpeg")  # type: ignore[attr-defined]
+    sm.negotiate_stream_profile = MagicMock(return_value="mp3_48k_stereo_320")  # type: ignore[attr-defined]
 
     # 3. Create and start session
     _ = session_manager.create(source_id="linux_adapter:synthetic:any_source", target_id="target1")

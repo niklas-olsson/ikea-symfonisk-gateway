@@ -34,8 +34,12 @@ from bridge_core.stream.profiles import (
     AUDIO_AUX_CLIENT_QUEUE_BYTES_DEFAULT,
     AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT,
     DELIVERY_PROFILE_DEFAULTS,
+    STREAM_PROFILE_ORDER,
+    STREAM_PROFILES,
     DeliveryProfile,
     DeliveryProfileDefaults,
+    is_profile_supported,
+    negotiate_stream_profile,
 )
 from bridge_core.stream.utils import resolve_ffmpeg_path
 
@@ -73,13 +77,15 @@ class Session:
         self,
         source_id: str,
         target_id: str,
-        stream_profile: str = "mp3_48k_stereo_320",
+        stream_profile: str = "auto",
         auto_heal: bool = True,
     ):
         self.session_id = f"sess_{uuid4().hex[:12]}"
         self.source_id = source_id
         self.target_id = target_id
-        self.stream_profile = stream_profile
+        self.requested_stream_profile = stream_profile
+        self.selected_stream_profile: str | None = None
+        self.effective_stream_profile: str | None = None
         self.auto_heal = auto_heal
         self.state: SessionState = SessionState.CREATED
         self.stream_url: str | None = None
@@ -164,7 +170,10 @@ class Session:
             "session_id": self.session_id,
             "source_id": self.source_id,
             "target_id": self.target_id,
-            "stream_profile": self.stream_profile,
+            "stream_profile": self.effective_stream_profile or self.selected_stream_profile or self.requested_stream_profile,
+            "requested_stream_profile": self.requested_stream_profile,
+            "selected_stream_profile": self.selected_stream_profile,
+            "effective_stream_profile": self.effective_stream_profile,
             "auto_heal": self.auto_heal,
             "state": self.state.value,
             "stream_url": self.stream_url,
@@ -573,7 +582,7 @@ class SessionManager:
 
         return StreamPipeline(
             session.session_id,
-            session.stream_profile,
+            session.effective_stream_profile or session.selected_stream_profile or "mp3_48k_stereo_320",
             target_id=session.target_id,
             ffmpeg_path=ffmpeg_path,
             on_error=lambda e: self._handle_session_error(session.session_id, e),
@@ -608,10 +617,10 @@ class SessionManager:
         else:
             self._stream_publisher.register_pipeline(session.session_id, pipeline)
 
-        if not session.stream_url:
+        if not session.stream_url or swap:
             session.stream_url = self._stream_publisher.get_stream_url(
                 session.session_id,
-                session.stream_profile,
+                session.effective_stream_profile or session.selected_stream_profile or "mp3_48k_stereo_320",
                 subscriber_role="primary_renderer",
                 delivery_path_id=session.target_id,
             )
@@ -824,7 +833,7 @@ class SessionManager:
         self,
         source_id: str | None = None,
         target_id: str | None = None,
-        stream_profile: str = "mp3_48k_stereo_320",
+        stream_profile: str = "auto",
         auto_heal: bool = True,
     ) -> Session:
         """Create a new session, using preferred devices if IDs are not provided."""
@@ -879,146 +888,230 @@ class SessionManager:
         )
 
         try:
-            phase_started_at = time.monotonic()
-            session.delivery_profile = self._resolve_delivery_profile_for_source(session.source_id)
-            session.effective_delivery_profile = session.delivery_profile
-            session.auto_fell_back_to_stable = False
-            session.fallback_reason = None
-            session.recent_primary_detach_times_monotonic.clear()
-            self._clear_primary_detach_state(session)
-            # 1. Prepare and start source
-            try:
-                prepare_res = self._source_registry.prepare_source(session.source_id)
-                if not prepare_res.success:
-                    if prepare_res.code == SOURCE_ADAPTER_PLATFORM_MISMATCH:
-                        session.last_error = create_session_error(
-                            prepare_res.code,
-                            prepare_res.message,
-                        )
-                    else:
-                        session.last_error = create_session_error(
-                            prepare_res.code or SOURCE_START_FAILED,
-                            f"Failed to prepare source: {prepare_res.error or prepare_res.message}",
-                        )
-                    raise RuntimeError(session.last_error.message)
-            except Exception as e:
-                if not session.last_error:
-                    session.last_error = create_session_error(SOURCE_START_FAILED, str(e))
-                raise
-            logger.info("Session %s: source prepare completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
-
-            # 2. Setup pipeline and publisher
-            phase_started_at = time.monotonic()
-            try:
-                if session.pipeline is None:
-                    session.pipeline = self._build_pipeline(session)
-
-                if self._stream_publisher:
-                    self._register_pipeline(session, session.pipeline)
-            except Exception as e:
-                if not session.last_error:
-                    session.last_error = create_session_error(PIPELINE_START_FAILED, str(e))
-                raise
-            logger.info("Session %s: pipeline setup completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
-
-            # 3. Start source with frame sink
-            phase_started_at = time.monotonic()
-            try:
-                frame_sink = SessionFrameSink(
-                    session.pipeline,
-                    on_error=lambda e: self._handle_session_error(session_id, e),
-                )
-                frame_sink.start()
-                self._frame_sinks[session_id] = frame_sink
-
-                source_binding = self._source_registry.resolve_source(session.source_id)
-                source_desc = source_binding.source if source_binding else None
-                adapter_info = source_binding.adapter_info if source_binding else None
-
-                start_res = self._source_registry.start_source(session.source_id, frame_sink)
-                if not start_res.success:
-                    if start_res.code == SOURCE_ADAPTER_PLATFORM_MISMATCH:
-                        session.last_error = create_session_error(
-                            start_res.code,
-                            start_res.message,
-                        )
-                    else:
-                        session.last_error = create_session_error(
-                            start_res.code or SOURCE_START_FAILED, f"Failed to start source: {start_res.message}"
-                        )
-                    await frame_sink.stop()
-                    raise RuntimeError(session.last_error.message)
-
-                # Diagnostic logging
-                adapter_name = adapter_info.adapter.__class__.__name__ if adapter_info and adapter_info.adapter else "Unknown"
-                logger.info(
-                    f"Starting source: source_id={session.source_id} "
-                    f"source_type={source_desc.source_type.value if source_desc else 'unknown'} "
-                    f"platform={source_desc.platform if source_desc else 'unknown'} "
-                    f"adapter={adapter_name} "
-                    f"backend={start_res.backend or 'unknown'}"
-                )
-
-                session.adapter_session_id = start_res.session_id
-                self._event_bus.emit(
-                    EventType.SOURCE_STARTED,
-                    session_id=session_id,
-                    payload={"adapter_session_id": session.adapter_session_id, "backend": start_res.backend},
-                )
-            except Exception as e:
-                if not session.last_error:
-                    session.last_error = create_session_error(SOURCE_START_FAILED, str(e))
-                raise
-            logger.info("Session %s: source start completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
-
-            # 4. Start pipeline
-            phase_started_at = time.monotonic()
-            try:
-                await session.pipeline.start()
-            except Exception as e:
-                session.last_error = create_session_error(PIPELINE_START_FAILED, str(e))
-                raise
-            logger.info("Session %s: pipeline start completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
-
-            # 5. Verify Windows source activity before touching the renderer
-            phase_started_at = time.monotonic()
+            # 0. Negotiate startup stream profile
             source_binding = self._source_registry.resolve_source(session.source_id)
-            source_desc = source_binding.source if source_binding else None
-            verification_result = "active"
-            if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT:
-                verification_result = await self._verify_windows_source_startup(session_id, session)
-                session.startup_viability_ms = (time.monotonic() - phase_started_at) * 1000
-                logger.info(
-                    "Session %s: windows verification gate resolved result=%s in %.1fms",
-                    session_id,
-                    verification_result,
-                    (time.monotonic() - phase_started_at) * 1000,
-                )
-            logger.info(
-                "Session %s: windows source verification completed in %.1fms",
-                session_id,
-                (time.monotonic() - phase_started_at) * 1000,
-            )
+            target_desc = self._target_registry.get_target(session.target_id)
+            if not source_binding or not target_desc:
+                session.last_error = create_session_error(SOURCE_START_FAILED, "Source or target not found")
+                raise RuntimeError(session.last_error.message)
 
-            # 6. Prepare and start renderer
+            source_caps = source_binding.source.capabilities
+            target_caps = target_desc  # TargetDescriptor implements the required properties
+
+            if session.requested_stream_profile == "auto":
+                lkg_key = f"lkg_profile:{session.source_id}:{session.target_id}"
+                lkg_profile = self._get_optional_str_config(lkg_key)
+                session.selected_stream_profile = negotiate_stream_profile(source_caps, target_caps, lkg_profile)
+            else:
+                if not is_profile_supported(session.requested_stream_profile, source_caps, target_caps):
+                    session.last_error = create_session_error(
+                        SOURCE_START_FAILED,
+                        f"Requested profile {session.requested_stream_profile} is not supported by source or target",
+                    )
+                    raise RuntimeError(session.last_error.message)
+                session.selected_stream_profile = session.requested_stream_profile
+
             phase_started_at = time.monotonic()
-            try:
-                await self._start_renderer_playback(session)
-            except Exception as e:
-                if not session.last_error:
-                    session.last_error = create_session_error(RENDERER_PLAYBACK_FAILED, str(e))
-                self._event_bus.emit(
-                    EventType.RENDERER_PLAYBACK_FAILED,
-                    session_id=session_id,
-                    payload={
-                        "error": str(e),
-                        "last_error": session.last_error.model_dump(),
-                        "target_id": session.target_id,
-                    },
-                )
-                raise
+            # Determine profile ladder
+            start_profile = session.selected_stream_profile or "mp3_48k_stereo_320"
+            profile_ladder = [start_profile]
+            if session.requested_stream_profile == "auto":
+                remaining_profiles = [p for p in STREAM_PROFILE_ORDER if p != start_profile]
+                # Filter ladder to only include supported profiles
+                supported_remaining = [p for p in remaining_profiles if is_profile_supported(p, source_caps, target_caps)]
+                # Ensure start_profile index in STREAM_PROFILE_ORDER and only take profiles below it
+                try:
+                    start_idx = STREAM_PROFILE_ORDER.index(start_profile)
+                    supported_remaining = [p for p in supported_remaining if STREAM_PROFILE_ORDER.index(p) > start_idx]
+                except ValueError:
+                    pass
+                profile_ladder.extend(supported_remaining)
 
-            logger.info("Session %s: renderer prepare/play completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
+            for attempt_profile in profile_ladder:
+                logger.info("Session %s: attempting start with profile %s", session_id, attempt_profile)
+                session.selected_stream_profile = attempt_profile
+                session.last_error = None
+
+                try:
+                    phase_started_at = time.monotonic()
+                    session.delivery_profile = self._resolve_delivery_profile_for_source(session.source_id)
+                    session.effective_delivery_profile = session.delivery_profile
+                    session.auto_fell_back_to_stable = False
+                    session.fallback_reason = None
+                    session.recent_primary_detach_times_monotonic.clear()
+                    self._clear_primary_detach_state(session)
+
+                    # 1. Prepare and start source
+                    try:
+                        prepare_res = self._source_registry.prepare_source(session.source_id)
+                        if not prepare_res.success:
+                            if prepare_res.code == SOURCE_ADAPTER_PLATFORM_MISMATCH:
+                                session.last_error = create_session_error(
+                                    prepare_res.code,
+                                    prepare_res.message,
+                                )
+                            else:
+                                session.last_error = create_session_error(
+                                    prepare_res.code or SOURCE_START_FAILED,
+                                    f"Failed to prepare source: {prepare_res.error or prepare_res.message}",
+                                )
+                            raise RuntimeError(session.last_error.message)
+                    except Exception as e:
+                        if not session.last_error:
+                            session.last_error = create_session_error(SOURCE_START_FAILED, str(e))
+                        raise
+                    logger.info("Session %s: source prepare completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
+
+                    # 2. Setup pipeline and publisher
+                    phase_started_at = time.monotonic()
+                    try:
+                        if session.pipeline:
+                            await session.pipeline.stop()
+                            session.pipeline = None
+
+                        session.pipeline = self._build_pipeline(session)
+
+                        if self._stream_publisher:
+                            self._register_pipeline(session, session.pipeline)
+                    except Exception as e:
+                        if not session.last_error:
+                            session.last_error = create_session_error(PIPELINE_START_FAILED, str(e))
+                        raise
+                    logger.info("Session %s: pipeline setup completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
+
+                    # 3. Start source with frame sink
+                    phase_started_at = time.monotonic()
+                    try:
+                        frame_sink = SessionFrameSink(
+                            session.pipeline,
+                            on_error=lambda e: self._handle_session_error(session_id, e),
+                        )
+                        frame_sink.start()
+                        self._frame_sinks[session_id] = frame_sink
+
+                        source_binding = self._source_registry.resolve_source(session.source_id)
+                        source_desc = source_binding.source if source_binding else None
+                        adapter_info = source_binding.adapter_info if source_binding else None
+
+                        start_res = self._source_registry.start_source(session.source_id, frame_sink)
+                        if not start_res.success:
+                            if start_res.code == SOURCE_ADAPTER_PLATFORM_MISMATCH:
+                                session.last_error = create_session_error(
+                                    start_res.code,
+                                    start_res.message,
+                                )
+                            else:
+                                session.last_error = create_session_error(
+                                    start_res.code or SOURCE_START_FAILED, f"Failed to start source: {start_res.message}"
+                                )
+                            await frame_sink.stop()
+                            raise RuntimeError(session.last_error.message)
+
+                        # Diagnostic logging
+                        adapter_name = adapter_info.adapter.__class__.__name__ if adapter_info and adapter_info.adapter else "Unknown"
+                        logger.info(
+                            f"Starting source: source_id={session.source_id} "
+                            f"source_type={source_desc.source_type.value if source_desc else 'unknown'} "
+                            f"platform={source_desc.platform if source_desc else 'unknown'} "
+                            f"adapter={adapter_name} "
+                            f"backend={start_res.backend or 'unknown'}"
+                        )
+
+                        session.adapter_session_id = start_res.session_id
+                        self._event_bus.emit(
+                            EventType.SOURCE_STARTED,
+                            session_id=session_id,
+                            payload={"adapter_session_id": session.adapter_session_id, "backend": start_res.backend},
+                        )
+                    except Exception as e:
+                        if not session.last_error:
+                            session.last_error = create_session_error(SOURCE_START_FAILED, str(e))
+                        raise
+                    logger.info("Session %s: source start completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
+
+                    # 4. Start pipeline
+                    phase_started_at = time.monotonic()
+                    try:
+                        await session.pipeline.start()
+                    except Exception as e:
+                        session.last_error = create_session_error(PIPELINE_START_FAILED, str(e))
+                        raise
+                    logger.info("Session %s: pipeline start completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000)
+
+                    # 5. Verify Windows source activity before touching the renderer
+                    phase_started_at = time.monotonic()
+                    source_binding = self._source_registry.resolve_source(session.source_id)
+                    source_desc = source_binding.source if source_binding else None
+                    verification_result = "active"
+                    if source_desc and source_desc.platform == "windows" and source_desc.source_type == SourceType.SYSTEM_OUTPUT:
+                        verification_result = await self._verify_windows_source_startup(session_id, session)
+                        session.startup_viability_ms = (time.monotonic() - phase_started_at) * 1000
+                        logger.info(
+                            "Session %s: windows verification gate resolved result=%s in %.1fms",
+                            session_id,
+                            verification_result,
+                            (time.monotonic() - phase_started_at) * 1000,
+                        )
+                    logger.info(
+                        "Session %s: windows source verification completed in %.1fms",
+                        session_id,
+                        (time.monotonic() - phase_started_at) * 1000,
+                    )
+
+                    # 6. Prepare and start renderer
+                    phase_started_at = time.monotonic()
+                    try:
+                        await self._start_renderer_playback(session)
+                    except Exception as e:
+                        if not session.last_error:
+                            session.last_error = create_session_error(RENDERER_PLAYBACK_FAILED, str(e))
+                        self._event_bus.emit(
+                            EventType.RENDERER_PLAYBACK_FAILED,
+                            session_id=session_id,
+                            payload={
+                                "error": str(e),
+                                "last_error": session.last_error.model_dump(),
+                                "target_id": session.target_id,
+                            },
+                        )
+                        raise
+
+                    logger.info(
+                        "Session %s: renderer prepare/play completed in %.1fms", session_id, (time.monotonic() - phase_started_at) * 1000
+                    )
+
+                    # Successful start
+                    session.effective_stream_profile = attempt_profile
+
+                    # Persist last known good profile
+                    if self._config_store:
+                        lkg_key = f"lkg_profile:{session.source_id}:{session.target_id}"
+                        self._config_store.set(lkg_key, attempt_profile)
+
+                    break
+
+                except Exception as e:
+                    logger.warning("Session %s: failed to start with profile %s: %s", session_id, attempt_profile, e)
+                    # Cleanup for retry
+                    monitor_task = self._session_monitors.pop(session_id, None)
+                    if monitor_task:
+                        await self._cancel_and_drain(monitor_task)
+                    if session_id in self._frame_sinks:
+                        await self._frame_sinks[session_id].stop()
+                        del self._frame_sinks[session_id]
+                    if session.adapter_session_id:
+                        self._source_registry.stop_source(session.source_id, session.adapter_session_id)
+                        session.adapter_session_id = None
+                    if session.pipeline:
+                        await session.pipeline.stop()
+                        session.pipeline = None
+                    session.stream_url = None
+                    if attempt_profile == profile_ladder[-1]:
+                        # Last attempt failed, propagate error
+                        raise
+            else:
+                # Should not be reachable if ladder has elements and last one raises
+                raise RuntimeError("Failed to start with any viable profile")
 
             session.transition_to(SessionState.PLAYING)
             initial_media_state = "establishing_primary"

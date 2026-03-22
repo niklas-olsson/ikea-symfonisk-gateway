@@ -18,6 +18,10 @@ class TargetResponse(BaseModel):
     display_name: str
     members: list[str]
     coordinator_id: str
+    supported_codecs: list[str] = []
+    supported_sample_rates: list[int] = []
+    supported_channels: list[int] = []
+    max_bitrate_kbps: int | None = None
     is_preferred: bool = False
     is_active: bool = False
     is_available: bool = True
@@ -45,6 +49,10 @@ async def list_targets(request: Request) -> TargetListResponse:
                 display_name=t.display_name,
                 members=t.members,
                 coordinator_id=t.coordinator_id,
+                supported_codecs=getattr(t, "supported_codecs", []),
+                supported_sample_rates=getattr(t, "supported_sample_rates", []),
+                supported_channels=getattr(t, "supported_channels", []),
+                max_bitrate_kbps=getattr(t, "max_bitrate_kbps", None),
                 is_preferred=getattr(t, "is_preferred", False),
                 is_active=getattr(t, "is_active", False),
                 is_available=getattr(t, "is_available", True),
@@ -78,6 +86,10 @@ async def get_target(request: Request, target_id: str) -> TargetResponse:
             display_name=t.display_name,
             members=t.members,
             coordinator_id=t.coordinator_id,
+            supported_codecs=getattr(t, "supported_codecs", []),
+            supported_sample_rates=getattr(t, "supported_sample_rates", []),
+            supported_channels=getattr(t, "supported_channels", []),
+            max_bitrate_kbps=getattr(t, "max_bitrate_kbps", None),
         )
 
     return TargetResponse(
@@ -87,6 +99,10 @@ async def get_target(request: Request, target_id: str) -> TargetResponse:
         display_name=found.display_name,
         members=found.members,
         coordinator_id=found.coordinator_id,
+        supported_codecs=getattr(found, "supported_codecs", []),
+        supported_sample_rates=getattr(found, "supported_sample_rates", []),
+        supported_channels=getattr(found, "supported_channels", []),
+        max_bitrate_kbps=getattr(found, "max_bitrate_kbps", None),
         is_preferred=getattr(found, "is_preferred", False),
         is_active=getattr(found, "is_active", False),
         is_available=getattr(found, "is_available", True),

@@ -33,6 +33,22 @@ class TargetDescriptor(ABC):
     def coordinator_id(self) -> str: ...
 
     @property
+    def supported_codecs(self) -> list[str]:
+        return ["mp3", "aac", "pcm_s16le"]
+
+    @property
+    def supported_sample_rates(self) -> list[int]:
+        return [44100, 48000]
+
+    @property
+    def supported_channels(self) -> list[int]:
+        return [1, 2]
+
+    @property
+    def max_bitrate_kbps(self) -> int | None:
+        return None
+
+    @property
     def is_preferred(self) -> bool:
         return getattr(self, "_is_preferred", False)
 
