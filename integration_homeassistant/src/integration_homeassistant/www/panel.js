@@ -173,7 +173,7 @@ class SymfoniskGatewayPanel extends HTMLElement {
   }
 
   _handleRecover() {
-    this._hass.callService('ikea_symfonisk_gateway', 'recover_session', {});
+    this._hass.callService('ikea_symfonisk_gateway', 'recover_playback', {});
   }
 
   _handleScan() {

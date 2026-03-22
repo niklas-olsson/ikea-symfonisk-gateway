@@ -31,6 +31,11 @@ async def async_setup_entry(
 class SymfoniskSelect(CoordinatorEntity[SymfoniskCoordinator], SelectEntity):
     """Base class for Symfonisk select entities."""
 
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self.coordinator.last_update_success and self.coordinator.data.health.get("status") == "ok"
+
     def __init__(self, coordinator: SymfoniskCoordinator, entry: ConfigEntry) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -45,7 +50,7 @@ class SymfoniskSelect(CoordinatorEntity[SymfoniskCoordinator], SelectEntity):
 class SymfoniskSourceSelect(SymfoniskSelect):
     """Select entity for audio source selection."""
 
-    _attr_name = "Audio Source"
+    _attr_name = "Source"
 
     @property
     def options(self) -> list[str]:
@@ -70,7 +75,7 @@ class SymfoniskSourceSelect(SymfoniskSelect):
 class SymfoniskTargetSelect(SymfoniskSelect):
     """Select entity for playback target selection."""
 
-    _attr_name = "Playback Speaker"
+    _attr_name = "Speaker"
 
     @property
     def options(self) -> list[str]:

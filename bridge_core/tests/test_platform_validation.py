@@ -62,7 +62,7 @@ async def test_platform_mismatch_fails(session_manager: SessionManager, source_r
             adapter_instance=linux_adapter,
         )
 
-    session = session_manager.create(source_id="mismatched_adapter:system:mismatched_source", target_id="target1")
+    session = await session_manager.create(source_id="mismatched_adapter:system:mismatched_source", target_id="target1")
     success = await session_manager.start_session(session.session_id)
 
     assert not success
@@ -103,7 +103,7 @@ async def test_platform_any_works(session_manager: SessionManager, source_regist
         patch("bridge_core.core.session_manager.negotiate_stream_profile", return_value="mp3_48k_stereo_320"),
     ):
         # 3. Create and start session
-        _ = session_manager.create(source_id="linux_adapter:synthetic:any_source", target_id="target1")
+        _ = await session_manager.create(source_id="linux_adapter:synthetic:any_source", target_id="target1")
 
         # We mock more things to let start_session succeed until frame ingestion check
         session_manager._stream_publisher = MagicMock()
