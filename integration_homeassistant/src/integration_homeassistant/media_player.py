@@ -46,6 +46,11 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
         }
 
     @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self.coordinator.last_update_success and self.coordinator.data.health.get("status") == "ok"
+
+    @property
     def state(self) -> MediaPlayerState:
         """Return the state of the player."""
         if not self.coordinator.data.sessions:

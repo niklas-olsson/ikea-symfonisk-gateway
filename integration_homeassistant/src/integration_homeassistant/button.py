@@ -35,6 +35,11 @@ async def async_setup_entry(
 class SymfoniskButton(CoordinatorEntity[SymfoniskCoordinator], ButtonEntity):
     """Base class for Symfonisk buttons."""
 
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self.coordinator.last_update_success and self.coordinator.data.health.get("status") == "ok"
+
     def __init__(self, coordinator: SymfoniskCoordinator, entry: ConfigEntry) -> None:
         """Initialize."""
         super().__init__(coordinator)
