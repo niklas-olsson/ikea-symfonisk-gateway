@@ -108,7 +108,7 @@
             display: flex;
             flex-direction: column;
             gap: var(--spacing-12);
-            padding: var(--spacing-24);
+            padding: var(--spacing-16) var(--spacing-24);
             background-color: var(--bg);
             border-radius: var(--radius);
             border: 1px solid oklch(100% 0 0 / 5%);
@@ -293,6 +293,15 @@
             letter-spacing: 0.1em;
             color: var(--text-muted);
             font-weight: 600;
+        }
+
+        details > summary {
+            transition: color 0.2s ease;
+            cursor: pointer;
+        }
+
+        details > summary:hover {
+            color: var(--text);
         }
 
         .events-log {
@@ -503,7 +512,8 @@
         }
 
         .bt-device-item.connected {
-            border-color: oklch(from var(--success) l c h / 30%);
+            background: oklch(from var(--success) l c h / 5%);
+            border-color: oklch(from var(--success) l c h / 40%);
         }
 
         .bt-device-info {
@@ -549,8 +559,26 @@
 
         .bt-device-actions {
             display: flex;
-            gap: var(--spacing-4);
+            flex-direction: column;
+            gap: var(--spacing-8);
+            align-items: flex-end;
             flex-shrink: 0;
+        }
+
+        .bt-device-actions-primary {
+            display: flex;
+            gap: var(--spacing-8);
+        }
+
+        .bt-device-actions-secondary {
+            display: flex;
+            gap: var(--spacing-4);
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+
+        .bt-device-actions-secondary:hover {
+            opacity: 1;
         }
 
         .bt-device-actions button {
@@ -620,8 +648,8 @@
             </div>
 
             <div class="actions-row">
-                <button id="play-btn">▶ Play</button>
-                <button id="stop-btn" class="secondary" disabled>■ Stop</button>
+                <button id="play-btn">Play</button>
+                <button id="stop-btn" class="secondary" disabled>Stop</button>
             </div>
 
             <div class="status-row">
@@ -897,7 +925,7 @@
                         };
                         const typeLabel = typeLabels[s.source_type] || s.source_type;
 
-                        return `<option value="${s.source_id}">${label} (${typeLabel})</option>`;
+                        return `<option value="${s.source_id}">${label}</option>`;
                     }).join('');
                 }
 
@@ -937,7 +965,7 @@
                         if (t.is_active) label = '● ' + label;
                         if (t.is_preferred) label = '★ ' + label;
                         if (!t.is_available) label = '[OFFLINE] ' + label;
-                        return `<option value="${t.target_id}">${label} (${t.renderer})</option>`;
+                        return `<option value="${t.target_id}">${label}</option>`;
                     }).join('');
                 }
 
@@ -1144,13 +1172,13 @@
             const targetName = getSelectedText(targetSelect);
 
             if (!sourceName || !targetName) {
-                subtextEl.textContent = 'Select a source and speaker to begin';
+                subtextEl.textContent = 'Select source and target';
             } else if (state === 'ACTIVE') {
-                subtextEl.textContent = `Streaming from ${sourceName} to ${targetName}`;
+                subtextEl.textContent = `Playing: ${sourceName} → ${targetName}`;
             } else if (state === 'ERROR') {
-                subtextEl.textContent = `Failed to stream from ${sourceName} to ${targetName}`;
+                subtextEl.textContent = `Failed: ${sourceName} → ${targetName}`;
             } else {
-                subtextEl.textContent = `Ready to stream from ${sourceName} to ${targetName}`;
+                subtextEl.textContent = `Ready: ${sourceName} → ${targetName}`;
             }
         }
 
@@ -1247,7 +1275,19 @@
                 pairBtn.style.display = 'none';
                 document.getElementById('bt-pair-stop-btn').style.display = '';
                 document.getElementById('bt-countdown').style.display = 'flex';
+                // Add a searching indicator if not present
+                if (!document.getElementById('bt-searching-label')) {
+                    const label = document.createElement('span');
+                    label.id = 'bt-searching-label';
+                    label.style.fontSize = '0.75rem';
+                    label.style.color = 'var(--bt-accent)';
+                    label.style.fontWeight = '600';
+                    label.textContent = 'Searching for devices...';
+                    document.getElementById('bt-countdown').prepend(label);
+                }
             } else {
+                const searchingLabel = document.getElementById('bt-searching-label');
+                if (searchingLabel) searchingLabel.remove();
                 panel.classList.remove('bt-pairing-active');
                 pairBtn.style.display = '';
                 pairBtn.disabled = !powered;
@@ -1375,20 +1415,23 @@
                 if (d.trusted) badges += '<span class="bt-badge trusted">Trusted</span>';
                 if (isPreferred) badges += '<span class="bt-badge preferred">★ Preferred</span>';
 
-                let actions = '';
+                let primaryActions = '';
+                let secondaryActions = '';
+
                 if (d.connected) {
-                    actions += `<button class="bt-danger" onclick="btDisconnect('${d.mac}')">Disconnect</button>`;
+                    primaryActions += `<button class="bt-danger" onclick="btDisconnect('${d.mac}')">Disconnect</button>`;
                 } else if (d.paired) {
-                    actions += `<button class="bt-primary" onclick="btConnect('${d.mac}')">Connect</button>`;
+                    primaryActions += `<button class="bt-primary" onclick="btConnect('${d.mac}')">Connect</button>`;
                 }
+
                 if (!d.trusted) {
-                    actions += `<button class="secondary" onclick="btTrust('${d.mac}', '${(d.name || '').replace(/'/g, "\\'")}')">Trust</button>`;
+                    secondaryActions += `<button class="secondary" onclick="btTrust('${d.mac}', '${(d.name || '').replace(/'/g, "\\'")}')" title="Trust Device">Trust</button>`;
                 }
                 if (!isPreferred && d.paired) {
-                    actions += `<button class="secondary" onclick="btSetPreferred('${d.mac}')">★</button>`;
+                    secondaryActions += `<button class="secondary" onclick="btSetPreferred('${d.mac}')" title="Set as Preferred">★</button>`;
                 }
                 if (d.paired) {
-                    actions += `<button class="bt-danger" onclick="btRemove('${d.mac}')">✕</button>`;
+                    secondaryActions += `<button class="bt-danger" onclick="btRemove('${d.mac}')" title="Remove Device">✕</button>`;
                 }
 
                 return `
@@ -1398,7 +1441,10 @@
                             <span class="bt-device-mac">${d.mac}</span>
                             <div class="bt-device-badges">${badges}</div>
                         </div>
-                        <div class="bt-device-actions">${actions}</div>
+                        <div class="bt-device-actions">
+                            <div class="bt-device-actions-primary">${primaryActions}</div>
+                            <div class="bt-device-actions-secondary">${secondaryActions}</div>
+                        </div>
                     </div>
                 `;
             }).join('');
