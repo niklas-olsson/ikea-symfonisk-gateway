@@ -13,6 +13,16 @@ recover_playback:
       selector:
         text:
 
+stop_playback:
+  description: "Stops the current active playback session on the bridge."
+  fields:
+    entry_id:
+      description: "The config entry ID of the bridge (optional if only one bridge is configured)."
+      required: false
+      selector:
+        config_entry:
+          integration: ikea_symfonisk_gateway
+
 refresh_discovery:
   description: "Triggers a full discovery refresh of both audio sources and playback targets on the bridge."
   fields:
