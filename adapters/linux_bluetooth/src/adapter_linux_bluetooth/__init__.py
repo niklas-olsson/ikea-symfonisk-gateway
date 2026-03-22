@@ -619,14 +619,18 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     async def _monitor_status(self) -> None:
         """Periodically check adapter status and emit events on change."""
+        iteration = 0
         try:
             while True:
-                # Only perform periodic list_sources (pactl-based) if the system is not yet configured
-                if not self._is_configured():
+                # Throttle source discovery to every 60 seconds (every second iteration)
+                # and only if the system is not yet configured.
+                if not self._is_configured() and iteration % 2 == 0:
                     # Discover sources periodically to automatically emit BLUETOOTH_SOURCE_AVAILABLE
                     await asyncio.to_thread(self.list_sources)
 
                 status = await self.get_adapter_status()
+
+                iteration += 1
 
                 # Check for readiness errors to emit READY/FAILED events
                 if status["healthy"] and not self._last_status.get("healthy", False):
@@ -644,9 +648,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
                         )
                     self._last_status = status
 
-                # Use a small sleep at end of loop to prevent CPU spinning
-                # when configured (skipping list_sources)
-                await asyncio.sleep(5)
+                # Increase idle sleep to 30 seconds to reduce compute budget
+                await asyncio.sleep(30)
         except asyncio.CancelledError:
             pass
         except Exception as e:

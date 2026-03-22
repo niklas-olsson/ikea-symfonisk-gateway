@@ -62,7 +62,8 @@ class TargetRegistry:
         """Periodically refresh targets from all adapters."""
         while self._active:
             try:
-                await asyncio.sleep(60)  # Refresh every minute
+                # Refresh every 5 minutes to reduce idle compute budget
+                await asyncio.sleep(300)
 
                 # Stop broad polling once a preferred device is configured
                 if self._is_configured():
