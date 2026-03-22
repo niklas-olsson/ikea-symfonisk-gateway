@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -10,11 +11,16 @@ logger = logging.getLogger(__name__)
 
 def get_default_storage_path() -> Path:
     """Return default storage path for trusted devices."""
-    # Use the persistent config directory mounted as a volume
-    data_dir = Path("/app/config")
-    if not data_dir.is_dir():
-        # Fallback for development if /app/config isn't mapped
-        data_dir = Path.home() / ".config" / "ikea-symfonisk-bridge"
+    # 1. Use BRIDGE_CONFIG_DIR if provided
+    config_dir_env = os.environ.get("BRIDGE_CONFIG_DIR")
+    if config_dir_env:
+        data_dir = Path(config_dir_env)
+    # 2. Use the persistent config directory mounted as a volume in Docker
+    elif Path("/app/config").is_dir():
+        data_dir = Path("/app/config")
+    # 3. Fallback for development
+    else:
+        data_dir = Path("config")
 
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "bluetooth_trusted_devices.json"

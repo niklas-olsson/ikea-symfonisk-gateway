@@ -18,7 +18,7 @@ uv sync
 
 # 2. Configure
 cp .env.example .env
-# Edit .env with your settings (BRIDGE_AUTH_TOKEN recommended)
+# Edit .env with your settings (e.g. FFMPEG_PATH)
 
 # 3. Run
 uv run python -m bridge_core
@@ -48,43 +48,57 @@ The gateway starts at `http://localhost:8732` (Web UI & API) and `http://localho
 - **Home Assistant** — For home automation integration (v2024.1+)
 - **Linux with PulseAudio/BlueZ** — For Linux audio/Bluetooth adapters
 
-### Network Requirements
-
-- The gateway and your Sonos/Symfonisk speakers must be on the same local network
-- Sonos devices are discovered via SSDP multicast—ensure your network allows this
-
 ---
 
-## Installation
+## Installation & Deployment
 
-### 1. Clone the Repository
+### Recommended: Local Installation (uv)
+
+The recommended way to run the gateway is natively on your host machine to ensure the best access to audio hardware and Bluetooth.
+
+1.  **Clone the Repository**
+    ```bash
+    git clone https://github.com/your-repo/ikea-symfonisk-gateway.git
+    cd ikea-symfonisk-gateway
+    ```
+
+2.  **Install Dependencies**
+    ```bash
+    uv sync
+    ```
+
+3.  **Configure Environment**
+    ```bash
+    cp .env.example .env
+    ```
+    Edit `.env` to customize your configuration (see [Configuration](#configuration)).
+
+4.  **Run the Gateway**
+    ```bash
+    uv run python -m bridge_core
+    ```
+
+### Alternative: Docker
+
+Docker is supported for Linux hosts. Running on Windows/macOS via Docker will not have access to host audio devices.
 
 ```bash
-git clone https://github.com/your-repo/ikea-symfonisk-gateway.git
-cd ikea-symfonisk-gateway
+# Using Docker Compose (Recommended)
+docker-compose up -d
+
+# Using Docker directly
+docker build -t symfonisk-gateway .
+docker run -d \
+  --name symfonisk-gateway \
+  -p 8732:8732 \
+  -p 8080:8080 \
+  -v ./config:/app/config \
+  symfonisk-gateway
 ```
 
-### 2. Install Dependencies
-
-```bash
-uv sync
-```
-
-This installs all packages from the workspace, including:
-- `bridge_core` — Main FastAPI application
-- `ui_web` — Web interface
-- `renderer_sonos` — Sonos/Symfonisk speaker adapter
-- `adapter-linux-audio` — Linux audio input adapter
-- `adapter-linux-bluetooth` — Linux Bluetooth adapter
-- `integration_homeassistant` — Home Assistant integration
-
-### 3. Configure Environment
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your settings (see [Configuration](#configuration) below).
+#### Docker Persistence & Bluetooth
+- To persist settings, mount a local directory to `/app/config`.
+- Bluetooth requires host networking and BlueZ access (see `docker-compose.yml` for required capabilities and volume mounts).
 
 ---
 
@@ -94,99 +108,12 @@ Environment variables control the gateway behavior:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BRIDGE_HOST` | `localhost` | Host to bind the server |
+| `BRIDGE_HOST` | `0.0.0.0` | Host to bind the server |
 | `BRIDGE_PORT` | `8732` | Port for the Web UI and REST API |
 | `BRIDGE_STREAM_PORT` | `8080` | Port for audio streaming |
+| `BRIDGE_CONFIG_DIR` | `config` | Directory for persistent storage |
 | `FFMPEG_PATH` | `ffmpeg` | Explicit path to FFmpeg executable |
 | `LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-
-### FFmpeg Configuration
-
-The bridge requires FFmpeg to encode audio streams. It resolves the executable path in the following order:
-1.  **Config API**: `PUT /v1/config/ffmpeg_path` with `{"value": "/path/to/ffmpeg"}`
-2.  **Environment Variable**: `FFMPEG_PATH` (e.g., in `.env` file)
-3.  **System PATH**: Default `shutil.which("ffmpeg")` resolution
-
-
----
-
-## Running the Application
-
-### Option A: Local Development
-
-```bash
-# Run with uvicorn
-uv run python -m bridge_core
-
-# Or explicitly
-uv run uvicorn bridge_core.main:app --host 0.0.0.0 --port 8732
-```
-
-### Option B: Docker
-
-```bash
-# Build and run
-docker-compose up -d
-
-# View logs
-docker-compose logs -f bridge
-
-# Stop
-docker-compose down
-```
-
-The Docker image exposes:
-- `8732` — REST API
-- `8080` — Audio stream
-
-#### Persistent Storage
-To persist Bluetooth pairings and 'Trusted/Preferred' settings, you must mount a local directory to `/app/config`:
-```yaml
-volumes:
-  - ./config:/app/config
-```
-
-#### Bluetooth Requirements
-Running the Bluetooth adapter inside Docker requires access to the host's BlueZ stack and specific capabilities:
-```yaml
-cap_add:
-  - NET_ADMIN
-  - SYS_ADMIN
-devices:
-  - /dev/bus/usb:/dev/bus/usb
-volumes:
-  - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
-  - /var/lib/bluetooth:/var/lib/bluetooth
-```
-
-### Option C: Docker (Manual)
-
-```bash
-docker build -t symfonisk-gateway .
-docker run -d \
-  --name symfonisk-gateway \
-  -p 8732:8732 \
-  -p 8080:8080 \
-  -e BRIDGE_HOST=0.0.0.0 \
-  -e BRIDGE_AUTH_TOKEN=your-secret-token \
-  -v ./config:/app/config \
-  symfonisk-gateway
-```
-
-### Verify It's Running
-
-```bash
-# Verify the Web UI is served
-curl -I http://localhost:8732/
-
-# Expected response: HTTP/1.1 200 OK
-```
-
-Check health endpoint:
-
-```bash
-curl http://localhost:8732/health
-```
 
 ---
 
@@ -227,139 +154,6 @@ The gateway connects **audio sources** to **audio targets** via **sessions**:
 
 ---
 
-## Adapters
-
-### Synthetic Adapter (Testing)
-
-Included by default for testing without hardware:
-
-```python
-# Creates a test source that outputs a 440Hz sine wave
-# No configuration needed
-```
-
-### Linux Audio Adapter
-
-For capturing audio from a sound card or USB audio interface:
-
-```bash
-# Install dependencies (if not already)
-sudo apt install libasound2-dev pulseaudio
-
-# Ensure your audio device is detected
-pactl list sources short
-```
-
-
-### Linux Bluetooth Adapter
-
-For streaming audio via Bluetooth (e.g., from a phone or turntable):
-
-```bash
-# Install dependencies
-sudo apt install bluez pulseaudio-module-bluetooth
-
-# Ensure Bluetooth is enabled
-sudo systemctl enable bluetooth
-sudo systemctl start bluetooth
-
-# Pair your device (use bluetoothctl)
-bluetoothctl
-[bluetooth]# power on
-[bluetooth]# scan on
-[bluetooth]# pair XX:XX:XX:XX:XX:XX
-[bluetooth]# connect XX:XX:XX:XX:XX:XX
-[bluetooth]# trust XX:XX:XX:XX:XX:XX
-```
-
-#### Auto-Play & Persistence
-The gateway can automatically start playing audio when a trusted device connects.
-1.  **Trust the device**: In the Web UI, go to the Bluetooth settings and mark the device as **Trusted**.
-2.  **Pre-select the target**: Mark the device as **Preferred** if you want it to automatically start a session to your primary speaker on connection.
-3.  **Persistence**: These settings are saved to `/app/config/bluetooth_trusted_devices.json`. Ensure this path is persistent (see [Docker](#docker) section).
-
-### Windows Audio Adapter
-
-For capturing the default Windows playback mix and relaying it to Sonos/SYMFONISK:
-
-```bash
-uv sync
-uv run python -m bridge_core
-```
-
-- The Windows source exposed by the API is `windows-audio-adapter:system:default`.
-- Its `source_type` is `system_output`.
-- The Windows backend depends on `PyAudioWPatch` and is installed only on Windows.
-- If the backend is missing or cannot probe the default output device, `/v1/sources` still lists the source in degraded form with backend diagnostics in `metadata`.
-- Silent startup is allowed: the session can reach `playing` before Windows audio begins, and playback starts flowing once an application produces sound.
-
-To isolate loopback capture without starting the full bridge:
-
-```bash
-uv run python scripts/verify_windows_loopback.py
-```
-
-The script prints the selected host API, default render device, chosen loopback capture device, callback counts, non-empty buffer counts, sample counts, emitted frame counts, and backend start-viability checks over a 5-second observation window.
-
----
-
-## API Reference
-
-### Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/` | Web UI |
-| `GET` | `/health` | Health check |
-| `GET` | `/v1/sources` | List available sources |
-| `GET` | `/v1/targets` | List available targets |
-| `POST` | `/v1/sessions` | Create a session (source → target) |
-| `GET` | `/v1/sessions` | List known sessions |
-| `POST` | `/v1/sessions/{id}/stop` | End a session |
-| `GET` | `/events` | SSE stream for events |
-
-### Example: Create a Session
-
-```bash
-SOURCE_ID=$(curl -s http://localhost:8732/v1/sources | jq -r '.sources[0].source_id')
-
-curl -X POST http://localhost:8732/v1/sessions \
-  -H "Content-Type: application/json" \
-  -d "{\"source_id\": \"${SOURCE_ID}\", \"target_id\": \"sonos://Kitchen\"}"
-```
-
----
-
-## Home Assistant Integration
-
-The gateway integrates with Home Assistant as a media player.
-
-### Installation (HACS)
-
-1. Install [HACS](https://hacs.xyz/) if not already installed
-2. Add this repository as a custom repository in HACS
-3. Install the "IKEA Symfonisk Gateway" integration
-4. Restart Home Assistant
-
-### Configuration (config.yaml)
-
-```yaml
-ikea_symfonisk_gateway:
-  host: <gateway-ip>
-  port: 8732
-```
-
-Replace `<gateway-ip>` with your gateway's IP address.
-
-### Entities
-
-After setup, you'll see:
-- Media player entities for each Symfonisk speaker
-- Source selection for choosing audio input
-- Play/pause controls
-
----
-
 ## Troubleshooting
 
 ### Speakers Not Discovered
@@ -376,17 +170,6 @@ After setup, you'll see:
 3. Check CPU usage on the gateway machine
 4. Adjust stream buffer size (future feature)
 
-### Docker Container Won't Start
-
-```bash
-# Check logs
-docker-compose logs
-
-# Common issues:
-# - Port already in use: Change BRIDGE_PORT in .env
-# - Permission denied: Check volume mounts
-```
-
 ### Bluetooth Adapter Issues
 
 ```bash
@@ -398,23 +181,6 @@ bluetoothctl paired-devices
 
 # Check audio profile
 bluetoothctl info <device-mac>
-```
-
-### Restart Gateway
-
-```bash
-# Restart the bridge process or container
-# (for Docker: docker-compose restart)
-```
-
-### Debug Logging
-
-```bash
-# Enable debug output
-LOG_LEVEL=DEBUG uv run python -m bridge_core
-
-# View SSE events in real-time
-curl -N http://localhost:8732/events
 ```
 
 ---
@@ -429,32 +195,16 @@ uv run pytest .
 
 ### Code Quality
 
-```bash
-# Format code
-uv run ruff format .
-
-# Lint code
-uv run ruff check .
-
-# Type check
-uv run mypy .
-```
-
-All three must pass before pushing:
-
+All checks must pass before pushing:
 ```bash
 uv run ruff format . && uv run ruff check . && uv run mypy . && uv run pytest .
 ```
 
 ### Pre-commit Hooks
 
-Install git hooks for automatic validation:
-
 ```bash
 ./scripts/install-hooks.sh
 ```
-
-This runs format/lint/type checks before each commit.
 
 ---
 

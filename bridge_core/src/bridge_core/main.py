@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import logging
+import os
 import platform
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -120,12 +121,17 @@ def register_ingress_adapters(source_registry: SourceRegistry, event_bus: EventB
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifespan."""
+    # Resolve configuration directory and ports
+    config_dir = Path(os.environ.get("BRIDGE_CONFIG_DIR", "config"))
+    config_dir.mkdir(parents=True, exist_ok=True)
+    stream_port = int(os.environ.get("BRIDGE_STREAM_PORT", 8080))
+
     # Initialize core components
-    config_store = ConfigStore(db_path="config.db")
+    config_store = ConfigStore(db_path=config_dir / "config.db")
     event_bus = EventBus()
     source_registry = SourceRegistry(event_bus, config_store=config_store)
     target_registry = TargetRegistry(event_bus, config_store=config_store)
-    publisher = StreamPublisher(port=8080)
+    publisher = StreamPublisher(port=stream_port)
     session_manager = SessionManager(
         event_bus,
         source_registry,
@@ -221,4 +227,6 @@ if (UI_DIR).exists():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8732)
+    host = os.environ.get("BRIDGE_HOST", "0.0.0.0")
+    port = int(os.environ.get("BRIDGE_PORT", 8732))
+    uvicorn.run(app, host=host, port=port)

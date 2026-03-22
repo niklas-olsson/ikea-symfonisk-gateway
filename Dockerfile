@@ -31,6 +31,7 @@ EXPOSE 8732 8080
 ENV BRIDGE_HOST=0.0.0.0
 ENV BRIDGE_PORT=8732
 ENV BRIDGE_STREAM_PORT=8080
+ENV BRIDGE_CONFIG_DIR=/app/config
 
 # Run the bridge
 CMD ["uv", "run", "python", "-m", "bridge_core.main"]
