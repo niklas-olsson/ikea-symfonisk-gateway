@@ -49,51 +49,38 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
             "model": "SYMFONISK Gateway",
         }
 
-    def _get_session(self) -> dict[str, Any] | None:
-        """Return the session for the currently selected target."""
-        target_id = self.coordinator.selected_target_id
-        if not target_id:
-            return None
-
-        for session in self.coordinator.data.sessions:
-            if session.get("target_id") == target_id and session.get("state") != "stopped":
-                return session
-
-        return None
-
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
         return self.coordinator.last_update_success and self.coordinator.data.health.get("status") == "ok"
 
     @property
-    def state(self) -> MediaPlayerState:
+    def state(self) -> MediaPlayerState | str:
         """Return the state of the player."""
-        active_session = self._get_session()
+        active_session = self.coordinator.get_active_session()
         if not active_session:
             return MediaPlayerState.IDLE
 
-        pres_state = active_session.get("presentation_state")
+        # Use internal state for tighter semantics
+        state = active_session.get("state")
 
+        if state == "playing":
+            return MediaPlayerState.PLAYING
+        if state in ("starting", "preparing", "healing", "buffering"):
+            return MediaPlayerState.BUFFERING
+        if state == "degraded":
+            return "degraded"
+        if state == "failed":
+            return "failed"
+        if state == "stopping":
+            return MediaPlayerState.IDLE
+
+        # Fallback to presentation_state if available
+        pres_state = active_session.get("presentation_state")
         if pres_state == "playing":
             return MediaPlayerState.PLAYING
         if pres_state == "buffering":
             return MediaPlayerState.BUFFERING
-        if pres_state == "error":
-            return MediaPlayerState.IDLE
-        if pres_state == "idle":
-            return MediaPlayerState.IDLE
-
-        # Fallback to internal state if presentation_state is not available
-        state = active_session.get("state")
-        if state == "playing":
-            return MediaPlayerState.PLAYING
-        if state in ("starting", "preparing", "healing"):
-            return MediaPlayerState.BUFFERING
-        if state == "degraded":
-            return MediaPlayerState.ON
-        if state == "failed":
-            return MediaPlayerState.IDLE
 
         return MediaPlayerState.IDLE
 
@@ -125,31 +112,39 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
         """Title of current playing media."""
         source_name = self.source or "None"
         target_name = self.target_name or "None"
+        active_session = self.coordinator.get_active_session()
+        if not active_session:
+            return f"Ready: {source_name} ➔ {target_name}"
 
-        return f"{source_name} ➔ {target_name}"
+        state = active_session.get("state")
+        if state in ("starting", "preparing", "healing", "buffering"):
+            return f"Starting: {source_name} ➔ {target_name}"
+
+        return f"Playing: {source_name} ➔ {target_name}"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return entity specific state attributes."""
-        session = self._get_session()
+        attrs = {
+            "selected_source": self.source,
+            "selected_speaker": self.target_name,
+        }
+
+        session = self.coordinator.get_active_session()
         if not session:
-            return {}
+            return attrs
 
         media_status = session.get("media_status") or {}
-        return {
-            "session_id": session.get("session_id"),
-            "source_id": session.get("source_id"),
-            "target_id": session.get("target_id"),
-            "stream_profile": session.get("stream_profile"),
-            "effective_stream_profile": session.get("effective_stream_profile"),
-            "bridge_state": session.get("state"),
-            "presentation_state": session.get("presentation_state"),
-            "presentation_detail": session.get("presentation_detail"),
-            "media_state": media_status.get("state"),
-            "media_reason": media_status.get("reason"),
-            "effective_delivery_profile": media_status.get("effective_delivery_profile"),
-            "last_error": session.get("last_error"),
-        }
+        attrs["delivery_profile"] = media_status.get("effective_delivery_profile")
+
+        state = session.get("state")
+        if state == "degraded":
+            attrs["problem"] = session.get("presentation_detail") or media_status.get("reason") or "Playback degraded"
+        elif state == "failed":
+            last_error = session.get("last_error") or {}
+            attrs["problem"] = last_error.get("message") or "Playback failed"
+
+        return attrs
 
     async def async_media_play(self) -> None:
         """Send play command."""
@@ -164,13 +159,9 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
 
     async def async_media_stop(self) -> None:
         """Send stop command."""
-        target_id = self.coordinator.selected_target_id
-        if not target_id:
-            return
-
-        for session in self.coordinator.data.sessions:
-            if session.get("target_id") == target_id and session.get("state") != "stopped":
-                await self.coordinator.stop_session(session["session_id"])
+        session = self.coordinator.get_active_session()
+        if session:
+            await self.coordinator.stop_session(session["session_id"])
 
     async def async_select_source(self, source: str) -> None:
         """Select input source."""
