@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, MANUFACTURER, MODEL
 from .coordinator import SymfoniskCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,9 +44,11 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
         super().__init__(coordinator)
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": f"SYMFONISK Gateway ({coordinator.host})",
-            "manufacturer": "IKEA",
-            "model": "SYMFONISK Gateway",
+            "name": f"SYMFONISK Bridge ({coordinator.host})",
+            "manufacturer": MANUFACTURER,
+            "model": MODEL,
+            "sw_version": coordinator.data.health.get("version"),
+            "configuration_url": coordinator.base_url,
         }
 
     @property
@@ -112,15 +114,7 @@ class SymfoniskMediaPlayer(CoordinatorEntity[SymfoniskCoordinator], MediaPlayerE
         """Title of current playing media."""
         source_name = self.source or "None"
         target_name = self.target_name or "None"
-        active_session = self.coordinator.get_active_session()
-        if not active_session:
-            return f"Ready: {source_name} ➔ {target_name}"
-
-        state = active_session.get("state")
-        if state in ("starting", "preparing", "healing", "buffering"):
-            return f"Starting: {source_name} ➔ {target_name}"
-
-        return f"Playing: {source_name} ➔ {target_name}"
+        return f"{source_name} ➔ {target_name}"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
