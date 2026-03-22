@@ -47,8 +47,9 @@ To maintain a clean architecture and avoid "dependency hell," the following rule
 - Changes are pushed via `EventBus` (`TOPOLOGY_CHANGED`, `RENDERER_DISCOVERY_CHANGED`).
 
 ### 2. Session Lifecycle (Creation -> Playback)
-1. **Creation**: `SessionManager.create()` initializes a `Session` object with a unique ID.
+1. **Creation**: `SessionManager.create()` initializes a `Session` object with a unique ID. Target exclusivity is not enforced at create time by default, allowing multiple sessions to exist for the same target if they have different sources.
 2. **Start**: `SessionManager.start_session()`:
+    - **Target Arbitration**: If another session is already using the same target, it is automatically stopped before the new session begins.
     - Calls `SourceRegistry.prepare_source()` and `start_source()`.
     - Initializes a `StreamPipeline` and `SessionFrameSink`.
     - Starts the FFmpeg process via the pipeline.
