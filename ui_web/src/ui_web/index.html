@@ -1237,48 +1237,34 @@
             }
 
             playBtn.disabled = true;
-            addLog('SYSTEM', 'Requesting session...');
+            addLog('SYSTEM', 'Starting playback...');
 
             try {
                 await persistDeliveryProfile();
-                const createRes = await fetch('/v1/sessions', {
+                const playRes = await fetch('/v1/play', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source_id, target_id, takeover: true })
+                    body: JSON.stringify({
+                        source_id,
+                        target_id,
+                        conflict_policy: 'takeover',
+                        stream_profile: 'auto',
+                        auto_heal: true
+                    })
                 });
 
-                if (!createRes.ok) {
-                    const err = await createRes.json();
-                    if (createRes.status === 409) {
+                if (!playRes.ok) {
+                    const err = await playRes.json();
+                    if (playRes.status === 409) {
                         throw new Error(err.detail?.message || 'Conflicting session already exists');
                     }
-                    throw new Error(err.detail?.message || 'Failed to create session');
+                    throw new Error(err.detail?.message || 'Failed to start playback');
                 }
 
-                const session = await createRes.json();
+                const session = await playRes.json();
                 currentSessionId = session.session_id;
 
-                if (session.resume_available) {
-                    addLog('SYSTEM', `Resuming existing session ${currentSessionId}...`);
-                    const resumeRes = await fetch(`/v1/sessions/${currentSessionId}/resume`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ force_reclaim: true })
-                    });
-
-                    if (!resumeRes.ok) {
-                        const err = await resumeRes.json();
-                        throw new Error(err.detail?.message || 'Failed to resume session');
-                    }
-                } else {
-                    addLog('SYSTEM', `Starting session ${currentSessionId}...`);
-                    const startRes = await fetch(`/v1/sessions/${currentSessionId}/start`, { method: 'POST' });
-
-                    if (!startRes.ok) {
-                        const err = await startRes.json();
-                        throw new Error(err.detail?.message || 'Failed to start session');
-                    }
-                }
+                addLog('SYSTEM', `Playback started (Session: ${currentSessionId})`);
 
                 stopBtn.disabled = false;
                 updateSessionUI('ACTIVE', 'Starting');

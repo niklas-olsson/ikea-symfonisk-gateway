@@ -94,39 +94,23 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
         return self.data.config.get("preferred_target_id")
 
     async def start_session(self, source_id: str | None = None, target_id: str | None = None) -> str:
-        """Start a new session or reuse/takeover an existing one."""
+        """Start a new session or reuse/takeover an existing one using the canonical play endpoint."""
         session = async_get_clientsession(self.hass)
         payload = {
             "source_id": source_id or self.selected_source_id,
             "target_id": target_id or self.selected_target_id,
+            "conflict_policy": "takeover",
             "stream_profile": "auto",
-            "takeover": True,
+            "auto_heal": True,
         }
 
-        async with session.post(f"{self.base_url}/v1/sessions", json=payload) as resp:
+        async with session.post(f"{self.base_url}/v1/play", json=payload) as resp:
             if not resp.ok:
                 text = await resp.text()
-                raise Exception(f"Failed to create session: {text}")
+                raise Exception(f"Failed to start playback: {text}")
 
             data = await resp.json()
             session_id = data["session_id"]
-            resume_available = data.get("resume_available", False)
-
-        if resume_available:
-            # Resume existing session
-            async with session.post(
-                f"{self.base_url}/v1/sessions/{session_id}/resume",
-                json={"force_reclaim": True},
-            ) as resp:
-                if not resp.ok:
-                    text = await resp.text()
-                    raise Exception(f"Failed to resume session: {text}")
-        else:
-            # Start new session
-            async with session.post(f"{self.base_url}/v1/sessions/{session_id}/start") as resp:
-                if not resp.ok:
-                    text = await resp.text()
-                    raise Exception(f"Failed to start session: {text}")
 
         await self.async_request_refresh()
         return session_id
