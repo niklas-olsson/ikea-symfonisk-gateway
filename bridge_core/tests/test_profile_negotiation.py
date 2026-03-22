@@ -1,14 +1,13 @@
 """Tests for stream profile negotiation and fallback."""
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from bridge_core.adapters.base import TargetDescriptor
 from bridge_core.core.event_bus import EventBus
 from bridge_core.core.session_manager import SessionManager
 from bridge_core.core.source_registry import SourceBinding, SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
-from bridge_core.adapters.base import TargetDescriptor
 from bridge_core.stream.pipeline import StreamPipeline
 from ingress_sdk.types import PrepareResult, SourceCapabilities, SourceDescriptor, SourceType, StartResult
 
@@ -79,11 +78,7 @@ def source_registry() -> MagicMock:
     )
 
     # Use a real SourceBinding (dataclass) instead of a mock to avoid weird attribute access issues
-    registry.resolve_source.return_value = SourceBinding(
-        source=source_desc,
-        adapter_info=MagicMock(),
-        local_source_id="src_1"
-    )
+    registry.resolve_source.return_value = SourceBinding(source=source_desc, adapter_info=MagicMock(), local_source_id="src_1")
     return registry
 
 
@@ -125,8 +120,10 @@ async def test_negotiate_highest_viable_profile(session_manager: SessionManager,
     """Test that 'auto' picks the highest profile supported by both."""
     session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
-    with patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls, \
-         patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.start = AsyncMock()
         mock_pipeline.get_diagnostics_snapshot.return_value = {}
@@ -143,8 +140,10 @@ async def test_negotiate_restricted_target(session_manager: SessionManager, targ
     target_registry.get_target.return_value = MockTargetDescriptor("tgt_1", codecs=["mp3"])
     session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
-    with patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls, \
-         patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.start = AsyncMock()
         mock_pipeline.get_diagnostics_snapshot.return_value = {}
@@ -170,9 +169,10 @@ async def test_fallback_ladder_on_failure(session_manager: SessionManager) -> No
     pipeline_aac.start = AsyncMock()
     pipeline_aac.get_diagnostics_snapshot.return_value = {}
 
-    with patch("bridge_core.core.session_manager.StreamPipeline", side_effect=[pipeline_pcm, pipeline_aac]), \
-         patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
-
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline", side_effect=[pipeline_pcm, pipeline_aac]),
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
         success = await session_manager.start_session(session.session_id)
 
     assert success is True
@@ -185,8 +185,10 @@ async def test_last_known_good_reuse(session_manager: SessionManager, config_sto
     config_store.get.return_value = "aac_48k_stereo_256"
     session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
-    with patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls, \
-         patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.start = AsyncMock()
         mock_pipeline.get_diagnostics_snapshot.return_value = {}
@@ -217,8 +219,10 @@ async def test_persistence_on_success(session_manager: SessionManager, config_st
     """Test that successful start persists the profile."""
     session = session_manager.create(source_id="src_1", target_id="tgt_1", stream_profile="auto")
 
-    with patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls, \
-         patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"):
+    with (
+        patch("bridge_core.core.session_manager.StreamPipeline") as mock_pipeline_cls,
+        patch("bridge_core.core.session_manager.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg"),
+    ):
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.start = AsyncMock()
         mock_pipeline.get_diagnostics_snapshot.return_value = {}
