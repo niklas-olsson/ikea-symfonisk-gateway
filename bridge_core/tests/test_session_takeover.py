@@ -8,15 +8,15 @@ from bridge_core.adapters.base import OwnershipResult, OwnershipStatus
 from bridge_core.core.event_bus import EventBus, EventType
 from bridge_core.core.session_manager import (
     STOP_REASON_MANUAL,
+    STOP_REASON_PREFERRED,
     STOP_REASON_RECLAIMED,
     STOP_REASON_SUPERSEDED,
-    STOP_REASON_PREFERRED,
     SessionManager,
     SessionState,
 )
 from bridge_core.core.source_registry import SourceRegistry
 from bridge_core.core.target_registry import TargetRegistry
-from ingress_sdk.types import PrepareResult, SourceDescriptor, SourceType, StartResult, SourceCapabilities
+from ingress_sdk.types import PrepareResult, SourceCapabilities, SourceDescriptor, SourceType, StartResult
 
 
 @pytest.fixture
@@ -79,7 +79,7 @@ async def test_session_preferred_device_takeover(session_manager: SessionManager
         try:
             event = await asyncio.wait_for(queue.get(), timeout=0.1)
             break
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await asyncio.sleep(0.05)
 
     assert event is not None
@@ -109,14 +109,14 @@ async def test_session_manual_takeover(session_manager: SessionManager, event_bu
         try:
             event = await asyncio.wait_for(queue.get(), timeout=0.1)
             break
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await asyncio.sleep(0.05)
 
     assert event is not None
     assert event.session_id == sess1.session_id
     assert event.payload["stop_reason"] == STOP_REASON_MANUAL
     assert sess1.stop_reason == STOP_REASON_MANUAL
-    assert sess1.state == SessionState.STOPPED
+    assert sess1.state == SessionState.STOPPED  # type: ignore[comparison-overlap]
 
     # 4. Verify sess2 is created
     assert sess2.session_id != sess1.session_id
@@ -137,7 +137,7 @@ async def test_session_superseded_default_reason(session_manager: SessionManager
         try:
             event = await asyncio.wait_for(queue.get(), timeout=0.1)
             break
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await asyncio.sleep(0.05)
 
     assert event is not None
@@ -205,7 +205,7 @@ async def test_target_reclaimed_during_monitoring(
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=0.1)
                     break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     await asyncio.sleep(0.05)
 
             assert event is not None

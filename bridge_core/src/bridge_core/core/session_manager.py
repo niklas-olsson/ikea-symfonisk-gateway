@@ -12,7 +12,7 @@ from uuid import uuid4
 from ingress_sdk.protocol import AudioFrame
 from ingress_sdk.types import SourceType
 
-from bridge_core.adapters.base import OwnershipResult, OwnershipStatus
+from bridge_core.adapters.base import OwnershipStatus
 from bridge_core.core.config_store import ConfigStore
 from bridge_core.core.errors import (
     MEDIA_ENGINE_NOT_FOUND,
