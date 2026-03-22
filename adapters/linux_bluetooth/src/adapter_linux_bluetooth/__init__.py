@@ -612,10 +612,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
         """Check if any preferred devices are configured."""
         if not self._config_store:
             return False
-        return bool(
-            self._config_store.get("preferred_source_id") or
-            self._config_store.get("preferred_target_id")
-        )
+        return bool(self._config_store.get("preferred_source_id") or self._config_store.get("preferred_target_id"))
 
     async def _monitor_status(self) -> None:
         """Periodically check adapter status and emit events on change."""
