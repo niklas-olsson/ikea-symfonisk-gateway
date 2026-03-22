@@ -5,6 +5,8 @@ import logging
 import time
 from typing import Any
 
+from shared.normalization import normalize_for_comparison
+
 from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
 from bridge_core.core.event_bus import EventBus, EventType
 
@@ -140,7 +142,12 @@ class TargetRegistry:
 
                 # Check if it was previously unavailable or changed
                 old_target = self._targets.get(tid)
-                if not old_target or not getattr(old_target, "is_available", True) or set(old_target.members) != set(target.members):
+
+                # Use normalized comparison for deep property checks
+                norm_old = normalize_for_comparison(old_target.to_dict()) if old_target and hasattr(old_target, 'to_dict') else None
+                norm_new = normalize_for_comparison(target.to_dict()) if hasattr(target, 'to_dict') else None
+
+                if not old_target or not getattr(old_target, "is_available", True) or norm_old != norm_new:
                     changed = True
             else:
                 # Target missing from discovery

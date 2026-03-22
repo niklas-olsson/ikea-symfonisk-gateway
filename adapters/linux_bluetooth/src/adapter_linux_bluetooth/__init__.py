@@ -23,6 +23,7 @@ from ingress_sdk.types import (
     SourceType,
     StartResult,
 )
+from shared.normalization import normalize_for_comparison
 
 from .store import TrustedDeviceStore
 
@@ -280,7 +281,11 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 for sid in old_sources - new_sources:
                     self._event_bus.emit(EventType.BLUETOOTH_SOURCE_UNAVAILABLE, payload={"source_id": sid})
 
-                if new_sources != old_sources:
+                # Check for semantic change in sources (beyond IDs)
+                norm_old = normalize_for_comparison([s.model_dump() for s in self._sources_cache])
+                norm_new = normalize_for_comparison([s.model_dump() for s in sources])
+
+                if norm_old != norm_new:
                     self._event_bus.emit(EventType.TOPOLOGY_CHANGED, payload={"adapter_id": self.id()})
 
             self._source_id_map = new_source_id_map
@@ -647,7 +652,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     if self._event_bus:
                         self._event_bus.emit(EventType.BLUETOOTH_ADAPTER_FAILED, payload={"errors": status["readiness_errors"]})
 
-                if status != self._last_status:
+                if normalize_for_comparison(status) != normalize_for_comparison(self._last_status):
                     if self._event_bus:
                         self._event_bus.emit(
                             EventType.BLUETOOTH_ADAPTER_STATUS_CHANGED,

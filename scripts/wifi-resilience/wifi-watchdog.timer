@@ -1,0 +1,14 @@
+[Unit]
+Description=Run WiFi Watchdog periodically
+Requires=wifi-watchdog.service
+
+[Timer]
+# Wait 5 minutes after boot before first run
+OnBootSec=5min
+# Run every 5 minutes
+OnUnitActiveSec=5min
+# Keep timer active even if system is suspended
+Persistent=true
+
+[Install]
+WantedBy=timers.target
