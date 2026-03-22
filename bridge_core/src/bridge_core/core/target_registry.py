@@ -186,11 +186,10 @@ class TargetRegistry:
 
         active_target_ids = set()
         if self._session_manager:
-            from bridge_core.core.session_manager import SessionState
             active_target_ids = {
                 sess.target_id
                 for sess in self._session_manager.list()
-                if sess.state in (SessionState.PLAYING, SessionState.STARTING, SessionState.PREPARING, SessionState.HEALING, SessionState.DEGRADED, SessionState.QUIESCED)
+                if sess.state.value in ("playing", "starting", "preparing", "healing", "degraded", "quiesced")
             }
 
         results = []

@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class OwnershipStatus(str, Enum):
@@ -15,7 +15,7 @@ class OwnershipStatus(str, Enum):
 class OwnershipResult:
     """Result of an ownership inspection."""
 
-    def __init__(self, status: OwnershipStatus, evidence: Optional[str] = None):
+    def __init__(self, status: OwnershipStatus, evidence: str | None = None):
         self.status = status
         self.evidence = evidence
 

@@ -9,7 +9,6 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
-from fastapi import HTTPException
 from ingress_sdk.protocol import AudioFrame
 from ingress_sdk.types import SourceType
 
@@ -18,7 +17,6 @@ from bridge_core.core.config_store import ConfigStore
 from bridge_core.core.errors import (
     MEDIA_ENGINE_NOT_FOUND,
     PIPELINE_START_FAILED,
-    QUIESCED_SESSION_CONFLICT,
     RENDERER_PLAYBACK_FAILED,
     SOURCE_ADAPTER_PLATFORM_MISMATCH,
     SOURCE_START_FAILED,
