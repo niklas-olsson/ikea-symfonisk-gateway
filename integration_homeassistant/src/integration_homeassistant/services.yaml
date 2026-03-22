@@ -1,0 +1,34 @@
+recover_session:
+  description: "Attempts to recover a failed or degraded session on the bridge."
+  fields:
+    entry_id:
+      description: "The config entry ID of the bridge (optional if only one bridge is configured)."
+      required: false
+      selector:
+        config_entry:
+          integration: ikea_symfonisk_gateway
+    session_id:
+      description: "The ID of the session to recover (optional, will attempt to recover the active session if not provided)."
+      required: false
+      selector:
+        text:
+
+refresh_sources:
+  description: "Triggers a manual refresh of available audio sources on the bridge."
+  fields:
+    entry_id:
+      description: "The config entry ID of the bridge (optional if only one bridge is configured)."
+      required: false
+      selector:
+        config_entry:
+          integration: ikea_symfonisk_gateway
+
+refresh_targets:
+  description: "Triggers a manual refresh of available playback targets (speakers) on the bridge."
+  fields:
+    entry_id:
+      description: "The config entry ID of the bridge (optional if only one bridge is configured)."
+      required: false
+      selector:
+        config_entry:
+          integration: ikea_symfonisk_gateway

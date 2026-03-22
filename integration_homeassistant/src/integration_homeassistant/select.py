@@ -55,12 +55,11 @@ class SymfoniskSourceSelect(SymfoniskSelect):
     @property
     def current_option(self) -> str | None:
         """Return the current option."""
-        return self.coordinator.selected_source_id
+        return self.coordinator.data.config.get("preferred_source_id")
 
     async def async_select_option(self, option: str) -> None:
         """Update the current option."""
-        self.coordinator.selected_source_id = option
-        self.async_write_ha_state()
+        await self.coordinator.async_set_config("preferred_source_id", option)
 
     @property
     def unique_id(self) -> str:
@@ -81,12 +80,11 @@ class SymfoniskTargetSelect(SymfoniskSelect):
     @property
     def current_option(self) -> str | None:
         """Return the current option."""
-        return self.coordinator.selected_target_id
+        return self.coordinator.data.config.get("preferred_target_id")
 
     async def async_select_option(self, option: str) -> None:
         """Update the current option."""
-        self.coordinator.selected_target_id = option
-        self.async_write_ha_state()
+        await self.coordinator.async_set_config("preferred_target_id", option)
 
     @property
     def unique_id(self) -> str:

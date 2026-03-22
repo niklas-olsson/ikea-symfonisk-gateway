@@ -23,6 +23,7 @@ class SymfoniskData:
         self.sources: list[dict[str, Any]] = []
         self.targets: list[dict[str, Any]] = []
         self.sessions: list[dict[str, Any]] = []
+        self.config: dict[str, Any] = {}
 
 
 class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
@@ -33,8 +34,6 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
         self.host = host
         self.port = port
         self.base_url = f"http://{host}:{port}"
-        self.selected_source_id: str | None = None
-        self.selected_target_id: str | None = None
 
         super().__init__(
             hass,
@@ -73,6 +72,12 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
                     sessions_data = await resp.json()
                     data.sessions = sessions_data.get("sessions", [])
 
+                # Fetch config
+                async with session.get(f"{self.base_url}/v1/config") as resp:
+                    resp.raise_for_status()
+                    config_data = await resp.json()
+                    data.config = config_data.get("config", {})
+
                 return data
 
         except (aiohttp.ClientError, TimeoutError) as err:
@@ -110,5 +115,46 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
             if not resp.ok:
                 text = await resp.text()
                 raise Exception(f"Failed to stop session: {text}")
+
+        await self.async_refresh()
+
+    async def async_set_config(self, key: str, value: Any) -> None:
+        """Set a configuration value on the bridge."""
+        session = async_get_clientsession(self.hass)
+        payload = {"value": value}
+        async with session.put(f"{self.base_url}/v1/config/{key}", json=payload) as resp:
+            if not resp.ok:
+                text = await resp.text()
+                raise Exception(f"Failed to set config {key}: {text}")
+
+        await self.async_refresh()
+
+    async def async_recover_session(self, session_id: str) -> None:
+        """Trigger session recovery on the bridge."""
+        session = async_get_clientsession(self.hass)
+        async with session.post(f"{self.base_url}/v1/sessions/{session_id}/recover") as resp:
+            if not resp.ok:
+                text = await resp.text()
+                raise Exception(f"Failed to recover session: {text}")
+
+        await self.async_refresh()
+
+    async def async_refresh_sources(self) -> None:
+        """Trigger source refresh on the bridge."""
+        session = async_get_clientsession(self.hass)
+        async with session.post(f"{self.base_url}/v1/sources/refresh") as resp:
+            if not resp.ok:
+                text = await resp.text()
+                raise Exception(f"Failed to refresh sources: {text}")
+
+        await self.async_refresh()
+
+    async def async_refresh_targets(self) -> None:
+        """Trigger target refresh on the bridge."""
+        session = async_get_clientsession(self.hass)
+        async with session.post(f"{self.base_url}/v1/targets/refresh") as resp:
+            if not resp.ok:
+                text = await resp.text()
+                raise Exception(f"Failed to refresh targets: {text}")
 
         await self.async_refresh()
