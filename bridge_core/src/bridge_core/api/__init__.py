@@ -3,6 +3,7 @@
 from bridge_core.api.adapters import router as adapters_router
 from bridge_core.api.bluetooth import router as bluetooth_router
 from bridge_core.api.config import router as config_router
+from bridge_core.api.discovery import router as discovery_router
 from bridge_core.api.events import router as events_router
 from bridge_core.api.health import router as health_router
 from bridge_core.api.sessions import router as sessions_router
@@ -18,4 +19,5 @@ __all__ = [
     "adapters_router",
     "bluetooth_router",
     "config_router",
+    "discovery_router",
 ]
