@@ -19,7 +19,7 @@ class SymfoniskGatewayPanel extends HTMLElement {
     if (!this._hass || !this._config) return;
 
     // Find our entities
-    const mediaPlayerId = Object.keys(this._hass.states).find(id => id.startsWith('media_player.bridge_session'));
+    const mediaPlayerId = Object.keys(this._hass.states).find(id => id.startsWith('media_player.') && this._hass.states[id].attributes.friendly_name === 'SYMFONISK Bridge') || Object.keys(this._hass.states).find(id => id.startsWith('media_player.bridge_session'));
     const sessionStateId = Object.keys(this._hass.states).find(id => id.endsWith('session_state'));
     const profileId = Object.keys(this._hass.states).find(id => id.endsWith('delivery_profile'));
     const failureReasonId = Object.keys(this._hass.states).find(id => id.endsWith('failure_reason'));
@@ -84,7 +84,7 @@ class SymfoniskGatewayPanel extends HTMLElement {
             <span id="session-status" class="status-tag status-idle">Idle</span>
           </div>
           <div id="session-info">
-             <p id="session-text">No active session</p>
+             <p id="session-text">No active playback</p>
              <div id="session-details" class="details"></div>
           </div>
           <div class="actions">
@@ -135,10 +135,10 @@ class SymfoniskGatewayPanel extends HTMLElement {
         const streamProfile = attr.effective_stream_profile || '';
 
         if (presState === 'playing') {
-            sessionText.textContent = `Streaming to speakers`;
+            sessionText.textContent = mediaPlayer.attributes.media_title || `Streaming to speakers`;
             sessionDetails.textContent = `Profile: ${streamProfile}`;
         } else if (presState === 'idle' && detail.includes('detached')) {
-            sessionText.textContent = `Session Detached (Idle)`;
+            sessionText.textContent = `Playback Detached (Idle)`;
             sessionDetails.textContent = `Detail: ${detail}`;
         } else if (presState === 'error') {
             sessionText.textContent = `Playback Failed`;
@@ -161,11 +161,15 @@ class SymfoniskGatewayPanel extends HTMLElement {
   }
 
   _handlePlay() {
-    this._hass.callService('ikea_symfonisk_gateway', 'start_session', {});
+    if (this._state.mediaPlayer) {
+        this._hass.callService('media_player', 'media_play', { entity_id: this._state.mediaPlayer.entity_id });
+    }
   }
 
   _handleStop() {
-    this._hass.callService('ikea_symfonisk_gateway', 'stop_all_sessions', {});
+    if (this._state.mediaPlayer) {
+        this._hass.callService('media_player', 'media_stop', { entity_id: this._state.mediaPlayer.entity_id });
+    }
   }
 
   _handleRecover() {
