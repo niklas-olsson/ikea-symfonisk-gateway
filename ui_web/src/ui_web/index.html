@@ -1230,6 +1230,7 @@
         async function createAndStartSession() {
             const source_id = sourceSelect.value;
             const target_id = targetSelect.value;
+            const targetName = getSelectedText(targetSelect);
 
             if (!source_id || !target_id) {
                 addLog('SYSTEM', 'Select a source and target first');
@@ -1237,58 +1238,48 @@
             }
 
             playBtn.disabled = true;
-            addLog('SYSTEM', 'Requesting session...');
 
             try {
                 await persistDeliveryProfile();
-                const createRes = await fetch('/v1/sessions', {
+
+                // Check if target is already active to show "Taking over" message
+                const targetsRes = await fetch('/v1/targets');
+                const { targets } = await targetsRes.json();
+                const target = targets.find(t => t.target_id === target_id);
+                if (target && target.is_active) {
+                    addLog('SYSTEM', `Taking over ${targetName}...`);
+                } else {
+                    addLog('SYSTEM', 'Starting playback...');
+                }
+
+                const res = await fetch('/v1/play', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source_id, target_id, takeover: true })
+                    body: JSON.stringify({
+                        source_id,
+                        target_id,
+                        conflict_policy: 'takeover',
+                        auto_heal: true
+                    })
                 });
 
-                if (!createRes.ok) {
-                    const err = await createRes.json();
-                    if (createRes.status === 409) {
-                        throw new Error(err.detail?.message || 'Conflicting session already exists');
-                    }
-                    throw new Error(err.detail?.message || 'Failed to create session');
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail?.message || 'Failed to start playback');
                 }
 
-                const session = await createRes.json();
+                const session = await res.json();
                 currentSessionId = session.session_id;
 
-                if (session.resume_available) {
-                    addLog('SYSTEM', `Resuming existing session ${currentSessionId}...`);
-                    const resumeRes = await fetch(`/v1/sessions/${currentSessionId}/resume`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ force_reclaim: true })
-                    });
-
-                    if (!resumeRes.ok) {
-                        const err = await resumeRes.json();
-                        throw new Error(err.detail?.message || 'Failed to resume session');
-                    }
-                } else {
-                    addLog('SYSTEM', `Starting session ${currentSessionId}...`);
-                    const startRes = await fetch(`/v1/sessions/${currentSessionId}/start`, { method: 'POST' });
-
-                    if (!startRes.ok) {
-                        const err = await startRes.json();
-                        throw new Error(err.detail?.message || 'Failed to start session');
-                    }
-                }
-
+                addLog('SYSTEM', `Session ${currentSessionId} initialized`);
                 stopBtn.disabled = false;
                 updateSessionUI('ACTIVE', 'Starting');
             } catch (err) {
-                console.error('Session failed', err);
+                console.error('Playback failed', err);
                 addLog('ERROR', err.message);
                 playBtn.disabled = false;
 
-                // Try to extract action if available from previous fetch failure
-                let action = err.message || 'Failed to start session. Check your connections and try again.';
+                let action = err.message || 'Failed to start playback. Check your connections and try again.';
                 updateSessionUI('ERROR', 'Failed', action);
             }
         }
