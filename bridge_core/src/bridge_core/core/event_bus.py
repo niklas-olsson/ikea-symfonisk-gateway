@@ -104,7 +104,8 @@ EventHandler = Callable[[BridgeEvent], Awaitable[None]]
 class EventBus:
     """Publish-subscribe event bus for the bridge."""
 
-    def __init__(self) -> None:
+    def __init__(self, metrics: Any | None = None) -> None:
+        self._metrics = metrics
         self._handlers: dict[EventType | None, list[EventHandler]] = {}
         self._queues: dict[asyncio.Queue[BridgeEvent], EventType | None] = {}
 
@@ -178,6 +179,8 @@ class EventBus:
 
     async def publish(self, event: BridgeEvent) -> None:
         """Publish an event to all subscribers."""
+        if self._metrics:
+            self._metrics.increment("event_emitted_count")
         await self._deliver_to_queues_async(event)
         loop = asyncio.get_running_loop()
         self._dispatch_handler_tasks(event, loop)

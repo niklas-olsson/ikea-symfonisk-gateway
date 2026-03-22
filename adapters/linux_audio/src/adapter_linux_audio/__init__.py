@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from bridge_core.core.event_bus import EventBus
@@ -31,8 +31,9 @@ logger = logging.getLogger(__name__)
 class LinuxAudioAdapter(IngressAdapter):
     """Adapter for capturing system audio on Linux."""
 
-    def __init__(self, event_bus: EventBus | None = None) -> None:
+    def __init__(self, event_bus: EventBus | None = None, metrics: Any | None = None) -> None:
         self._event_bus = event_bus
+        self._metrics = metrics
         self._session_id: str | None = None
         self._running = False
         self._process: asyncio.subprocess.Process | None = None
@@ -66,6 +67,8 @@ class LinuxAudioAdapter(IngressAdapter):
     async def _hotplug_loop(self) -> None:
         """Listens for PulseAudio events using pactl subscribe."""
         try:
+            if self._metrics:
+                self._metrics.increment("subprocess_execution_count")
             process = await asyncio.create_subprocess_exec(
                 "pactl",
                 "subscribe",
@@ -122,13 +125,20 @@ class LinuxAudioAdapter(IngressAdapter):
         import time
         now = time.time()
         if now - self._sources_time < 5:
+            if self._metrics:
+                self._metrics.increment("source_list_cache_hit_count")
             return self._sources_cache
+
+        if self._metrics:
+            self._metrics.increment("source_list_cache_miss_count")
 
         sources = []
         import subprocess
 
         # 1. Try to discover PulseAudio sources
         try:
+            if self._metrics:
+                self._metrics.increment("subprocess_execution_count")
             result = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
@@ -165,6 +175,8 @@ class LinuxAudioAdapter(IngressAdapter):
 
         # 2. Try to discover ALSA sources
         try:
+            if self._metrics:
+                self._metrics.increment("subprocess_execution_count")
             result = subprocess.run(["arecord", "-l"], capture_output=True, text=True, check=True)
             for line in result.stdout.split("\n"):
                 if line.startswith("card "):
@@ -327,6 +339,8 @@ class LinuxAudioAdapter(IngressAdapter):
             return
 
         try:
+            if self._metrics:
+                self._metrics.increment("subprocess_execution_count")
             self._process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,

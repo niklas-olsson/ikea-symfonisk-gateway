@@ -72,8 +72,9 @@ logger = logging.getLogger(__name__)
 class LinuxBluetoothAdapter(IngressAdapter):
     """Adapter for capturing Bluetooth audio on Linux."""
 
-    def __init__(self, event_bus: EventBus | None = None) -> None:
+    def __init__(self, event_bus: EventBus | None = None, metrics: Any | None = None) -> None:
         self._event_bus = event_bus
+        self._metrics = metrics
         self._session_id: str | None = None
         self._running = False
         self._process: asyncio.subprocess.Process | None = None
@@ -171,7 +172,12 @@ class LinuxBluetoothAdapter(IngressAdapter):
         import time
         now = time.time()
         if now - self._sources_time < 5:
+            if self._metrics:
+                self._metrics.increment("source_list_cache_hit_count")
             return self._sources_cache
+
+        if self._metrics:
+            self._metrics.increment("source_list_cache_miss_count")
 
         sources: list[SourceDescriptor] = []
         if not shutil.which("pactl"):
@@ -182,6 +188,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
         try:
             backend_type = "PulseAudio"
             default_source = "auto_null.monitor"
+            if self._metrics:
+                self._metrics.increment("subprocess_execution_count")
             info_res = subprocess.run(["pactl", "info"], capture_output=True, text=True)
             for line in info_res.stdout.split("\n"):
                 if "PipeWire" in line:
@@ -192,6 +200,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
             macs_found = set()
 
             # 1. Check for explicit pulse sources
+            if self._metrics:
+                self._metrics.increment("subprocess_execution_count")
             result = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
@@ -207,6 +217,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
             # 2. Check for explicit pulse cards (PipeWire Loopback fallback)
             if backend_type == "PipeWire":
+                if self._metrics:
+                    self._metrics.increment("subprocess_execution_count")
                 res = subprocess.run(["pactl", "list", "short", "cards"], capture_output=True, text=True)
                 for line in res.stdout.strip().split("\n"):
                     if not line:
@@ -335,6 +347,8 @@ class LinuxBluetoothAdapter(IngressAdapter):
         cmd = ["parec", f"--device={source_id}", "--format=s16le", "--rate=48000", "--channels=2"]
 
         try:
+            if self._metrics:
+                self._metrics.increment("subprocess_execution_count")
             self._process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,

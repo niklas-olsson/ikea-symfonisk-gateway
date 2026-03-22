@@ -164,6 +164,7 @@ class StreamPipeline:
         target_id: str | None = None,
         ffmpeg_path: str = "ffmpeg",
         on_error: Any | None = None,
+        metrics: Any | None = None,
         keepalive_enabled: bool | None = None,
         keepalive_idle_threshold_ms: int | None = None,
         source_outage_grace_ms: int | None = None,
@@ -192,6 +193,7 @@ class StreamPipeline:
         self.target_id = target_id
         self.ffmpeg_path = ffmpeg_path
         self.on_error = on_error
+        self._metrics = metrics
         self.profile = STREAM_PROFILES[profile_id]
         self._delivery_profile = delivery_profile
         defaults = DELIVERY_PROFILE_DEFAULTS[delivery_profile]
@@ -363,6 +365,8 @@ class StreamPipeline:
         logger.info(f"Starting FFmpeg for session {self.session_id}: {' '.join(cmd)}")
 
         try:
+            if self._metrics:
+                self._metrics.increment("subprocess_execution_count")
             self._process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdin=asyncio.subprocess.PIPE,

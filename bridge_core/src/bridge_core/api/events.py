@@ -17,6 +17,7 @@ async def event_generator(request: Request) -> AsyncGenerator[dict[str, str], No
     event_bus: EventBus = request.app.state.event_bus
     queue = event_bus.subscribe()
 
+    metrics = getattr(request.app.state, "metrics", None)
     try:
         while True:
             # Check if client disconnected
@@ -26,6 +27,8 @@ async def event_generator(request: Request) -> AsyncGenerator[dict[str, str], No
             try:
                 # Wait for an event from the bus
                 event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                if metrics:
+                    metrics.increment("sse_event_count")
                 yield {
                     "id": event.event_id,
                     "event": event.type,
