@@ -8,7 +8,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTime
+from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -56,6 +56,7 @@ class SymfoniskStatusSensor(SymfoniskSensor):
 
     _attr_name = "Status"
     _attr_unique_id = "status"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:
@@ -75,6 +76,8 @@ class SymfoniskUptimeSensor(SymfoniskSensor):
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> float | None:
@@ -91,6 +94,7 @@ class SymfoniskSessionStateSensor(SymfoniskSensor):
     """Sensor for active session state."""
 
     _attr_name = "Session State"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:
@@ -110,6 +114,7 @@ class SymfoniskNegotiatedProfileSensor(SymfoniskSensor):
     """Sensor for negotiated stream profile."""
 
     _attr_name = "Negotiated Stream Profile"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:
@@ -129,6 +134,7 @@ class SymfoniskFailureReasonSensor(SymfoniskSensor):
     """Sensor for session failure reason/action."""
 
     _attr_name = "Failure Reason"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:
@@ -152,6 +158,7 @@ class SymfoniskDeliveryProfileSensor(SymfoniskSensor):
     """Sensor for active delivery profile."""
 
     _attr_name = "Effective Delivery Profile"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -46,6 +47,7 @@ class SymfoniskSourceSelect(SymfoniskSelect):
     """Select entity for audio source selection."""
 
     _attr_name = "Selected Source"
+    _attr_entity_category = EntityCategory.CONFIG
 
     @property
     def options(self) -> list[str]:
@@ -71,6 +73,7 @@ class SymfoniskTargetSelect(SymfoniskSelect):
     """Select entity for playback target selection."""
 
     _attr_name = "Selected Target"
+    _attr_entity_category = EntityCategory.CONFIG
 
     @property
     def options(self) -> list[str]:
