@@ -7,7 +7,7 @@ import logging
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from shared.metrics import MetricsRegistry
@@ -35,11 +35,11 @@ class SubprocessRunner:
 
     def __init__(self, metrics: MetricsRegistry | None = None) -> None:
         self._metrics = metrics
-        self._cache: Dict[Tuple[str, ...], CacheEntry] = {}
+        self._cache: dict[tuple[str, ...], CacheEntry] = {}
 
     def run(
         self,
-        args: List[str],
+        args: list[str],
         ttl: float = 0,
         timeout: float | None = None,
         retries: int = 0,
@@ -111,7 +111,7 @@ class SubprocessRunner:
 
     async def run_async(
         self,
-        args: List[str],
+        args: list[str],
         ttl: float = 0,
         timeout: float | None = None,
         retries: int = 0,
@@ -159,7 +159,7 @@ class SubprocessRunner:
 
                 try:
                     stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     process.kill()
                     await process.wait()
                     raise TimeoutError(f"Async command timed out after {timeout}s: {' '.join(args)}")
@@ -196,14 +196,16 @@ class SubprocessRunner:
                     raise
 
                 wait_time = backoff_base ** (attempt - 1)
-                logger.warning(f"Async command failed (attempt {attempt}/{retries + 1}): {' '.join(args)}: {e}. Retrying in {wait_time}s...")
+                logger.warning(
+                    f"Async command failed (attempt {attempt}/{retries + 1}): {' '.join(args)}: {e}. Retrying in {wait_time}s..."
+                )
                 await asyncio.sleep(wait_time)
             finally:
                 duration = time.time() - start_time
                 if duration > 1.0:
                     logger.warning(f"Slow async subprocess: {' '.join(args)} took {duration:.2f}s")
 
-    def invalidate(self, args: List[str] | None = None) -> None:
+    def invalidate(self, args: list[str] | None = None) -> None:
         """Invalidate cache for a specific command or all commands."""
         if args is None:
             self._cache.clear()
@@ -214,7 +216,7 @@ class SubprocessRunner:
                 del self._cache[key]
                 logger.debug(f"Subprocess cache invalidated for: {' '.join(args)}")
 
-    def invalidate_by_prefix(self, prefix: List[str]) -> None:
+    def invalidate_by_prefix(self, prefix: list[str]) -> None:
         """Invalidate all cache entries starting with the given prefix."""
         prefix_tuple = tuple(prefix)
         keys_to_remove = [k for k in self._cache.keys() if k[: len(prefix_tuple)] == prefix_tuple]

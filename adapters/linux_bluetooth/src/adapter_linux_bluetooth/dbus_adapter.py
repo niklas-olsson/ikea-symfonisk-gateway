@@ -7,7 +7,6 @@ from typing import Any, cast
 
 from dbus_fast import BusType, Variant
 from dbus_fast.aio import MessageBus
-
 from shared.subprocess import SubprocessRunner
 
 logger = logging.getLogger(__name__)

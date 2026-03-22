@@ -245,15 +245,16 @@ class SourceRegistry:
         active_source_ids = set()
         if self._session_manager:
             active_source_ids = {
-                sess.source_id for sess in self._session_manager.list()
+                sess.source_id
+                for sess in self._session_manager.list()
                 if sess.state.value in ("playing", "starting", "preparing", "healing", "degraded")
             }
 
         results = []
         for s in self._sources.values():
             copy = s.model_copy()
-            copy.is_preferred = (s.source_id == preferred_id)
-            copy.is_active = (s.source_id in active_source_ids)
+            copy.is_preferred = s.source_id == preferred_id
+            copy.is_active = s.source_id in active_source_ids
             copy.is_available = True
             results.append(copy)
 

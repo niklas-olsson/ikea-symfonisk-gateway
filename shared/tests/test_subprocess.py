@@ -2,14 +2,14 @@
 
 import subprocess
 import time
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-import asyncio
-from shared.subprocess import SubprocessRunner
 from shared.metrics import MetricsRegistry
+from shared.subprocess import SubprocessRunner
 
 
-def test_subprocess_runner_caching():
+def test_subprocess_runner_caching() -> None:
     metrics = MetricsRegistry()
     runner = SubprocessRunner(metrics=metrics)
     args = ["echo", "hello"]
@@ -31,7 +31,7 @@ def test_subprocess_runner_caching():
         assert metrics.get_snapshot().get("subprocess_cache_hit_count") == 1
 
 
-def test_subprocess_runner_ttl_expiration():
+def test_subprocess_runner_ttl_expiration() -> None:
     runner = SubprocessRunner()
     args = ["echo", "hello"]
 
@@ -50,7 +50,7 @@ def test_subprocess_runner_ttl_expiration():
         assert mock_run.call_count == 2
 
 
-def test_subprocess_runner_invalidation():
+def test_subprocess_runner_invalidation() -> None:
     runner = SubprocessRunner()
     args = ["echo", "hello"]
 
@@ -66,7 +66,7 @@ def test_subprocess_runner_invalidation():
         assert mock_run.call_count == 2
 
 
-def test_subprocess_runner_invalidate_prefix():
+def test_subprocess_runner_invalidate_prefix() -> None:
     runner = SubprocessRunner()
 
     with patch("subprocess.run") as mock_run:
@@ -90,7 +90,7 @@ def test_subprocess_runner_invalidate_prefix():
         assert mock_run.call_count == 5  # Still 5, ls not invalidated
 
 
-def test_subprocess_runner_retries():
+def test_subprocess_runner_retries() -> None:
     runner = SubprocessRunner()
     args = ["fail"]
 
@@ -99,7 +99,7 @@ def test_subprocess_runner_retries():
         mock_run.side_effect = [
             subprocess.SubprocessError("fail 1"),
             subprocess.SubprocessError("fail 2"),
-            MagicMock(stdout="success", stderr="", returncode=0)
+            MagicMock(stdout="success", stderr="", returncode=0),
         ]
 
         # Should succeed on 3rd attempt
@@ -108,7 +108,7 @@ def test_subprocess_runner_retries():
         assert mock_run.call_count == 3
 
 
-def test_subprocess_runner_retries_failure():
+def test_subprocess_runner_retries_failure() -> None:
     runner = SubprocessRunner()
     args = ["fail"]
 
@@ -122,7 +122,7 @@ def test_subprocess_runner_retries_failure():
 
 
 @pytest.mark.asyncio
-async def test_subprocess_runner_async_caching():
+async def test_subprocess_runner_async_caching() -> None:
     metrics = MetricsRegistry()
     runner = SubprocessRunner(metrics=metrics)
     args = ["echo", "hello"]
@@ -147,7 +147,7 @@ async def test_subprocess_runner_async_caching():
 
 
 @pytest.mark.asyncio
-async def test_subprocess_runner_async_retries():
+async def test_subprocess_runner_async_retries() -> None:
     runner = SubprocessRunner()
     args = ["fail"]
 
@@ -157,10 +157,7 @@ async def test_subprocess_runner_async_retries():
         mock_process.returncode = 0
 
         # Fail once then succeed
-        mock_exec.side_effect = [
-            Exception("fail 1"),
-            mock_process
-        ]
+        mock_exec.side_effect = [Exception("fail 1"), mock_process]
 
         res = await runner.run_async(args, retries=1, backoff_base=0.1)
         assert res.stdout == "success"

@@ -199,8 +199,12 @@ class StreamPipeline:
         defaults = DELIVERY_PROFILE_DEFAULTS[delivery_profile]
 
         self._keepalive_enabled = keepalive_enabled if keepalive_enabled is not None else defaults.keepalive_enabled
-        self._idle_threshold_ms = keepalive_idle_threshold_ms if keepalive_idle_threshold_ms is not None else defaults.keepalive_idle_threshold_ms
-        self._source_outage_grace_ms = source_outage_grace_ms if source_outage_grace_ms is not None else AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT
+        self._idle_threshold_ms = (
+            keepalive_idle_threshold_ms if keepalive_idle_threshold_ms is not None else defaults.keepalive_idle_threshold_ms
+        )
+        self._source_outage_grace_ms = (
+            source_outage_grace_ms if source_outage_grace_ms is not None else AUDIO_SOURCE_OUTAGE_GRACE_MS_DEFAULT
+        )
         self._live_jitter_target_ms = live_jitter_target_ms if live_jitter_target_ms is not None else defaults.live_jitter_target_ms
         self._transport_heartbeat_window_ms = (
             transport_heartbeat_window_ms if transport_heartbeat_window_ms is not None else defaults.transport_heartbeat_window_ms

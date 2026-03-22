@@ -46,6 +46,7 @@ class NullWindowsBackend:
 
         # Add prescriptive action to metadata based on the code
         from bridge_core.core.errors import ERROR_DETAILS
+
         if self._probe_result.code in ERROR_DETAILS:
             metadata["error_action"] = ERROR_DETAILS[self._probe_result.code]["action"]
 

@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from bridge_core.core.event_bus import EventBus
 
-from shared.subprocess import SubprocessRunner
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
@@ -26,6 +25,7 @@ from ingress_sdk.types import (
     SourceType,
     StartResult,
 )
+from shared.subprocess import SubprocessRunner
 
 logger = logging.getLogger(__name__)
 

@@ -25,22 +25,22 @@ def test_list_sources(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Mock subprocess.run to simulate pactl output
     import subprocess
+    from typing import Any
+
     class MockResult:
-        def __init__(self, stdout="", stderr="", returncode=0, args=None):
+        def __init__(self, stdout: str = "", stderr: str = "", returncode: int = 0, args: list[str] | None = None) -> None:
             self.stdout = stdout
             self.stderr = stderr
             self.returncode = returncode
             self.args = args
 
-    def mock_run(args, **kwargs):
+    def mock_run(args: list[str], **kwargs: Any) -> MockResult:
         if args and isinstance(args, list) and "pactl" in args:
             return MockResult(
                 stdout="1\talsa_output.pci-0000_00_1f.3.analog-stereo.monitor\tmodule-alsa-card.c\ts16le 2ch 48000Hz\n2\talsa_input.pci-0000_00_1f.3.analog-stereo\tmodule-alsa-card.c\ts16le 2ch 48000Hz",
-                args=args
+                args=args,
             )
         raise FileNotFoundError()
-
-    import subprocess
 
     monkeypatch.setattr(subprocess, "run", mock_run)
 
