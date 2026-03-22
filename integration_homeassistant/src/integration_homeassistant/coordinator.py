@@ -147,6 +147,12 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
 
         await self.async_request_refresh()
 
+    async def async_stop_playback(self) -> None:
+        """Stop all active playback sessions."""
+        for session in self.data.sessions:
+            if session.get("state") in ("playing", "starting", "preparing"):
+                await self.stop_session(session["session_id"])
+
     async def async_set_config(self, key: str, value: Any) -> None:
         """Set a configuration value on the bridge."""
         session = async_get_clientsession(self.hass)

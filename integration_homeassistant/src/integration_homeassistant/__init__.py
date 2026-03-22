@@ -99,22 +99,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if target_coordinator := get_target_coordinator(call):
             await target_coordinator.async_refresh_discovery()
 
+    async def handle_start_playback(call: ServiceCall) -> None:
+        """Handle the start_playback service call."""
+        target_coordinator = get_target_coordinator(call)
+
+        if not target_coordinator:
+            _LOGGER.error("No coordinator found for start_playback")
+            return
+
+        source_id = call.data.get("source_id") or target_coordinator.selected_source_id
+        target_id = call.data.get("target_id") or target_coordinator.selected_target_id
+
+        if not source_id or not target_id:
+            _LOGGER.error("Source or Target not selected and no defaults available")
+            return
+
+        await target_coordinator.start_session(source_id, target_id)
+
     async def handle_stop_playback(call: ServiceCall) -> None:
         """Handle the stop_playback service call."""
         target_coordinator = get_target_coordinator(call)
-        if not target_coordinator:
-            _LOGGER.error("No coordinator found for stop_playback")
-            return
 
-        for session in target_coordinator.data.sessions:
-            if session.get("state") in ("playing", "starting", "preparing", "healing"):
-                await target_coordinator.stop_session(session["session_id"])
+        if target_coordinator:
+            await target_coordinator.async_stop_playback()
+        else:
+            _LOGGER.error("No coordinator found for stop_playback")
 
     if not hass.services.has_service(DOMAIN, "recover_playback"):
         hass.services.async_register(DOMAIN, "recover_playback", handle_recover_playback)
         hass.services.async_register(DOMAIN, "refresh_sources", handle_refresh_sources)
         hass.services.async_register(DOMAIN, "refresh_targets", handle_refresh_targets)
         hass.services.async_register(DOMAIN, "refresh_discovery", handle_refresh_discovery)
+        hass.services.async_register(DOMAIN, "start_playback", handle_start_playback)
         hass.services.async_register(DOMAIN, "stop_playback", handle_stop_playback)
         # Compatibility aliases for older dashboards and panels.
         hass.services.async_register(DOMAIN, "recover_session", handle_recover_playback)
@@ -137,6 +153,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, "refresh_sources")
         hass.services.async_remove(DOMAIN, "refresh_targets")
         hass.services.async_remove(DOMAIN, "refresh_discovery")
+        hass.services.async_remove(DOMAIN, "start_playback")
         hass.services.async_remove(DOMAIN, "stop_playback")
         hass.services.async_remove(DOMAIN, "stop_all_sessions")
 
