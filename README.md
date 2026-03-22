@@ -24,7 +24,7 @@ cp .env.example .env
 uv run python -m bridge_core
 ```
 
-The gateway starts at `http://localhost:8732` (API) and `http://localhost:8080` (audio stream).
+The gateway starts at `http://localhost:8732` (Web UI & API) and `http://localhost:8080` (Audio Stream).
 
 ---
 
@@ -94,11 +94,9 @@ Environment variables control the gateway behavior:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BRIDGE_HOST` | `localhost` | Host to bind the API server |
-| `BRIDGE_PORT` | `8732` | Port for the REST API |
-| `BRIDGE_API_PORT` | `8732` | Port for API endpoints |
+| `BRIDGE_HOST` | `localhost` | Host to bind the server |
+| `BRIDGE_PORT` | `8732` | Port for the Web UI and REST API |
 | `BRIDGE_STREAM_PORT` | `8080` | Port for audio streaming |
-| `BRIDGE_AUTH_TOKEN` | _(empty)_ | Bearer token for API authentication. **Set this for production!** |
 | `FFMPEG_PATH` | `ffmpeg` | Explicit path to FFmpeg executable |
 | `LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
@@ -109,13 +107,6 @@ The bridge requires FFmpeg to encode audio streams. It resolves the executable p
 2.  **Environment Variable**: `FFMPEG_PATH` (e.g., in `.env` file)
 3.  **System PATH**: Default `shutil.which("ffmpeg")` resolution
 
-### Production Security
-
-Always set `BRIDGE_AUTH_TOKEN` when exposing the gateway:
-
-```bash
-BRIDGE_AUTH_TOKEN=$(openssl rand -hex 32)
-```
 
 ---
 
@@ -185,16 +176,16 @@ docker run -d \
 ### Verify It's Running
 
 ```bash
-curl http://localhost:8732/
+# Verify the Web UI is served
+curl -I http://localhost:8732/
 
-# Expected response:
-# {"service":"ikea-symfonisk-gateway","version":"0.1.0","status":"running"}
+# Expected response: HTTP/1.1 200 OK
 ```
 
 Check health endpoint:
 
 ```bash
-curl http://localhost:8732/api/health
+curl http://localhost:8732/health
 ```
 
 ---
@@ -259,12 +250,6 @@ sudo apt install libasound2-dev pulseaudio
 pactl list sources short
 ```
 
-Configure in your `.env`:
-
-```bash
-ADAPTER_LINUX_AUDIO_SOURCE=<pulse-source-name>
-# Example: ADAPTER_LINUX_AUDIO_SOURCE=alsa_input.usb-Audio-USB_Audio-Interface-00.analog-stereo
-```
 
 ### Linux Bluetooth Adapter
 
@@ -324,14 +309,14 @@ The script prints the selected host API, default render device, chosen loopback 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/` | Service info |
+| `GET` | `/` | Web UI |
 | `GET` | `/health` | Health check |
 | `GET` | `/v1/sources` | List available sources |
 | `GET` | `/v1/targets` | List available targets |
 | `POST` | `/v1/sessions` | Create a session (source → target) |
-| `GET` | `/v1/sessions` | List active sessions |
+| `GET` | `/v1/sessions` | List known sessions |
 | `POST` | `/v1/sessions/{id}/stop` | End a session |
-| `GET` | `/v1/events` | SSE stream for events |
+| `GET` | `/events` | SSE stream for events |
 
 ### Example: Create a Session
 
@@ -341,14 +326,6 @@ SOURCE_ID=$(curl -s http://localhost:8732/v1/sources | jq -r '.sources[0].source
 curl -X POST http://localhost:8732/v1/sessions \
   -H "Content-Type: application/json" \
   -d "{\"source_id\": \"${SOURCE_ID}\", \"target_id\": \"sonos://Kitchen\"}"
-```
-
-### Authentication
-
-When `BRIDGE_AUTH_TOKEN` is set, include it in requests:
-
-```bash
-curl -H "Authorization: Bearer <TOKEN>" http://localhost:8732/v1/sources
 ```
 
 ---
@@ -370,10 +347,9 @@ The gateway integrates with Home Assistant as a media player.
 ikea_symfonisk_gateway:
   host: <gateway-ip>
   port: 8732
-  token: <BRIDGE_AUTH_TOKEN>
 ```
 
-Replace `<gateway-ip>` with your gateway's IP address and `<BRIDGE_AUTH_TOKEN>` with your auth token.
+Replace `<gateway-ip>` with your gateway's IP address.
 
 ### Entities
 
@@ -424,13 +400,10 @@ bluetoothctl paired-devices
 bluetoothctl info <device-mac>
 ```
 
-### Reset Everything
+### Restart Gateway
 
 ```bash
-# Stop all sessions
-curl -X DELETE http://localhost:8732/api/sessions
-
-# Restart gateway
+# Restart the bridge process or container
 # (for Docker: docker-compose restart)
 ```
 
@@ -441,7 +414,7 @@ curl -X DELETE http://localhost:8732/api/sessions
 LOG_LEVEL=DEBUG uv run python -m bridge_core
 
 # View SSE events in real-time
-curl -N http://localhost:8732/api/events
+curl -N http://localhost:8732/events
 ```
 
 ---
