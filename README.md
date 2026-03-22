@@ -12,7 +12,7 @@ Linux can capture local system audio and accept Bluetooth audio from supported d
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/your-repo/ikea-symfonisk-gateway.git
+git clone https://github.com/baloise/ikea-symfonisk-gateway.git
 cd ikea-symfonisk-gateway
 uv sync
 
@@ -58,7 +58,7 @@ The recommended way to run the gateway is natively on your host machine to ensur
 
 1.  **Clone the Repository**
     ```bash
-    git clone https://github.com/your-repo/ikea-symfonisk-gateway.git
+    git clone https://github.com/baloise/ikea-symfonisk-gateway.git
     cd ikea-symfonisk-gateway
     ```
 
