@@ -3,12 +3,12 @@
 import asyncio
 import logging
 from collections.abc import Sequence
-from shared.normalization import normalize_for_comparison
 from typing import Any
 
 import soco  # type: ignore[import-untyped]
 from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
 from bridge_core.core.event_bus import EventBus, EventType, Severity
+from shared.normalization import normalize_for_comparison
 
 logger = logging.getLogger(__name__)
 

@@ -13,7 +13,7 @@ def normalize_for_comparison(data: Any) -> Any:
     - Ensures consistent types (tuples to lists)
     """
     # Volatile keys to ignore in comparisons
-    VOLATILE_KEYS = {
+    volatile_keys = {
         "timestamp",
         "rssi",
         "RSSI",
@@ -32,7 +32,7 @@ def normalize_for_comparison(data: Any) -> Any:
         return {
             k: normalize_for_comparison(v)
             for k, v in data.items()
-            if k not in VOLATILE_KEYS
+            if k not in volatile_keys
         }
 
     if isinstance(data, (list, tuple)):
@@ -44,10 +44,10 @@ def normalize_for_comparison(data: Any) -> Any:
             # First, try to sort based on a common stable key if it's a list of dicts
             if all(isinstance(i, dict) for i in normalized_list):
                 # Common ID keys in the project
-                ID_KEYS = ["source_id", "target_id", "mac", "Address", "uid", "adapter_id", "id", "path"]
+                id_keys = ["source_id", "target_id", "mac", "Address", "uid", "adapter_id", "id", "path"]
 
                 def get_sort_key(d: dict[str, Any]) -> str:
-                    for key in ID_KEYS:
+                    for key in id_keys:
                         if key in d:
                             return str(d[key])
                     # Fallback to json string representation if no ID key found

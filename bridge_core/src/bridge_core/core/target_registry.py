@@ -5,9 +5,10 @@ import logging
 import time
 from typing import Any
 
+from shared.normalization import normalize_for_comparison
+
 from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
 from bridge_core.core.event_bus import EventBus, EventType
-from shared.normalization import normalize_for_comparison
 
 logger = logging.getLogger(__name__)
 

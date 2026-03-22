@@ -16,10 +16,10 @@ from ingress_sdk.types import (
     SourceType,
     StartResult,
 )
+from shared.normalization import normalize_for_comparison
 
 from bridge_core.core.errors import SOURCE_ADAPTER_PLATFORM_MISMATCH
 from bridge_core.core.event_bus import BridgeEvent, EventBus, EventType
-from shared.normalization import normalize_for_comparison
 
 logger = logging.getLogger(__name__)
 

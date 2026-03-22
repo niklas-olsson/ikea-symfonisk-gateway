@@ -12,7 +12,6 @@ import subprocess
 from typing import Any, Protocol, cast
 
 from bridge_core.core.event_bus import EventBus, EventType
-from shared.normalization import normalize_for_comparison
 from ingress_sdk.base import FrameSink, IngressAdapter
 from ingress_sdk.types import (
     AdapterCapabilities,
@@ -24,6 +23,7 @@ from ingress_sdk.types import (
     SourceType,
     StartResult,
 )
+from shared.normalization import normalize_for_comparison
 
 from .store import TrustedDeviceStore
 
