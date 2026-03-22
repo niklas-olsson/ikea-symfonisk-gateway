@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from bridge_core.adapters.base import TargetDescriptor
+from bridge_core.adapters.base import OwnershipResult, OwnershipStatus, TargetDescriptor
 from bridge_core.core.event_bus import EventBus
 from bridge_core.core.session_manager import SessionManager
 from bridge_core.core.source_registry import SourceBinding, SourceRegistry
@@ -42,6 +42,9 @@ class MockTargetDescriptor(TargetDescriptor):
     @property
     def coordinator_id(self) -> str:
         return self._tid
+
+    async def inspect_ownership(self, target_id: str) -> OwnershipResult:
+        return OwnershipResult(OwnershipStatus.OWNED)
 
     @property
     def supported_codecs(self) -> list[str]:
@@ -91,6 +94,10 @@ def target_registry() -> MagicMock:
     registry.prepare_target = AsyncMock(return_value={"success": True})
     registry.play_stream = AsyncMock(return_value={"success": True})
     registry.stop_target = AsyncMock(return_value={"success": True})
+    registry.get_adapter_for_target.return_value = MagicMock()
+    registry.get_adapter_for_target.return_value.inspect_ownership = AsyncMock(
+        return_value=OwnershipResult(OwnershipStatus.OWNED)
+    )
     return registry
 
 

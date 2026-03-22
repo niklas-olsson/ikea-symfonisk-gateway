@@ -1237,7 +1237,7 @@
             }
 
             playBtn.disabled = true;
-            addLog('SYSTEM', 'Creating session...');
+            addLog('SYSTEM', 'Requesting session...');
 
             try {
                 await persistDeliveryProfile();
@@ -1249,18 +1249,35 @@
 
                 if (!createRes.ok) {
                     const err = await createRes.json();
+                    if (createRes.status === 409) {
+                        throw new Error(err.detail?.message || 'Conflicting session already exists');
+                    }
                     throw new Error(err.detail?.message || 'Failed to create session');
                 }
 
-                const { session_id } = await createRes.json();
-                currentSessionId = session_id;
+                const session = await createRes.json();
+                currentSessionId = session.session_id;
 
-                addLog('SYSTEM', `Starting session ${session_id}...`);
-                const startRes = await fetch(`/v1/sessions/${session_id}/start`, { method: 'POST' });
+                if (session.resume_available) {
+                    addLog('SYSTEM', `Resuming existing session ${currentSessionId}...`);
+                    const resumeRes = await fetch(`/v1/sessions/${currentSessionId}/resume`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ force_reclaim: true })
+                    });
 
-                if (!startRes.ok) {
-                    const err = await startRes.json();
-                    throw new Error(err.detail?.message || 'Failed to start session');
+                    if (!resumeRes.ok) {
+                        const err = await resumeRes.json();
+                        throw new Error(err.detail?.message || 'Failed to resume session');
+                    }
+                } else {
+                    addLog('SYSTEM', `Starting session ${currentSessionId}...`);
+                    const startRes = await fetch(`/v1/sessions/${currentSessionId}/start`, { method: 'POST' });
+
+                    if (!startRes.ok) {
+                        const err = await startRes.json();
+                        throw new Error(err.detail?.message || 'Failed to start session');
+                    }
                 }
 
                 stopBtn.disabled = false;
@@ -1271,7 +1288,7 @@
                 playBtn.disabled = false;
 
                 // Try to extract action if available from previous fetch failure
-                let action = 'Failed to start session. Check your connections and try again.';
+                let action = err.message || 'Failed to start session. Check your connections and try again.';
                 updateSessionUI('ERROR', 'Failed', action);
             }
         }
@@ -1334,7 +1351,7 @@
             return text.replace(/^●\s*/, '').replace(/^★\s*/, '').replace(/^\[OFFLINE\]\s*/, '').split(' (')[0];
         }
 
-        function updateSessionUI(state, label, errorAction = null, profile = null) {
+        function updateSessionUI(state, label, errorAction = null, profile = null, presentationDetail = null) {
             sessionState.textContent = label;
             sessionState.className = `status-tag status-${state.toLowerCase()}`;
 
@@ -1371,6 +1388,8 @@
                 subtextEl.textContent = text;
             } else if (state === 'ERROR') {
                 subtextEl.textContent = `Failed: ${sourceName} → ${targetName}`;
+            } else if (state === 'IDLE' && (presentationDetail === 'detached_recoverable' || presentationDetail === 'detached_waiting_for_user')) {
+                subtextEl.textContent = `Idle: ${sourceName} ➔ ${targetName} (Detached)`;
             } else {
                 subtextEl.textContent = `Ready: ${sourceName} → ${targetName}`;
             }
@@ -1735,7 +1754,7 @@
             // Session + topology events
             const sessionEventTypes = [
                 'session.created', 'session.starting', 'session.started',
-                'session.stopped', 'session.failed', 'topology.changed',
+                'session.stopped', 'session.failed', 'session.media.changed', 'topology.changed',
                 'publisher.active', 'source.started', 'renderer.discovery.changed'
             ];
 
@@ -1762,6 +1781,14 @@
                             updateSessionUI('ERROR', 'Failed', errorAction);
                             playBtn.disabled = false;
                             stopBtn.disabled = true;
+                        }
+                        if (type === 'session.media.changed' || type === 'session.created') {
+                            if (data.state === 'quiesced') {
+                                updateSessionUI('IDLE', 'Idle', null, null, data.presentation_detail);
+                                playBtn.disabled = false;
+                                stopBtn.disabled = false;
+                                currentSessionId = data.session_id;
+                            }
                         }
                     }
 
@@ -1902,16 +1929,18 @@
             try {
                 const res = await fetch('/v1/sessions');
                 const { sessions } = await res.json();
-                const active = sessions.find(s => ['playing', 'starting', 'preparing'].includes(s.state) || s.state === 'failed');
+                const active = sessions.find(s => ['playing', 'starting', 'preparing', 'quiesced'].includes(s.state) || s.state === 'failed');
                 if (active) {
                     currentSessionId = active.session_id;
                     const errorAction = active.last_error?.action || null;
-                    const stateType = active.state === 'failed' ? 'ERROR' : 'ACTIVE';
-                    updateSessionUI(stateType, active.state.charAt(0).toUpperCase() + active.state.slice(1), errorAction, active.effective_stream_profile);
+                    const stateType = active.state === 'failed' ? 'ERROR' : (active.state === 'quiesced' ? 'IDLE' : 'ACTIVE');
+                    const label = active.state === 'quiesced' ? 'Idle' : active.state.charAt(0).toUpperCase() + active.state.slice(1);
 
-                    if (active.state === 'failed') {
+                    updateSessionUI(stateType, label, errorAction, active.effective_stream_profile, active.presentation_detail);
+
+                    if (active.state === 'failed' || active.state === 'quiesced') {
                         playBtn.disabled = false;
-                        stopBtn.disabled = true;
+                        stopBtn.disabled = active.state === 'failed';
                     } else {
                         playBtn.disabled = true;
                         stopBtn.disabled = false;

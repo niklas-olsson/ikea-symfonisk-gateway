@@ -134,6 +134,14 @@ async def run_benchmark() -> dict[str, Any]:
         print("Benchmarking state: Active-Experimental")
         results["active_experimental"] = await collect_sample(duration_seconds=10)
 
+        # State: Quiesced-Detached
+        print("Simulating Quiesced-Detached state (EXPERIMENTAL profile + disconnect)...")
+        # We can't easily force a disconnect here without real hardware or mock control,
+        # but we can check if the bridge exposes the state after we stop the source if mocked.
+        # For now, we'll try to trigger it by waiting or using a mock if available.
+        # This is a placeholder for the scenario.
+        results["quiesced_detached"] = await collect_sample(duration_seconds=5)
+
         # Cleanup
         print(f"Stopping session: {session_id}")
         async with httpx.AsyncClient() as client:

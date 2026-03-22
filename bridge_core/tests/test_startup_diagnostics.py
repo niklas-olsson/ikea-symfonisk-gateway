@@ -31,10 +31,16 @@ def mock_source_registry() -> MagicMock:
 
 @pytest.fixture
 def mock_target_registry() -> MagicMock:
+    from bridge_core.adapters.base import OwnershipResult, OwnershipStatus
+
     registry = MagicMock()
     registry.prepare_target = AsyncMock(return_value={"success": True})
     registry.play_stream = AsyncMock(return_value={"success": True})
     registry.stop_target = AsyncMock(return_value={"success": True})
+    registry.get_adapter_for_target.return_value = MagicMock()
+    registry.get_adapter_for_target.return_value.inspect_ownership = AsyncMock(
+        return_value=OwnershipResult(OwnershipStatus.OWNED)
+    )
     return registry
 
 

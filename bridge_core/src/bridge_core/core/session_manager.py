@@ -9,18 +9,22 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from fastapi import HTTPException
 from ingress_sdk.protocol import AudioFrame
 from ingress_sdk.types import SourceType
 
+from bridge_core.adapters.base import OwnershipStatus
 from bridge_core.core.config_store import ConfigStore
 from bridge_core.core.errors import (
     MEDIA_ENGINE_NOT_FOUND,
     PIPELINE_START_FAILED,
+    QUIESCED_SESSION_CONFLICT,
     RENDERER_PLAYBACK_FAILED,
     SOURCE_ADAPTER_PLATFORM_MISMATCH,
     SOURCE_START_FAILED,
     WINDOWS_LOOPBACK_CAPTURE_STALLED,
     WINDOWS_OUTPUT_DEVICE_SILENT,
+    SessionConflictError,
     SessionError,
     create_session_error,
 )
@@ -64,6 +68,7 @@ class SessionState(str, Enum):
     PLAYING = "playing"
     HEALING = "healing"
     DEGRADED = "degraded"
+    QUIESCED = "quiesced"
     STOPPING = "stopping"
     STOPPED = "stopped"
     FAILED = "failed"
@@ -96,6 +101,8 @@ class Session:
         self.last_error: SessionError | None = None
         self.media_state: str = "playing_degraded"
         self.media_reason: str | None = None
+        self.presentation_state: str = "idle"
+        self.presentation_detail: str | None = None
         self.media_heal_attempts = 0
         self.media_heal_in_progress = False
         self.media_epoch = 0
@@ -132,9 +139,22 @@ class Session:
             SessionState.PREPARING: [SessionState.READY, SessionState.STOPPING, SessionState.FAILED],
             SessionState.READY: [SessionState.STARTING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.STARTING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.FAILED],
-            SessionState.PLAYING: [SessionState.HEALING, SessionState.DEGRADED, SessionState.STOPPING, SessionState.FAILED],
+            SessionState.PLAYING: [
+                SessionState.HEALING,
+                SessionState.DEGRADED,
+                SessionState.STOPPING,
+                SessionState.FAILED,
+                SessionState.QUIESCED,
+            ],
             SessionState.HEALING: [SessionState.PLAYING, SessionState.STOPPING, SessionState.DEGRADED, SessionState.FAILED],
-            SessionState.DEGRADED: [SessionState.PLAYING, SessionState.HEALING, SessionState.STOPPING, SessionState.FAILED],
+            SessionState.DEGRADED: [
+                SessionState.PLAYING,
+                SessionState.HEALING,
+                SessionState.STOPPING,
+                SessionState.FAILED,
+                SessionState.QUIESCED,
+            ],
+            SessionState.QUIESCED: [SessionState.STARTING, SessionState.STOPPING, SessionState.FAILED],
             SessionState.STOPPING: [SessionState.STOPPED, SessionState.FAILED],
             SessionState.STOPPED: [SessionState.STARTING, SessionState.PREPARING, SessionState.FAILED],
             SessionState.FAILED: [SessionState.PREPARING, SessionState.STARTING, SessionState.HEALING, SessionState.STOPPING],
@@ -165,6 +185,13 @@ class Session:
         last_primary_enqueue_monotonic = diagnostics.get("last_primary_enqueue_monotonic")
         last_primary_dequeue_monotonic = diagnostics.get("last_primary_dequeue_monotonic")
         last_primary_yield_monotonic = diagnostics.get("last_primary_yield_monotonic")
+        presentation_state = self.presentation_state
+        presentation_detail = self.presentation_detail
+        # Mapping internal state to operator facing state
+        if self.state == SessionState.QUIESCED:
+            presentation_state = "idle"
+            presentation_detail = self.presentation_detail or "detached_recoverable"
+
         return {
             "session_id": self.session_id,
             "source_id": self.source_id,
@@ -175,6 +202,9 @@ class Session:
             "effective_stream_profile": self.effective_stream_profile,
             "auto_heal": self.auto_heal,
             "state": self.state.value,
+            "presentation_state": presentation_state,
+            "presentation_detail": presentation_detail,
+            "resume_available": self.state == SessionState.QUIESCED,
             "stream_url": self.stream_url,
             "adapter_session_id": self.adapter_session_id,
             "created_at": self.created_at,
@@ -632,8 +662,17 @@ class SessionManager:
             )
 
     def _set_media_state(self, session: Session, state: str, reason: str | None = None) -> None:
+        changed = session.media_state != state or session.media_reason != reason
         session.media_state = state
         session.media_reason = reason
+
+        if changed:
+            source_health = self._source_registry.get_source_health(session.source_id)
+            self._event_bus.emit(
+                EventType.SESSION_MEDIA_CHANGED,
+                session_id=session.session_id,
+                payload=session.to_dict(source_health=source_health),
+            )
 
     async def _start_renderer_playback(self, session: Session) -> None:
         session.last_renderer_play_requested_monotonic = time.monotonic()
@@ -847,6 +886,14 @@ class SessionManager:
             raise ValueError("No source_id provided and no preferred source set")
         if not target_id:
             raise ValueError("No target_id provided and no preferred target set")
+
+        # Server-side target exclusivity
+        for existing in self._sessions.values():
+            if existing.target_id == target_id and existing.state != SessionState.STOPPED:
+                if existing.source_id == source_id and existing.state == SessionState.QUIESCED:
+                    logger.info("Reusing existing quiesced session %s for target %s", existing.session_id, target_id)
+                    return existing
+                raise SessionConflictError(existing.session_id, target_id)
 
         session = Session(
             source_id=source_id,
@@ -1560,8 +1607,14 @@ class SessionManager:
                 )
                 if delivery_should_degrade and session.media_reason != "client_detached_while_session_open":
                     session.primary_detach_escalations_total += 1
-                    session.transition_to(SessionState.DEGRADED)
-                    self._set_media_state(session, "playing_degraded", "client_detached_while_session_open")
+                    # DO NOT call stop_session() and DO NOT emit session.stopped.
+                    # Transition to QUIESCED state which is "idle_detached" presentation.
+                    session.transition_to(SessionState.QUIESCED)
+                    session.presentation_state = "idle"
+                    session.presentation_detail = "detached_recoverable"
+                    self._set_media_state(session, "idle_detached", "client_detached_while_session_open")
+                    # Quiesce expensive work
+                    asyncio.create_task(self._quiesce_session(session.session_id))
                     details = {
                         "reason": "client_detached_while_session_open",
                         "transport_alive": transport_alive,
@@ -1612,7 +1665,7 @@ class SessionManager:
                         transport_recovery_started_at = None
 
                 if (
-                    session.state == SessionState.DEGRADED
+                    session.state in {SessionState.DEGRADED, SessionState.QUIESCED}
                     and encoder_alive
                     and (
                         (
@@ -1629,6 +1682,15 @@ class SessionManager:
                     )
                     and (real_frames_written > 0 or keepalive_active)
                 ):
+                    # Allow auto resume only on fresh source activity and only when ownership is positively owned.
+                    if session.state == SessionState.QUIESCED:
+                        adapter = self._target_registry.get_adapter_for_target(session.target_id)
+                        if adapter:
+                            ownership_res = await adapter.inspect_ownership(session.target_id)
+                            if ownership_res.status != OwnershipStatus.OWNED:
+                                # Requires explicit user resume if ownership is unknown or not_owned
+                                continue
+
                     session.transition_to(SessionState.PLAYING)
                     restored_state = "active" if real_frames_written > 0 else "idle"
                     self._set_media_state(session, "playing_active" if restored_state == "active" else "playing_idle", None)
@@ -1770,6 +1832,61 @@ class SessionManager:
             failure_reason,
         )
 
+    async def _quiesce_session(self, session_id: str) -> None:
+        """Quiesce expensive work for a detached session."""
+        session = self.get(session_id)
+        if not session:
+            return
+
+        # 1. Stop source and frame sink
+        if session_id in self._frame_sinks:
+            await self._frame_sinks[session_id].stop()
+            del self._frame_sinks[session_id]
+
+        if session.adapter_session_id:
+            try:
+                self._source_registry.stop_source(session.source_id, session.adapter_session_id)
+            except Exception as e:
+                logger.error(f"Error quiescing source for session {session_id}: {e}")
+            session.adapter_session_id = None
+
+        # 2. Stop pipeline
+        if session.pipeline:
+            await session.pipeline.stop()
+            # We DON'T unregister the pipeline from publisher to keep the stream URL valid
+            # but we stop the FFmpeg process.
+
+        logger.info("Session %s quiesced (detached state)", session_id)
+
+    async def resume_session(self, session_id: str, force_reclaim: bool = False) -> bool:
+        """Resume a quiesced session."""
+        session = self.get(session_id)
+        if not session or session.state != SessionState.QUIESCED:
+            return False
+
+        # Allow renderer stop during quiesced cleanup only when ownership is positively owned.
+        adapter = self._target_registry.get_adapter_for_target(session.target_id)
+        ownership = OwnershipStatus.UNKNOWN
+        if adapter:
+            ownership_res = await adapter.inspect_ownership(session.target_id)
+            ownership = ownership_res.status
+
+        if not force_reclaim and ownership != OwnershipStatus.OWNED:
+            logger.info("Auto-resume denied for session %s: Ownership is %s", session_id, ownership)
+            session.presentation_detail = "detached_waiting_for_user"
+            return False
+
+        # If ownership is unknown or not_owned, and force_reclaim is False, we should ideally
+        # have required explicit user resume. The 'force_reclaim' flag represents that.
+
+        try:
+            session.transition_to(SessionState.STARTING)
+        except ValueError:
+            return False
+
+        # Re-run normal start flow
+        return await self.start_session(session_id)
+
     async def stop_session(self, session_id: str) -> bool:
         """Stop a session and its pipeline."""
         session = self.get(session_id)
@@ -1807,15 +1924,25 @@ class SessionManager:
         self._clear_primary_detach_state(session)
 
         # 1. Stop renderer
-        try:
-            await self._target_registry.stop_target(session.target_id)
-        except Exception as e:
-            # Log but continue cleanup
-            self._event_bus.emit(
-                EventType.RENDERER_PLAYBACK_FAILED,
-                session_id=session_id,
-                payload={"error": f"Error stopping renderer: {e}"},
-            )
+        # Allow renderer stop during quiesced cleanup only when ownership is positively owned.
+        adapter = self._target_registry.get_adapter_for_target(session.target_id)
+        should_stop_renderer = True
+        if adapter:
+            ownership_res = await adapter.inspect_ownership(session.target_id)
+            if ownership_res.status != OwnershipStatus.OWNED:
+                logger.info("Skipping renderer stop for session %s: Ownership is %s", session_id, ownership_res.status)
+                should_stop_renderer = False
+
+        if should_stop_renderer:
+            try:
+                await self._target_registry.stop_target(session.target_id)
+            except Exception as e:
+                # Log but continue cleanup
+                self._event_bus.emit(
+                    EventType.RENDERER_PLAYBACK_FAILED,
+                    session_id=session_id,
+                    payload={"error": f"Error stopping renderer: {e}"},
+                )
 
         # 2. Stop source and frame sink
         if session_id in self._frame_sinks:

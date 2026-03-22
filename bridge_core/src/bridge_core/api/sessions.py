@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from bridge_core.api.models import ErrorResponse
 from bridge_core.core import SessionManager
-from bridge_core.core.errors import SessionError
+from bridge_core.core.errors import QUIESCED_SESSION_CONFLICT, SessionConflictError, SessionError
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
@@ -35,6 +35,9 @@ class SessionResponse(BaseModel):
     started_at: float | None = None
     stopped_at: float | None = None
     last_error: SessionError | None = None
+    presentation_state: str | None = None
+    presentation_detail: str | None = None
+    resume_available: bool = False
     media_status: dict[str, Any] | None = None
 
 
@@ -42,7 +45,7 @@ class SessionListResponse(BaseModel):
     sessions: list[SessionResponse]
 
 
-@router.post("", response_model=SessionResponse, responses={400: {"model": ErrorResponse}})
+@router.post("", response_model=SessionResponse, responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}})
 async def create_session(request: Request, body: CreateSessionRequest) -> SessionResponse:
     """Create a new playback session."""
     manager: SessionManager = request.app.state.session_manager
@@ -56,6 +59,11 @@ async def create_session(request: Request, body: CreateSessionRequest) -> Sessio
         )
         source_health = source_registry.get_source_health(session.source_id)
         return SessionResponse(**session.to_dict(source_health=source_health))
+    except SessionConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": QUIESCED_SESSION_CONFLICT, "message": str(e)},
+        )
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -149,3 +157,32 @@ async def recover_session(request: Request, session_id: str) -> dict[str, Any]:
             status_code=400,
             detail={"code": "SESSION_RECOVERY_FAILED", "message": str(e)},
         )
+
+
+class ResumeSessionRequest(BaseModel):
+    force_reclaim: bool = False
+
+
+@router.post("/{session_id}/resume", responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})
+async def resume_session(request: Request, session_id: str, body: ResumeSessionRequest) -> dict[str, Any]:
+    """Resume a quiesced session."""
+    manager: SessionManager = request.app.state.session_manager
+    session = manager.get(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "SESSION_NOT_FOUND", "message": f"Session {session_id} not found"},
+        )
+
+    success = await manager.resume_session(session_id, force_reclaim=body.force_reclaim)
+    if not success:
+        error_detail: dict[str, Any] = {"code": "SESSION_RESUME_FAILED", "message": "Failed to resume session"}
+        if session.last_error:
+            error_detail["last_error"] = session.last_error.model_dump()
+            error_detail["message"] = session.last_error.message
+
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail,
+        )
+    return {"success": True}

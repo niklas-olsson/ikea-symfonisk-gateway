@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from bridge_core.adapters.base import OwnershipResult, OwnershipStatus
 from bridge_core.core.event_bus import EventBus, EventType
 from bridge_core.core.session_manager import SessionFrameSink, SessionManager, SessionState
 from bridge_core.core.source_registry import SourceRegistry
@@ -42,6 +43,10 @@ def target_registry(event_bus: EventBus) -> MagicMock:
     registry.play_stream = AsyncMock(return_value={"success": True})
     registry.stop_target = AsyncMock(return_value={"success": True})
     registry.heal_target = AsyncMock(return_value={"success": True})
+    registry.get_adapter_for_target.return_value = MagicMock()
+    registry.get_adapter_for_target.return_value.inspect_ownership = AsyncMock(
+        return_value=OwnershipResult(OwnershipStatus.OWNED)
+    )
     return registry
 
 
@@ -177,6 +182,11 @@ async def test_event_emission(session_manager: SessionManager, event_bus: EventB
     assert event.type == EventType.SOURCE_STARTED
     assert "adapter_session_id" in event.payload
     assert event.payload["backend"] is None
+
+    # Check SESSION_MEDIA_CHANGED event (establishing_primary)
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event.type == EventType.SESSION_MEDIA_CHANGED
+    assert event.payload["media_status"]["state"] == "establishing_primary"
 
     # Check RENDERER_PLAYBACK_STARTED event
     event = await asyncio.wait_for(queue.get(), timeout=1.0)
@@ -1564,7 +1574,7 @@ async def test_last_effective_delivery_path_loss_degrades_and_replays(
             await asyncio.sleep(1.2)
         heal_mock.assert_called_with(session.session_id, "replay", "client_detached_while_session_open")
 
-        assert session.state == SessionState.DEGRADED
+        assert session.state == SessionState.QUIESCED
         assert session.media_reason == "client_detached_while_session_open"
     await manager.stop_session(session.session_id)
 
@@ -2218,7 +2228,7 @@ async def test_primary_detach_beyond_grace_with_auto_heal_false_degrades_without
             await asyncio.sleep(1.3)
         heal_mock.assert_not_called()
 
-    assert session.state == SessionState.DEGRADED
+    assert session.state == SessionState.QUIESCED
     assert session.primary_detach_events_total >= 1
     assert session.primary_detach_escalations_total == 1
     await manager.stop_session(session.session_id)
