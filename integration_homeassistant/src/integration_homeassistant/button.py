@@ -35,6 +35,11 @@ async def async_setup_entry(
 class SymfoniskButton(CoordinatorEntity[SymfoniskCoordinator], ButtonEntity):
     """Base class for Symfonisk buttons."""
 
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self.coordinator.last_update_success and self.coordinator.data.health.get("status") == "ok"
+
     def __init__(self, coordinator: SymfoniskCoordinator, entry: ConfigEntry) -> None:
         """Initialize."""
         super().__init__(coordinator)
@@ -49,11 +54,18 @@ class SymfoniskButton(CoordinatorEntity[SymfoniskCoordinator], ButtonEntity):
 class SymfoniskStartButton(SymfoniskButton):
     """Button to start a playback session."""
 
-    _attr_name = "Start Session"
+    _attr_name = "Start Playback"
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        await self.coordinator.start_session()
+        source_id = self.coordinator.selected_source_id
+        target_id = self.coordinator.selected_target_id
+
+        if not source_id or not target_id:
+            _LOGGER.error("Source or Target not selected in coordinator")
+            return
+
+        await self.coordinator.start_session(source_id, target_id)
 
     @property
     def unique_id(self) -> str:
@@ -62,18 +74,12 @@ class SymfoniskStartButton(SymfoniskButton):
 
 
 class SymfoniskStopButton(SymfoniskButton):
-    """Button to stop playback on the selected target."""
-
-    _attr_name = "Stop Session"
+    _attr_name = "Stop Playback"
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        target_id = self.coordinator.selected_target_id
-        if not target_id:
-            return
-
         for session in self.coordinator.data.sessions:
-            if session.get("target_id") == target_id and session.get("state") != "stopped":
+            if session.get("state") in ("playing", "starting", "preparing", "healing"):
                 await self.coordinator.stop_session(session["session_id"])
 
     @property

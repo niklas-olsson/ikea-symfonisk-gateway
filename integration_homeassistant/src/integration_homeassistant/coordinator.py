@@ -128,8 +128,14 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
                     text = await resp.text()
                     raise Exception(f"Failed to start session: {text}")
 
-        await self.async_refresh()
+        await self.async_request_refresh()
         return session_id
+
+    async def async_stop_playback(self) -> None:
+        """Stop all active playback sessions."""
+        for session in self.data.sessions:
+            if session.get("state") in ("playing", "starting", "preparing", "healing"):
+                await self.stop_session(session["session_id"])
 
     async def stop_session(self, session_id: str) -> None:
         """Stop a session."""
@@ -139,7 +145,7 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
                 text = await resp.text()
                 raise Exception(f"Failed to stop session: {text}")
 
-        await self.async_refresh()
+        await self.async_request_refresh()
 
     async def async_set_config(self, key: str, value: Any) -> None:
         """Set a configuration value on the bridge."""
@@ -150,7 +156,7 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
                 text = await resp.text()
                 raise Exception(f"Failed to set config {key}: {text}")
 
-        await self.async_refresh()
+        await self.async_request_refresh()
 
     async def async_recover_session(self, session_id: str) -> None:
         """Trigger session recovery on the bridge."""
@@ -160,7 +166,7 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
                 text = await resp.text()
                 raise Exception(f"Failed to recover session: {text}")
 
-        await self.async_refresh()
+        await self.async_request_refresh()
 
     async def async_refresh_sources(self) -> None:
         """Trigger source refresh on the bridge."""
@@ -170,7 +176,7 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
                 text = await resp.text()
                 raise Exception(f"Failed to refresh sources: {text}")
 
-        await self.async_refresh()
+        await self.async_request_refresh()
 
     async def async_refresh_targets(self) -> None:
         """Trigger target refresh on the bridge."""
@@ -180,7 +186,7 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
                 text = await resp.text()
                 raise Exception(f"Failed to refresh targets: {text}")
 
-        await self.async_refresh()
+        await self.async_request_refresh()
 
     async def async_refresh_discovery(self) -> None:
         """Trigger a full discovery refresh (sources and targets) on the bridge."""
@@ -190,4 +196,4 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
                 text = await resp.text()
                 raise Exception(f"Failed to refresh discovery: {text}")
 
-        await self.async_refresh()
+        await self.async_request_refresh()
