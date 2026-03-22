@@ -112,9 +112,10 @@ async def get_target(request: Request, target_id: str) -> TargetResponse:
 @router.post("/refresh")
 async def refresh_targets(request: Request) -> dict[str, Any]:
     """Refresh targets from all registered adapters."""
-    registry: TargetRegistry = request.app.state.target_registry
-    await registry.refresh_targets()
-    return {"success": True}
+    # Compatibility shim behind the combined discovery refresh
+    from bridge_core.api.discovery import refresh_discovery
+
+    return await refresh_discovery(request)
 
 
 @router.post("/{target_id}/heal", responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}})

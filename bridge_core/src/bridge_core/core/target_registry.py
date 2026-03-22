@@ -5,6 +5,8 @@ import logging
 import time
 from typing import Any
 
+from shared.normalization import normalize_for_comparison
+
 from bridge_core.adapters.base import RendererAdapter, TargetDescriptor
 from bridge_core.core.event_bus import EventBus, EventType
 
@@ -47,11 +49,25 @@ class TargetRegistry:
                 pass
             self._refresh_task = None
 
+    def _is_configured(self) -> bool:
+        """Check if any preferred devices are configured."""
+        if not self._config_store:
+            return False
+        return bool(
+            self._config_store.get("preferred_source_id") or
+            self._config_store.get("preferred_target_id")
+        )
+
     async def _background_refresh(self) -> None:
         """Periodically refresh targets from all adapters."""
         while self._active:
             try:
                 await asyncio.sleep(60)  # Refresh every minute
+
+                # Stop broad polling once a preferred device is configured
+                if self._is_configured():
+                    continue
+
                 await self.refresh_targets()
             except asyncio.CancelledError:
                 break
@@ -126,7 +142,12 @@ class TargetRegistry:
 
                 # Check if it was previously unavailable or changed
                 old_target = self._targets.get(tid)
-                if not old_target or not getattr(old_target, "is_available", True) or set(old_target.members) != set(target.members):
+
+                # Use normalized comparison for deep property checks
+                norm_old = normalize_for_comparison(old_target.to_dict()) if old_target and hasattr(old_target, 'to_dict') else None
+                norm_new = normalize_for_comparison(target.to_dict()) if hasattr(target, 'to_dict') else None
+
+                if not old_target or not getattr(old_target, "is_available", True) or norm_old != norm_new:
                     changed = True
             else:
                 # Target missing from discovery

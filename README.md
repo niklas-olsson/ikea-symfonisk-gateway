@@ -183,6 +183,10 @@ bluetoothctl paired-devices
 bluetoothctl info <device-mac>
 ```
 
+### WiFi Stability
+
+For deployments relying on WiFi, see the [WiFi Resilience & Host Connectivity Guidance](docs/WIFI_RESILIENCE.md) for optional host-level optimization and watchdog configuration.
+
 ---
 
 ## Development

@@ -31,9 +31,10 @@ async def list_sources(request: Request) -> SourceListResponse:
 @router.post("/refresh")
 async def refresh_sources(request: Request) -> dict[str, Any]:
     """Refresh sources from all registered adapters."""
-    registry: SourceRegistry = request.app.state.source_registry
-    registry.refresh_sources()
-    return {"success": True}
+    # Compatibility shim behind the combined discovery refresh
+    from bridge_core.api.discovery import refresh_discovery
+
+    return await refresh_discovery(request)
 
 
 @router.get("/{source_id}", responses={404: {"model": ErrorResponse}})

@@ -23,6 +23,8 @@ from ingress_sdk.types import (
     SourceType,
     StartResult,
 )
+from shared.normalization import normalize_for_comparison
+from shared.subprocess import SubprocessRunner
 
 from .store import TrustedDeviceStore
 
@@ -72,8 +74,15 @@ logger = logging.getLogger(__name__)
 class LinuxBluetoothAdapter(IngressAdapter):
     """Adapter for capturing Bluetooth audio on Linux."""
 
-    def __init__(self, event_bus: EventBus | None = None, metrics: Any | None = None) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus | None = None,
+        config_store: Any | None = None,
+        metrics: Any | None = None,
+        runner: SubprocessRunner | None = None,
+    ) -> None:
         self._event_bus = event_bus
+        self._config_store = config_store
         self._metrics = metrics
         self._session_id: str | None = None
         self._running = False
@@ -82,6 +91,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
         self._frame_sink: FrameSink | None = None
 
         self._store = TrustedDeviceStore()
+        self._runner = runner or SubprocessRunner(metrics=metrics)
 
         is_linux = platform.system() == "Linux"
         self._adapter_controller: _BlueZAdapterController | None = None
@@ -90,7 +100,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
             from .dbus_adapter import BlueZAdapterController
             from .window import PairingWindowManager
 
-            self._adapter_controller = cast(_BlueZAdapterController, BlueZAdapterController())
+            self._adapter_controller = cast(_BlueZAdapterController, BlueZAdapterController(runner=self._runner))
             self._pairing_window = cast(
                 _PairingWindowManager,
                 PairingWindowManager(cast(Any, self._adapter_controller), self._store, event_bus),
@@ -168,18 +178,6 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
     def list_sources(self) -> list[SourceDescriptor]:
         """Discover connected Bluetooth A2DP sources using pactl."""
-        # Cache results for 5 seconds to avoid frequent pactl calls
-        import time
-
-        now = time.time()
-        if now - self._sources_time < 5:
-            if self._metrics:
-                self._metrics.increment("source_list_cache_hit_count")
-            return self._sources_cache
-
-        if self._metrics:
-            self._metrics.increment("source_list_cache_miss_count")
-
         sources: list[SourceDescriptor] = []
         if not shutil.which("pactl"):
             return sources
@@ -189,9 +187,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
         try:
             backend_type = "PulseAudio"
             default_source = "auto_null.monitor"
-            if self._metrics:
-                self._metrics.increment("subprocess_execution_count")
-            info_res = subprocess.run(["pactl", "info"], capture_output=True, text=True)
+            info_res = self._runner.run(["pactl", "info"], ttl=5)
             for line in info_res.stdout.split("\n"):
                 if "PipeWire" in line:
                     backend_type = "PipeWire"
@@ -201,9 +197,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
             macs_found = set()
 
             # 1. Check for explicit pulse sources
-            if self._metrics:
-                self._metrics.increment("subprocess_execution_count")
-            result = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, check=True)
+            result = self._runner.run(["pactl", "list", "short", "sources"], ttl=5, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
                     continue
@@ -218,9 +212,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
 
             # 2. Check for explicit pulse cards (PipeWire Loopback fallback)
             if backend_type == "PipeWire":
-                if self._metrics:
-                    self._metrics.increment("subprocess_execution_count")
-                res = subprocess.run(["pactl", "list", "short", "cards"], capture_output=True, text=True)
+                res = self._runner.run(["pactl", "list", "short", "cards"], ttl=5)
                 for line in res.stdout.strip().split("\n"):
                     if not line:
                         continue
@@ -275,12 +267,14 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 for sid in old_sources - new_sources:
                     self._event_bus.emit(EventType.BLUETOOTH_SOURCE_UNAVAILABLE, payload={"source_id": sid})
 
-                if new_sources != old_sources:
+                # Check for semantic change in sources (beyond IDs)
+                norm_old = normalize_for_comparison([s.model_dump() for s in self._sources_cache])
+                norm_new = normalize_for_comparison([s.model_dump() for s in sources])
+
+                if norm_old != norm_new:
                     self._event_bus.emit(EventType.TOPOLOGY_CHANGED, payload={"adapter_id": self.id()})
 
             self._source_id_map = new_source_id_map
-            self._sources_cache = sources
-            self._sources_time = now
             return sources
 
         except (subprocess.SubprocessError, FileNotFoundError) as e:
@@ -614,12 +608,23 @@ class LinuxBluetoothAdapter(IngressAdapter):
         """Set the preferred device MAC."""
         self._store.set_preferred_device(mac)
 
+    def _is_configured(self) -> bool:
+        """Check if any preferred devices are configured."""
+        if not self._config_store:
+            return False
+        return bool(
+            self._config_store.get("preferred_source_id") or
+            self._config_store.get("preferred_target_id")
+        )
+
     async def _monitor_status(self) -> None:
         """Periodically check adapter status and emit events on change."""
         try:
             while True:
-                # Discover sources periodically to automatically emit BLUETOOTH_SOURCE_AVAILABLE
-                await asyncio.to_thread(self.list_sources)
+                # Only perform periodic list_sources (pactl-based) if the system is not yet configured
+                if not self._is_configured():
+                    # Discover sources periodically to automatically emit BLUETOOTH_SOURCE_AVAILABLE
+                    await asyncio.to_thread(self.list_sources)
 
                 status = await self.get_adapter_status()
 
@@ -631,13 +636,16 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     if self._event_bus:
                         self._event_bus.emit(EventType.BLUETOOTH_ADAPTER_FAILED, payload={"errors": status["readiness_errors"]})
 
-                if status != self._last_status:
+                if normalize_for_comparison(status) != normalize_for_comparison(self._last_status):
                     if self._event_bus:
                         self._event_bus.emit(
                             EventType.BLUETOOTH_ADAPTER_STATUS_CHANGED,
                             payload=status,
                         )
                     self._last_status = status
+
+                # Use a small sleep at end of loop to prevent CPU spinning
+                # when configured (skipping list_sources)
                 await asyncio.sleep(5)
         except asyncio.CancelledError:
             pass
