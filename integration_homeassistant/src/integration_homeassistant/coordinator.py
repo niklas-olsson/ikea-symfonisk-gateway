@@ -42,16 +42,6 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
             update_interval=timedelta(seconds=5),
         )
 
-    @property
-    def selected_source_id(self) -> str | None:
-        """Return the currently selected source ID from config."""
-        return self.data.config.get("preferred_source_id")
-
-    @property
-    def selected_target_id(self) -> str | None:
-        """Return the currently selected target ID from config."""
-        return self.data.config.get("preferred_target_id")
-
     async def _async_update_data(self) -> SymfoniskData:
         """Fetch data from API endpoint."""
         session = async_get_clientsession(self.hass)
