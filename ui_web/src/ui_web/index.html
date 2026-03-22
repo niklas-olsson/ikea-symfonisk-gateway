@@ -136,6 +136,13 @@
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
+        /* Focus rings for accessibility */
+        select:focus-visible, button:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 4px oklch(from var(--accent) l c h / 30%);
+            border-color: var(--accent);
+        }
+
         select:hover {
             background-color: var(--surface-hover);
             border-color: oklch(100% 0 0 / 20%);
@@ -222,6 +229,7 @@
             text-transform: uppercase;
             font-size: 0.7rem;
             letter-spacing: 0.05em;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .status-idle { background-color: oklch(40% 0 0 / 20%); color: var(--text-muted); border: 1px solid oklch(40% 0 0 / 30%); }
@@ -545,9 +553,14 @@
 </head>
 <body>
     <main>
-        <header>
-            <h1>Bridge</h1>
-            <p class="subtitle">IKEA SYMFONISK Gateway v0.1.0</p>
+        <header style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+                <h1>Bridge</h1>
+                <p class="subtitle">IKEA SYMFONISK Gateway v0.1.0</p>
+            </div>
+            <div id="bridge-health" class="status-tag status-idle" style="margin-top: var(--spacing-12);">
+                Checking Health...
+            </div>
         </header>
 
         <!-- ── Bluetooth Panel ─────────────────────────────── -->
@@ -620,18 +633,6 @@
                         <option value="">Loading targets...</option>
                     </select>
                 </div>
-                <div class="field">
-                    <div class="field-header">
-                        <label for="delivery-profile-select">Delivery Profile</label>
-                    </div>
-                    <select id="delivery-profile-select">
-                        <option value="stable">Stable</option>
-                        <option value="experimental">Experimental</option>
-                    </select>
-                    <label id="delivery-profile-note" for="delivery-profile-select" style="text-transform: none; letter-spacing: 0; font-size: 0.8rem; display: none;">
-                        Lower latency, reduced buffering, may fall back to Stable if delivery becomes unstable.
-                    </label>
-                </div>
             </div>
 
             <div class="actions">
@@ -639,19 +640,50 @@
                 <button id="stop-btn" class="secondary" disabled>■ Stop</button>
             </div>
 
+            <!-- Advanced Settings -->
+            <details style="margin-top: var(--spacing-8);">
+                <summary style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: var(--spacing-4) 0;">
+                    Advanced Settings
+                </summary>
+                <div style="padding-top: var(--spacing-16); display: flex; flex-direction: column; gap: var(--spacing-16);">
+                    <div class="field">
+                        <div class="field-header">
+                            <label for="delivery-profile-select">Delivery Profile</label>
+                        </div>
+                        <select id="delivery-profile-select">
+                            <option value="stable">Stable</option>
+                            <option value="experimental">Experimental</option>
+                        </select>
+                        <label id="delivery-profile-note" for="delivery-profile-select" style="text-transform: none; letter-spacing: 0; font-size: 0.8rem; display: none; color: var(--text-muted);">
+                            Experimental: Lower latency, reduced buffering. May fall back to Stable if connection is unstable.
+                        </label>
+                    </div>
+                </div>
+            </details>
+
             <div class="status-bar">
-                <span>Session</span>
-                <span id="session-state" class="status-tag status-idle">Idle</span>
+                <div style="display: flex; align-items: center; gap: var(--spacing-16);">
+                    <span>Session</span>
+                    <span id="session-state" class="status-tag status-idle">Idle</span>
+                </div>
+                <button id="recover-btn" class="small-text" style="display: none;" onclick="recoverSession()">Recover</button>
+            </div>
+
+            <div id="session-error-container" style="display: none; padding: var(--spacing-16) var(--spacing-24); background-color: oklch(from var(--error) l c h / 10%); border-radius: var(--radius); border: 1px solid oklch(from var(--error) l c h / 20%);">
+                <div style="display: flex; flex-direction: column; gap: var(--spacing-4);">
+                    <label style="color: var(--error);">Recommendation</label>
+                    <p id="session-error-action" style="font-size: 0.9rem; color: var(--text);"></p>
+                </div>
             </div>
         </section>
 
-        <!-- ── Event Log ───────────────────────────────────── -->
-        <section class="log-section">
-            <div class="log-header">
-                <h2>Events</h2>
-            </div>
+        <!-- ── Event Log (Advanced) ────────────────────────── -->
+        <details class="log-section">
+            <summary style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; user-select: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: var(--spacing-8);">
+                Developer Logs
+            </summary>
             <div id="events-log" class="events-log"></div>
-        </section>
+        </details>
     </main>
 
     <script>
@@ -787,25 +819,49 @@
                 const res = await fetch('/v1/sources');
                 const { sources } = await res.json();
                 const currentValue = sourceSelect.value;
-                sourceSelect.innerHTML = sources.map(s => {
-                    let prefix = '';
-                    if (s.is_active) prefix += '● ';
-                    if (s.is_preferred) prefix += '★ ';
-                    if (!s.is_available) prefix += '⚠ [OFFLINE] ';
-                    return `<option value="${s.source_id}">${prefix}${s.display_name} (${s.source_type})</option>`;
-                }).join('') || '<option value="">No sources available</option>';
+
+                if (sources.length === 0) {
+                    sourceSelect.innerHTML = '<option value="">No sources found. Connect a device or click Refresh.</option>';
+                } else {
+                    sourceSelect.innerHTML = sources.map(s => {
+                        let label = s.display_name;
+                        if (s.is_active) label = '● ' + label;
+                        if (s.is_preferred) label = '★ ' + label;
+                        if (!s.is_available) label = '[OFFLINE] ' + label;
+
+                        // Map internal source types to user-friendly labels
+                        const typeLabels = {
+                            'system_audio': 'System Audio',
+                            'bluetooth_audio': 'Bluetooth',
+                            'microphone': 'Microphone',
+                            'line_in': 'Line In',
+                            'file_replay': 'File',
+                            'synthetic_test_source': 'Test Source'
+                        };
+                        const typeLabel = typeLabels[s.source_type] || s.source_type;
+
+                        return `<option value="${s.source_id}">${label} (${typeLabel})</option>`;
+                    }).join('');
+                }
 
                 if (currentValue && sources.find(s => s.source_id === currentValue)) {
                     sourceSelect.value = currentValue;
-                } else if (!currentValue) {
+                } else if (!currentValue || !sources.find(s => s.source_id === currentValue)) {
                     const preferred = sources.find(s => s.is_preferred && s.is_available);
-                    if (preferred) sourceSelect.value = preferred.source_id;
+                    if (preferred) {
+                        sourceSelect.value = preferred.source_id;
+                    } else if (sources.length > 0) {
+                        // Select first available source if no preferred
+                        const firstAvailable = sources.find(s => s.is_available);
+                        if (firstAvailable) sourceSelect.value = firstAvailable.source_id;
+                    }
                 }
 
                 syncDeliveryProfileSelection();
             } catch (err) {
                 console.error('Failed to fetch sources', err);
                 addLog('ERROR', 'Failed to fetch sources');
+                sourceSelect.innerHTML = '<option value="">Failed to load sources</option>';
             }
         }
 
@@ -814,23 +870,34 @@
                 const res = await fetch('/v1/targets');
                 const { targets } = await res.json();
                 const currentValue = targetSelect.value;
-                targetSelect.innerHTML = targets.map(t => {
-                    let prefix = '';
-                    if (t.is_active) prefix += '● ';
-                    if (t.is_preferred) prefix += '★ ';
-                    if (!t.is_available) prefix += '⚠ [OFFLINE] ';
-                    return `<option value="${t.target_id}">${prefix}${t.display_name} (${t.renderer})</option>`;
-                }).join('') || '<option value="">No targets available</option>';
+
+                if (targets.length === 0) {
+                    targetSelect.innerHTML = '<option value="">No targets found. Check speaker power and click Refresh.</option>';
+                } else {
+                    targetSelect.innerHTML = targets.map(t => {
+                        let label = t.display_name;
+                        if (t.is_active) label = '● ' + label;
+                        if (t.is_preferred) label = '★ ' + label;
+                        if (!t.is_available) label = '[OFFLINE] ' + label;
+                        return `<option value="${t.target_id}">${label} (${t.renderer})</option>`;
+                    }).join('');
+                }
 
                 if (currentValue && targets.find(t => t.target_id === currentValue)) {
                     targetSelect.value = currentValue;
-                } else if (!currentValue) {
+                } else if (!currentValue || !targets.find(t => t.target_id === currentValue)) {
                     const preferred = targets.find(t => t.is_preferred && t.is_available);
-                    if (preferred) targetSelect.value = preferred.target_id;
+                    if (preferred) {
+                        targetSelect.value = preferred.target_id;
+                    } else if (targets.length > 0) {
+                        const firstAvailable = targets.find(t => t.is_available);
+                        if (firstAvailable) targetSelect.value = firstAvailable.target_id;
+                    }
                 }
             } catch (err) {
                 console.error('Failed to fetch targets', err);
                 addLog('ERROR', 'Failed to fetch targets');
+                targetSelect.innerHTML = '<option value="">Failed to load targets</option>';
             }
         }
 
@@ -930,7 +997,10 @@
                 console.error('Session failed', err);
                 addLog('ERROR', err.message);
                 playBtn.disabled = false;
-                updateSessionUI('ERROR', 'Failed');
+
+                // Try to extract action if available from previous fetch failure
+                let action = 'Failed to start session. Check your connections and try again.';
+                updateSessionUI('ERROR', 'Failed', action);
             }
         }
 
@@ -965,9 +1035,42 @@
             }
         }
 
-        function updateSessionUI(state, label) {
+        async function recoverSession() {
+            if (!currentSessionId) return;
+            const recoverBtn = document.getElementById('recover-btn');
+            recoverBtn.disabled = true;
+            addLog('SYSTEM', `Attempting recovery for session ${currentSessionId}...`);
+            try {
+                const res = await fetch(`/v1/sessions/${currentSessionId}/recover`, { method: 'POST' });
+                if (res.ok) {
+                    addLog('SYSTEM', 'Recovery command sent');
+                } else {
+                    const err = await res.json();
+                    addLog('ERROR', `Recovery failed: ${err.detail?.message || 'Unknown error'}`);
+                }
+            } catch (err) {
+                addLog('ERROR', `Recovery failed: ${err.message}`);
+            } finally {
+                recoverBtn.disabled = false;
+            }
+        }
+
+        function updateSessionUI(state, label, errorAction = null) {
             sessionState.textContent = label;
             sessionState.className = `status-tag status-${state.toLowerCase()}`;
+
+            const errorContainer = document.getElementById('session-error-container');
+            const errorText = document.getElementById('session-error-action');
+            const recoverBtn = document.getElementById('recover-btn');
+
+            if (state === 'ERROR' && errorAction) {
+                errorContainer.style.display = 'block';
+                errorText.textContent = errorAction;
+                recoverBtn.style.display = 'block';
+            } else if (state !== 'ERROR') {
+                errorContainer.style.display = 'none';
+                recoverBtn.style.display = 'none';
+            }
         }
 
         function addLog(type, data) {
@@ -1319,7 +1422,8 @@
                             stopBtn.disabled = true;
                         }
                         if (type === 'session.failed') {
-                            updateSessionUI('ERROR', 'Failed');
+                            const errorAction = data.last_error?.action || 'An unknown error occurred. Please check your connections.';
+                            updateSessionUI('ERROR', 'Failed', errorAction);
                             playBtn.disabled = false;
                             stopBtn.disabled = true;
                         }
@@ -1386,7 +1490,37 @@
             };
         }
 
+        // ── Health functions ───────────────────────────────
+
+        async function fetchHealth() {
+            try {
+                const res = await fetch('/health');
+                if (!res.ok) throw new Error('Health check failed');
+                const health = await res.json();
+                const healthEl = document.getElementById('bridge-health');
+
+                if (health.status === 'ok' && health.ffmpeg && health.ffmpeg.available) {
+                    healthEl.textContent = 'Bridge Healthy';
+                    healthEl.className = 'status-tag status-active';
+                } else {
+                    let msg = 'Action Required';
+                    if (health.ffmpeg && !health.ffmpeg.available) {
+                        msg = 'FFmpeg Missing';
+                    }
+                    healthEl.textContent = msg;
+                    healthEl.className = 'status-tag status-error';
+                }
+            } catch (err) {
+                const healthEl = document.getElementById('bridge-health');
+                healthEl.textContent = 'Bridge Offline';
+                healthEl.className = 'status-tag status-error';
+            }
+        }
+
         // ── Initialize ─────────────────────────────────────
+
+        fetchHealth();
+        setInterval(fetchHealth, 30000);
 
         loadDeliveryProfile();
         fetchSources();
@@ -1414,12 +1548,20 @@
             try {
                 const res = await fetch('/v1/sessions');
                 const { sessions } = await res.json();
-                const active = sessions.find(s => ['playing', 'starting', 'preparing'].includes(s.state));
+                const active = sessions.find(s => ['playing', 'starting', 'preparing'].includes(s.state) || s.state === 'failed');
                 if (active) {
                     currentSessionId = active.session_id;
-                    updateSessionUI('ACTIVE', active.state.charAt(0).toUpperCase() + active.state.slice(1));
-                    playBtn.disabled = true;
-                    stopBtn.disabled = false;
+                    const errorAction = active.last_error?.action || null;
+                    const stateType = active.state === 'failed' ? 'ERROR' : 'ACTIVE';
+                    updateSessionUI(stateType, active.state.charAt(0).toUpperCase() + active.state.slice(1), errorAction);
+
+                    if (active.state === 'failed') {
+                        playBtn.disabled = false;
+                        stopBtn.disabled = true;
+                    } else {
+                        playBtn.disabled = true;
+                        stopBtn.disabled = false;
+                    }
                 }
             } catch (e) {}
         }
