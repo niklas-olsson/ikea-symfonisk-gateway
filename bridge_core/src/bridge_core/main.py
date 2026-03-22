@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from shared.metrics import MetricsRegistry
+from shared.subprocess import SubprocessRunner
 
 from bridge_core.adapters.mock_renderer import MockRendererAdapter
 from bridge_core.api import (
@@ -90,7 +91,8 @@ def register_ingress_adapters(
 
     if normalized_platform == "linux":
         metrics = getattr(source_registry, "_metrics", None)
-        linux_audio_adapter = LinuxAudioAdapter(event_bus, metrics=metrics)
+        subprocess_runner = SubprocessRunner(metrics=metrics)
+        linux_audio_adapter = LinuxAudioAdapter(event_bus, metrics=metrics, runner=subprocess_runner)
         source_registry.register_adapter(
             adapter_id=linux_audio_adapter.id(),
             platform=linux_audio_adapter.platform(),
@@ -100,7 +102,12 @@ def register_ingress_adapters(
             adapter_instance=linux_audio_adapter,
         )
 
-        linux_bluetooth_adapter = LinuxBluetoothAdapter(event_bus, config_store=config_store, metrics=metrics)
+        linux_bluetooth_adapter = LinuxBluetoothAdapter(
+            event_bus,
+            config_store=config_store,
+            metrics=metrics,
+            runner=subprocess_runner,
+        )
         source_registry.register_adapter(
             adapter_id=linux_bluetooth_adapter.id(),
             platform=linux_bluetooth_adapter.platform(),
