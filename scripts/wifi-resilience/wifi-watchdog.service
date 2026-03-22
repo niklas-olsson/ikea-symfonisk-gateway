@@ -1,0 +1,10 @@
+[Unit]
+Description=WiFi Stale Link Watchdog
+Documentation=https://github.com/baloise/ikea-symfonisk-gateway/docs/WIFI_RESILIENCE.md
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/wifi-watchdog.sh
+StandardOutput=journal
+StandardError=journal
