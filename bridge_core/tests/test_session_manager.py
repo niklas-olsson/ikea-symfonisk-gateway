@@ -2360,7 +2360,7 @@ async def test_play_canonical_orchestration(session_manager: SessionManager) -> 
     session3 = await session_manager.play(source_id="src_3", target_id="tgt_1", conflict_policy="takeover")
     assert session3.session_id != session.session_id
     assert session3.source_id == "src_3"
-    assert session.state == SessionState.STOPPED  # type: ignore[comparison-overlap]
+    assert session.state == SessionState.SUPERSEDED  # type: ignore[comparison-overlap]
 
     # 5. Reuse/Takeover with quiesced session
     session3.transition_to(SessionState.QUIESCED)

@@ -1065,7 +1065,11 @@ class SessionManager:
 
         # Server-side target exclusivity and takeover logic
         conflicting_session = next(
-            (s for s in self._sessions.values() if s.target_id == target_id and s.state != SessionState.STOPPED),
+            (
+                s
+                for s in self._sessions.values()
+                if s.target_id == target_id and s.state not in {SessionState.STOPPED, SessionState.SUPERSEDED}
+            ),
             None,
         )
 
@@ -1138,7 +1142,9 @@ class SessionManager:
                 await self.stop_session(conflicting_session.session_id, stop_reason=stop_reason)
                 with suppress(ValueError):
                     conflicting_session.transition_to(SessionState.SUPERSEDED)
-                self.terminate(conflicting_session.session_id)
+            else:
+                # Different source, no takeover requested: low-level 409
+                raise SessionConflictError(conflicting_session.session_id, target_id)
         session = Session(
             source_id=source_id,
             target_id=target_id,
@@ -1171,15 +1177,17 @@ class SessionManager:
 
         # Target Arbitration: Stop any incumbent sessions on the same target
         incumbents = [
-            s.session_id
+            s
             for s in self._sessions.values()
             if s.target_id == session.target_id
             and s.session_id != session.session_id
-            and s.state not in (SessionState.STOPPED, SessionState.FAILED)
+            and s.state not in (SessionState.STOPPED, SessionState.FAILED, SessionState.SUPERSEDED)
         ]
-        for incumbent_id in incumbents:
-            logger.info("Session %s taking over target %s from incumbent %s", session_id, session.target_id, incumbent_id)
-            await self.stop_session(incumbent_id)
+        for incumbent in incumbents:
+            logger.info("Session %s taking over target %s from incumbent %s", session_id, session.target_id, incumbent.session_id)
+            await self.stop_session(incumbent.session_id, stop_reason=STOP_REASON_SUPERSEDED)
+            with suppress(ValueError):
+                incumbent.transition_to(SessionState.SUPERSEDED)
 
         try:
             session.transition_to(SessionState.STARTING)
@@ -2379,7 +2387,7 @@ class SessionManager:
         # Find existing active session for target
         existing: Session | None = None
         for s in self._sessions.values():
-            if s.target_id == target_id and s.state not in {SessionState.STOPPED, SessionState.FAILED}:
+            if s.target_id == target_id and s.state not in {SessionState.STOPPED, SessionState.FAILED, SessionState.SUPERSEDED}:
                 existing = s
                 break
 
@@ -2391,7 +2399,6 @@ class SessionManager:
                 if existing.source_id != source_id:
                     raise SessionConflictError(existing.session_id, target_id)
 
-                # If same source, resume if needed
                 if existing.state == SessionState.QUIESCED:
                     await self.resume_session(existing.session_id)
                 elif existing.state != SessionState.PLAYING:
@@ -2400,27 +2407,26 @@ class SessionManager:
 
             if conflict_policy == "takeover":
                 if existing.source_id == source_id:
-                    # Same as reuse for same source
                     if existing.state == SessionState.QUIESCED:
                         await self.resume_session(existing.session_id)
                     elif existing.state != SessionState.PLAYING:
                         await self.start_session(existing.session_id)
                     return existing
-                else:
-                    # Takeover different source
-                    await self.stop_session(existing.session_id, stop_reason=takeover_reason or STOP_REASON_SUPERSEDED)
-                    # Create new session
-                    session = await self.create(
-                        source_id=source_id,
-                        target_id=target_id,
-                        stream_profile=stream_profile,
-                        auto_heal=auto_heal,
-                        takeover=True,
-                        takeover_reason=takeover_reason,
-                        intent=intent,
-                    )
-                    await self.start_session(session.session_id)
-                    return session
+
+                await self.stop_session(existing.session_id, stop_reason=takeover_reason or STOP_REASON_SUPERSEDED)
+                with suppress(ValueError):
+                    existing.transition_to(SessionState.SUPERSEDED)
+                session = await self.create(
+                    source_id=source_id,
+                    target_id=target_id,
+                    stream_profile=stream_profile,
+                    auto_heal=auto_heal,
+                    takeover=True,
+                    takeover_reason=takeover_reason,
+                    intent=intent,
+                )
+                await self.start_session(session.session_id)
+                return session
 
             raise ValueError(f"Unknown conflict policy: {conflict_policy}")
 
@@ -2430,6 +2436,8 @@ class SessionManager:
             target_id=target_id,
             stream_profile=stream_profile,
             auto_heal=auto_heal,
+            takeover=(conflict_policy == "takeover"),
+            takeover_reason=takeover_reason,
             intent=intent,
         )
         await self.start_session(session.session_id)

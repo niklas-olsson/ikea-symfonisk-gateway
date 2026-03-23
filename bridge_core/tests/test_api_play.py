@@ -60,6 +60,7 @@ def test_play_endpoint_takeover(client: TestClient) -> None:
 
         # 4. Verify first session is superseded or stopped
         get_res_1 = client.get(f"/v1/sessions/{session_id_1}")
+        assert get_res_1.status_code == 200
         assert get_res_1.json()["state"] in ("stopped", "superseded")
 
 

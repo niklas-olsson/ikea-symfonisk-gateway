@@ -118,7 +118,7 @@ async def test_target_takeover_at_start(session_manager: SessionManager) -> None
         adapter_info=MagicMock(adapter=MagicMock()),
     )
 
-    session_b = await session_manager.create(source_id="src_2", target_id="tgt_1")
+    session_b = await session_manager.create(source_id="src_2", target_id="tgt_1", takeover=True)
     assert session_b.session_id != session_a.session_id
     assert session_b.state == SessionState.CREATED
 
@@ -126,7 +126,7 @@ async def test_target_takeover_at_start(session_manager: SessionManager) -> None
     success = await session_manager.start_session(session_b.session_id)
     assert success is True
     assert session_b.state == SessionState.PLAYING  # type: ignore[comparison-overlap]
-    assert session_a.state == SessionState.STOPPED
+    assert session_a.state == SessionState.SUPERSEDED
 
 
 @pytest.mark.asyncio
@@ -171,7 +171,7 @@ async def test_start_session_ignores_failed_incumbent(session_manager: SessionMa
         adapter_info=MagicMock(adapter=MagicMock()),
     )
 
-    session_b = await session_manager.create(source_id="src_2", target_id="tgt_1")
+    session_b = await session_manager.create(source_id="src_2", target_id="tgt_1", takeover=True)
 
     with patch.object(session_manager, "stop_session", wraps=session_manager.stop_session) as stop_spy:
         await session_manager.start_session(session_b.session_id)
