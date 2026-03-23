@@ -49,22 +49,12 @@ class TargetRegistry:
                 pass
             self._refresh_task = None
 
-    def _is_configured(self) -> bool:
-        """Check if any preferred devices are configured."""
-        if not self._config_store:
-            return False
-        return bool(self._config_store.get("preferred_source_id") or self._config_store.get("preferred_target_id"))
-
     async def _background_refresh(self) -> None:
         """Periodically refresh targets from all adapters."""
         while self._active:
             try:
                 # Refresh every 5 minutes to reduce idle compute budget
                 await asyncio.sleep(300)
-
-                # Stop broad polling once a preferred device is configured
-                if self._is_configured():
-                    continue
 
                 await self.refresh_targets()
             except asyncio.CancelledError:

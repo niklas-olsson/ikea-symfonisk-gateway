@@ -9,6 +9,7 @@ import logging
 import platform
 import shutil
 import subprocess
+import time
 from typing import Any, Protocol, cast
 
 from bridge_core.core.event_bus import EventBus, EventType
@@ -110,6 +111,9 @@ class LinuxBluetoothAdapter(IngressAdapter):
         self._last_status: dict[str, Any] = {}
         self._source_id_map: dict[str, str] = {}  # virtual_id -> pa_id
         self._sources_cache: list[SourceDescriptor] = []
+        self._last_sources_fetch_monotonic: float = 0
+        self._sources_lock = asyncio.Lock()
+        self._source_fetch_ttl = 5.0  # 5 seconds cache
         self._sources_time: float = 0
 
         if self._event_bus and is_linux:
@@ -177,7 +181,11 @@ class LinuxBluetoothAdapter(IngressAdapter):
                 logger.debug(f"Auto-reconnect failed for {mac} (maybe not in range)")
 
     def list_sources(self) -> list[SourceDescriptor]:
-        """Discover connected Bluetooth A2DP sources using pactl."""
+        """Discover connected Bluetooth A2DP sources using pactl with caching."""
+        now = time.monotonic()
+        if now - self._last_sources_fetch_monotonic < self._source_fetch_ttl:
+            return self._sources_cache
+
         sources: list[SourceDescriptor] = []
         if not shutil.which("pactl"):
             return sources
@@ -275,12 +283,14 @@ class LinuxBluetoothAdapter(IngressAdapter):
                     self._event_bus.emit(EventType.TOPOLOGY_CHANGED, payload={"adapter_id": self.id()})
 
             self._source_id_map = new_source_id_map
+            self._sources_cache = sources
+            self._last_sources_fetch_monotonic = now
             return sources
 
         except (subprocess.SubprocessError, FileNotFoundError) as e:
             logger.error(f"Failed to list Bluetooth sources: {e}")
 
-        return sources
+        return sources or self._sources_cache
 
     def prepare(self, source_id: str) -> PrepareResult:
         """Verify the specified Bluetooth source exists."""
@@ -608,20 +618,13 @@ class LinuxBluetoothAdapter(IngressAdapter):
         """Set the preferred device MAC."""
         self._store.set_preferred_device(mac)
 
-    def _is_configured(self) -> bool:
-        """Check if any preferred devices are configured."""
-        if not self._config_store:
-            return False
-        return bool(self._config_store.get("preferred_source_id") or self._config_store.get("preferred_target_id"))
-
     async def _monitor_status(self) -> None:
         """Periodically check adapter status and emit events on change."""
         iteration = 0
         try:
             while True:
                 # Throttle source discovery to every 60 seconds (every second iteration)
-                # and only if the system is not yet configured.
-                if not self._is_configured() and iteration % 2 == 0:
+                if iteration % 2 == 0:
                     # Discover sources periodically to automatically emit BLUETOOTH_SOURCE_AVAILABLE
                     await asyncio.to_thread(self.list_sources)
 

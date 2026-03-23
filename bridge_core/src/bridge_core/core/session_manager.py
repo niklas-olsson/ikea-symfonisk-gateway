@@ -1145,6 +1145,19 @@ class SessionManager:
             else:
                 # Different source, no takeover requested: low-level 409
                 raise SessionConflictError(conflicting_session.session_id, target_id)
+
+        # Prune old SUPERSEDED or STOPPED sessions to prevent memory leak
+        # Keep only sessions from the last hour or sessions that haven't stopped yet
+        now = time.time()
+        sessions_to_prune = [
+            sid for sid, s in self._sessions.items()
+            if (s.state in [SessionState.SUPERSEDED, SessionState.STOPPED, SessionState.FAILED])
+            and (now - (s.stopped_at or s.created_at)) > 3600  # 1 hour
+        ]
+        for sid in sessions_to_prune:
+            logger.debug("Pruning stale session %s (state: %s)", sid, self._sessions[sid].state)
+            del self._sessions[sid]
+
         session = Session(
             source_id=source_id,
             target_id=target_id,
@@ -2400,17 +2413,24 @@ class SessionManager:
                     raise SessionConflictError(existing.session_id, target_id)
 
                 if existing.state == SessionState.QUIESCED:
-                    await self.resume_session(existing.session_id)
-                elif existing.state != SessionState.PLAYING:
+                    await self.resume_session(existing.session_id, force_reclaim=True)
+                else:
+                    # Even if already playing or starting, re-trigger renderer playback
+                    # to ensure the target is actually playing our stream.
                     await self.start_session(existing.session_id)
+                    if existing.state == SessionState.PLAYING:
+                        await self._start_renderer_playback(existing)
                 return existing
 
             if conflict_policy == "takeover":
                 if existing.source_id == source_id:
                     if existing.state == SessionState.QUIESCED:
-                        await self.resume_session(existing.session_id)
-                    elif existing.state != SessionState.PLAYING:
+                        await self.resume_session(existing.session_id, force_reclaim=True)
+                    else:
+                        # Re-trigger renderer playback to recover stolen state
                         await self.start_session(existing.session_id)
+                        if existing.state == SessionState.PLAYING:
+                            await self._start_renderer_playback(existing)
                     return existing
 
                 await self.stop_session(existing.session_id, stop_reason=takeover_reason or STOP_REASON_SUPERSEDED)

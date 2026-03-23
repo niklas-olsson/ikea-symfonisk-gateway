@@ -684,3 +684,29 @@ async def test_pipeline_debug_capture_writes_pre_and_post_encoder_files(tmp_path
         assert pre_wav.getsampwidth() == 2
         assert pre_wav.getnframes() > 0
     assert post_path.read_bytes() == b"encoded-data"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_caches_initial_header_for_late_subscribers() -> None:
+    pipeline = StreamPipeline("test_sess", "mp3_48k_stereo_320")
+    header_chunk = b"RIFF-WAVE-HEADER"
+
+    mock_process = FakeProcess(stdout_chunks=[header_chunk])
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+        await pipeline.start()
+
+        # Give time for _read_ffmpeg to catch and cache the header chunk
+        start_time = time.monotonic()
+        while pipeline._initial_header_chunk is None and (time.monotonic() - start_time) < 1.0:
+            await asyncio.sleep(0.01)
+
+        assert pipeline._initial_header_chunk == header_chunk
+
+        # Attach a subscriber LATE (after header is already cached and piped away)
+        gen = pipeline.subscribe(PipelineSubscriberInfo(role="auxiliary"))
+        # First chunk from generator MUST be the cached header
+        first = await anext(gen)
+        assert first == header_chunk
+
+        await pipeline.stop()

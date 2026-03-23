@@ -295,6 +295,7 @@ class StreamPipeline:
         self._pre_encoder_debug_mode: str | None = None
         self._post_encoder_debug_writer: Any | None = None
         self._pre_encoder_sidecar_path: Path | None = None
+        self._initial_header_chunk: bytes | None = None
 
     def _build_default_input_format(self, frame_duration_ms: int) -> PipelineInputFormat:
         return PipelineInputFormat(
@@ -544,6 +545,11 @@ class StreamPipeline:
                     self._evict_old_stdout_window_samples(now)
                     if self._first_encoded_output_monotonic is None:
                         self._first_encoded_output_monotonic = now
+                    
+                    if self._initial_header_chunk is None and len(data) > 0:
+                        self._initial_header_chunk = data
+                        logger.info("Cached initial header chunk of %s bytes for session %s", len(data), self.session_id)
+
                     if self._awaiting_real_encoded_output and self._first_real_encoded_output_monotonic is None:
                         self._first_real_encoded_output_monotonic = now
                         self._awaiting_real_encoded_output = False
@@ -584,6 +590,13 @@ class StreamPipeline:
         )
         async with self._lock:
             self._clients.append(subscriber)
+            if self._initial_header_chunk is not None:
+                subscriber.queue.put_nowait(self._initial_header_chunk)
+                subscriber.queued_bytes += len(self._initial_header_chunk)
+                subscriber.wake_event.set()
+            
+            logger.info("Subscriber %s (role: %s) attached to session %s", subscriber.subscriber_id, subscriber.role, self.session_id)
+            
             self._last_client_attach_monotonic = subscriber.attached_monotonic
             if self._is_primary_candidate(subscriber):
                 self._last_primary_attach_monotonic = subscriber.attached_monotonic
