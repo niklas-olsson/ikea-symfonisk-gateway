@@ -1150,7 +1150,8 @@ class SessionManager:
         # Keep only sessions from the last hour or sessions that haven't stopped yet
         now = time.time()
         sessions_to_prune = [
-            sid for sid, s in self._sessions.items()
+            sid
+            for sid, s in self._sessions.items()
             if (s.state in [SessionState.SUPERSEDED, SessionState.STOPPED, SessionState.FAILED])
             and (now - (s.stopped_at or s.created_at)) > 3600  # 1 hour
         ]

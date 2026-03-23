@@ -43,7 +43,7 @@ class LinuxAudioAdapter(IngressAdapter):
         self._capture_task: asyncio.Task[None] | None = None
         self._frame_sink: FrameSink | None = None
         self._hotplug_task: asyncio.Task[None] | None = None
-        
+
         self._sources_cache: list[SourceDescriptor] = []
         self._last_sources_fetch_monotonic: float = 0
         self._source_fetch_ttl = 5.0  # 5 seconds cache
@@ -102,6 +102,7 @@ class LinuxAudioAdapter(IngressAdapter):
                         now = asyncio.get_event_loop().time()
                         if now - self._last_topology_event_monotonic > self._topology_event_cooldown:
                             from bridge_core.core.event_bus import EventType
+
                             self._event_bus.emit(EventType.TOPOLOGY_CHANGED, payload={"adapter_id": self.id()})
                             self._last_topology_event_monotonic = now
 
@@ -135,6 +136,7 @@ class LinuxAudioAdapter(IngressAdapter):
     def list_sources(self) -> list[SourceDescriptor]:
         """Enumerate available PulseAudio and ALSA sources with caching."""
         import time
+
         now = time.monotonic()
         if now - self._last_sources_fetch_monotonic < self._source_fetch_ttl:
             return self._sources_cache
@@ -143,7 +145,7 @@ class LinuxAudioAdapter(IngressAdapter):
 
         # 1. Try to discover PulseAudio sources
         try:
-            result = self._runner.run(["pactl", "list", "short", "sources"], ttl=5, check=True)
+            result = self._runner.run(["pactl", "list", "short", "sources"], ttl=5, timeout=2.0, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
                     continue
@@ -179,7 +181,7 @@ class LinuxAudioAdapter(IngressAdapter):
 
         # 2. Try to discover ALSA sources
         try:
-            result = self._runner.run(["arecord", "-l"], ttl=5, check=True)
+            result = self._runner.run(["arecord", "-l"], ttl=5, timeout=2.0, check=True)
             for line in result.stdout.split("\n"):
                 if line.startswith("card "):
                     # e.g. card 0: PCH [HDA Intel PCH], device 0: ALC294 Analog [ALC294 Analog]

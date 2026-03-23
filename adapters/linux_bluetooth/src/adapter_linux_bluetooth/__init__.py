@@ -195,7 +195,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
         try:
             backend_type = "PulseAudio"
             default_source = "auto_null.monitor"
-            info_res = self._runner.run(["pactl", "info"], ttl=5)
+            info_res = self._runner.run(["pactl", "info"], ttl=5, timeout=2.0)
             for line in info_res.stdout.split("\n"):
                 if "PipeWire" in line:
                     backend_type = "PipeWire"
@@ -205,7 +205,7 @@ class LinuxBluetoothAdapter(IngressAdapter):
             macs_found = set()
 
             # 1. Check for explicit pulse sources
-            result = self._runner.run(["pactl", "list", "short", "sources"], ttl=5, check=True)
+            result = self._runner.run(["pactl", "list", "short", "sources"], ttl=5, timeout=2.0, check=True)
             for line in result.stdout.strip().split("\n"):
                 if not line:
                     continue

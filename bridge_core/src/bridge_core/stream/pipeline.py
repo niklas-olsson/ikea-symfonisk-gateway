@@ -545,7 +545,7 @@ class StreamPipeline:
                     self._evict_old_stdout_window_samples(now)
                     if self._first_encoded_output_monotonic is None:
                         self._first_encoded_output_monotonic = now
-                    
+
                     if self._initial_header_chunk is None and len(data) > 0:
                         self._initial_header_chunk = data
                         logger.info("Cached initial header chunk of %s bytes for session %s", len(data), self.session_id)
@@ -594,9 +594,9 @@ class StreamPipeline:
                 subscriber.queue.put_nowait(self._initial_header_chunk)
                 subscriber.queued_bytes += len(self._initial_header_chunk)
                 subscriber.wake_event.set()
-            
+
             logger.info("Subscriber %s (role: %s) attached to session %s", subscriber.subscriber_id, subscriber.role, self.session_id)
-            
+
             self._last_client_attach_monotonic = subscriber.attached_monotonic
             if self._is_primary_candidate(subscriber):
                 self._last_primary_attach_monotonic = subscriber.attached_monotonic
