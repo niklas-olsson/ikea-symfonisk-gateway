@@ -11,7 +11,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, MANUFACTURER, MODEL
 from .coordinator import SymfoniskCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,9 +48,11 @@ class SymfoniskButton(CoordinatorEntity[SymfoniskCoordinator], ButtonEntity):
         super().__init__(coordinator)
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": f"SYMFONISK Gateway ({coordinator.host})",
-            "manufacturer": "IKEA",
-            "model": "SYMFONISK Gateway",
+            "name": f"SYMFONISK Bridge ({coordinator.host})",
+            "manufacturer": MANUFACTURER,
+            "model": MODEL,
+            "sw_version": coordinator.data.health.get("version"),
+            "configuration_url": coordinator.base_url,
         }
 
 

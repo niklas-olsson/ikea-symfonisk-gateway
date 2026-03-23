@@ -38,7 +38,7 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
         super().__init__(
             hass,
             _LOGGER,
-            name=f"Symfonisk Gateway ({host})",
+            name=f"SYMFONISK Bridge ({host})",
             update_interval=timedelta(seconds=5),
         )
 
@@ -114,6 +114,7 @@ class SymfoniskCoordinator(DataUpdateCoordinator[SymfoniskData]):
             "conflict_policy": "takeover",
             "stream_profile": "auto",
             "auto_heal": True,
+            "intent": "homeassistant",
         }
 
         async with session.post(f"{self.base_url}/v1/play", json=payload) as resp:

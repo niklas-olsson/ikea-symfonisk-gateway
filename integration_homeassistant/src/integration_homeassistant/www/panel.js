@@ -23,7 +23,7 @@ class SymfoniskGatewayPanel extends HTMLElement {
         if (!id.startsWith('media_player.')) return false;
         const stateObj = this._hass.states[id];
         return stateObj.attributes && (
-            stateObj.attributes.friendly_name === 'SYMFONISK Bridge' ||
+            stateObj.attributes.friendly_name.includes('SYMFONISK Bridge') ||
             stateObj.attributes.session_id !== undefined ||
             stateObj.attributes.bridge_state !== undefined
         );
@@ -65,6 +65,15 @@ class SymfoniskGatewayPanel extends HTMLElement {
           align-items: center;
           margin-bottom: 16px;
         }
+        .header-title {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .header-title img {
+          height: 40px;
+          width: 40px;
+        }
         .status-tag {
           padding: 4px 12px;
           border-radius: 20px;
@@ -82,7 +91,11 @@ class SymfoniskGatewayPanel extends HTMLElement {
       <div class="container">
         <ha-card>
           <div class="header">
-            <h1>SYMFONISK Bridge</h1>
+            <div class="header-title">
+              <img src="/ikea_symfonisk_gateway_static/logo.svg" id="logo" onerror="this.style.display='none'; document.getElementById('logo-fallback').style.display='inline-block';">
+              <ha-icon id="logo-fallback" icon="mdi:router-wireless" style="display: none;"></ha-icon>
+              <h1>IKEA SYMFONISK Bridge</h1>
+            </div>
             <span id="session-status" class="status-tag status-idle">Idle</span>
           </div>
           <div id="session-info">

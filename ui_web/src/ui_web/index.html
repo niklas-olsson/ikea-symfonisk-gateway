@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IKEA SYMFONISK Gateway</title>
+    <title>IKEA SYMFONISK Bridge</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
@@ -85,6 +85,24 @@
 
         header {
             margin-bottom: var(--spacing-16);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-16);
+        }
+
+        .header-title img {
+            height: 64px;
+            width: 64px;
+        }
+
+        .header-title ha-icon {
+            --mdc-icon-size: 64px;
         }
 
         h1 {
@@ -708,10 +726,14 @@
     </script>
 
     <main>
-        <header style="display: flex; justify-content: space-between; align-items: flex-start;">
-            <div>
-                <h1>Bridge</h1>
-                <p class="subtitle">IKEA SYMFONISK Gateway v0.1.0</p>
+        <header>
+            <div class="header-title">
+                <img src="/static/logo.svg" id="logo" onerror="this.style.display='none'; document.getElementById('logo-fallback').style.display='inline-block';">
+                <ha-icon id="logo-fallback" icon="mdi:router-wireless" style="display: none;"></ha-icon>
+                <div>
+                    <h1>Bridge</h1>
+                    <p class="subtitle" id="bridge-subtitle">IKEA SYMFONISK Bridge</p>
+                </div>
             </div>
             <div style="display: flex; gap: var(--spacing-12); align-items: center; margin-top: var(--spacing-12);">
                 <button id="theme-toggle" class="small-text" style="padding: 4px 10px;">◑</button>
@@ -1250,7 +1272,8 @@
                         target_id,
                         conflict_policy: 'takeover',
                         stream_profile: 'auto',
-                        auto_heal: true
+                        auto_heal: true,
+                        intent: 'manual'
                     })
                 });
 
@@ -1853,6 +1876,11 @@
                 if (!res.ok) throw new Error('Health check failed');
                 const health = await res.json();
                 const healthEl = document.getElementById('bridge-health');
+                const subtitleEl = document.getElementById('bridge-subtitle');
+
+                if (health.version) {
+                    subtitleEl.textContent = `IKEA SYMFONISK Bridge v${health.version}`;
+                }
 
                 if (health.status === 'ok' && health.ffmpeg && health.ffmpeg.available) {
                     healthEl.textContent = 'Bridge Healthy';

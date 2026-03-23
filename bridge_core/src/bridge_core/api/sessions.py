@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from bridge_core.api.models import ErrorResponse
-from bridge_core.core import SessionManager
+from bridge_core.core import SessionIntent, SessionManager
 from bridge_core.core.errors import SESSION_CONFLICT, SessionConflictError, SessionError
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
@@ -20,12 +20,14 @@ class CreateSessionRequest(BaseModel):
     takeover: bool = False
     exclusive: bool = False
     takeover_reason: str | None = None
+    intent: SessionIntent = SessionIntent.MANUAL
 
 
 class SessionResponse(BaseModel):
     session_id: str
     source_id: str
     target_id: str
+    intent: SessionIntent
     stream_profile: str
     requested_stream_profile: str
     selected_stream_profile: str | None = None
@@ -64,6 +66,7 @@ async def create_session(request: Request, body: CreateSessionRequest) -> Sessio
             takeover=body.takeover,
             exclusive=body.exclusive,
             takeover_reason=body.takeover_reason,
+            intent=body.intent,
         )
         source_health = source_registry.get_source_health(session.source_id)
         return SessionResponse(**session.to_dict(source_health=source_health))

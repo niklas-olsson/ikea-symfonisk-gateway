@@ -64,6 +64,21 @@ STOP_REASON_MANUAL = "manual_takeover"
 STOP_REASON_PREFERRED = "preferred_device_takeover"
 
 
+class SessionIntent(str, Enum):
+    MANUAL = "manual"
+    HOMEASSISTANT = "homeassistant"
+    AUTOPLAY = "autoplay"
+    RECOVERY = "recovery"
+
+
+INTENT_PRIORITY = {
+    SessionIntent.MANUAL: 4,
+    SessionIntent.HOMEASSISTANT: 3,
+    SessionIntent.AUTOPLAY: 2,
+    SessionIntent.RECOVERY: 1,
+}
+
+
 class SessionState(str, Enum):
     CREATED = "created"
     PREPARING = "preparing"
@@ -89,10 +104,12 @@ class Session:
         stream_profile: str = "auto",
         auto_heal: bool = True,
         exclusive: bool = False,
+        intent: SessionIntent | str = SessionIntent.MANUAL,
     ):
         self.session_id = f"sess_{uuid4().hex[:12]}"
         self.source_id = source_id
         self.target_id = target_id
+        self.intent = SessionIntent(intent) if isinstance(intent, str) else intent
         self.requested_stream_profile = stream_profile
         self.selected_stream_profile: str | None = None
         self.effective_stream_profile: str | None = None
@@ -255,6 +272,7 @@ class Session:
             "session_id": self.session_id,
             "source_id": self.source_id,
             "target_id": self.target_id,
+            "intent": self.intent.value,
             "stream_profile": self.effective_stream_profile or self.selected_stream_profile or self.requested_stream_profile,
             "requested_stream_profile": self.requested_stream_profile,
             "selected_stream_profile": self.selected_stream_profile,
@@ -1022,6 +1040,7 @@ class SessionManager:
         takeover: bool = False,
         takeover_reason: str | None = None,
         exclusive: bool = False,
+        intent: SessionIntent | str = SessionIntent.MANUAL,
     ) -> Session:
         """Create a new playback session.
 
@@ -1094,6 +1113,22 @@ class SessionManager:
             if exclusive or conflicting_session.exclusive:
                 raise SessionConflictError(conflicting_session.session_id, target_id)
 
+            # Intent Priority Rule: Check if new intent can preempt incumbent
+            resolved_intent = SessionIntent(intent) if isinstance(intent, str) else intent
+            new_priority = INTENT_PRIORITY.get(resolved_intent, 0)
+            incumbent_priority = INTENT_PRIORITY.get(conflicting_session.intent, 0)
+            can_preempt = new_priority >= incumbent_priority
+            if not can_preempt:
+                logger.info(
+                    "Takeover denied: New intent %s (priority %d) cannot preempt incumbent session %s with intent %s (priority %d)",
+                    resolved_intent.value,
+                    new_priority,
+                    conflicting_session.session_id,
+                    conflicting_session.intent.value,
+                    incumbent_priority,
+                )
+                raise SessionConflictError(conflicting_session.session_id, target_id)
+
             if ownership_status == OwnershipStatus.NOT_OWNED or takeover:
                 logger.info(
                     "Taking over target %s from session %s by source %s",
@@ -1116,6 +1151,7 @@ class SessionManager:
             stream_profile=stream_profile,
             auto_heal=auto_heal,
             exclusive=exclusive,
+            intent=intent,
         )
         self._sessions[session.session_id] = session
         source_health = self._source_registry.get_source_health(session.source_id)
@@ -2328,6 +2364,7 @@ class SessionManager:
         stream_profile: str = "auto",
         auto_heal: bool = True,
         takeover_reason: str | None = None,
+        intent: SessionIntent | str = SessionIntent.MANUAL,
     ) -> Session:
         """
         Canonical orchestration method for playback.
@@ -2347,22 +2384,53 @@ class SessionManager:
                 sorted_targets = sorted(targets, key=lambda t: t.target_id)
                 target_id = sorted_targets[0].target_id
 
-        # Use create() to handle internal state transition rules, same-source idempotency,
-        # and different-source takeover logic.
-        if conflict_policy == "reject":
-            # For strict rejection, check if any non-stopped session exists.
-            existing = next(
-                (
-                    s
-                    for s in self._sessions.values()
-                    if s.target_id == target_id and s.state not in {SessionState.STOPPED, SessionState.SUPERSEDED}
-                ),
-                None,
-            )
-            if existing:
+        # Find existing active session for target
+        existing: Session | None = None
+        for s in self._sessions.values():
+            if s.target_id == target_id and s.state not in {SessionState.STOPPED, SessionState.FAILED, SessionState.SUPERSEDED}:
+                existing = s
+                break
+
+        if existing:
+            if conflict_policy == "reject":
                 raise SessionConflictError(existing.session_id, target_id)
 
-        # Delegate resolution logic to create().
+            if conflict_policy == "reuse":
+                if existing.source_id != source_id:
+                    raise SessionConflictError(existing.session_id, target_id)
+
+                if existing.state == SessionState.QUIESCED:
+                    await self.resume_session(existing.session_id)
+                elif existing.state != SessionState.PLAYING:
+                    await self.start_session(existing.session_id)
+                return existing
+
+            if conflict_policy == "takeover":
+                if existing.source_id == source_id:
+                    if existing.state == SessionState.QUIESCED:
+                        await self.resume_session(existing.session_id)
+                    elif existing.state != SessionState.PLAYING:
+                        await self.start_session(existing.session_id)
+                    return existing
+
+                await self.stop_session(existing.session_id, stop_reason=takeover_reason or STOP_REASON_SUPERSEDED)
+                with suppress(ValueError):
+                    existing.transition_to(SessionState.SUPERSEDED)
+                session = await self.create(
+                    source_id=source_id,
+                    target_id=target_id,
+                    stream_profile=stream_profile,
+                    auto_heal=auto_heal,
+                    takeover=True,
+                    takeover_reason=takeover_reason,
+                    intent=intent,
+                )
+                await self.start_session(session.session_id)
+                return session
+
+            raise ValueError(f"Unknown conflict policy: {conflict_policy}")
+
+        # No existing session
         session = await self.create(
             source_id=source_id,
             target_id=target_id,
@@ -2370,15 +2438,7 @@ class SessionManager:
             auto_heal=auto_heal,
             takeover=(conflict_policy == "takeover"),
             takeover_reason=takeover_reason,
+            intent=intent,
         )
-
-        if conflict_policy == "reuse" and session.source_id != source_id:
-            # This should be unreachable because create() with takeover=False
-            # raises SessionConflictError for different-source conflicts.
-            raise SessionConflictError(session.session_id, target_id)
-
-        # If create() returned a session that isn't already active, start it.
-        if session.state not in {SessionState.PLAYING, SessionState.STARTING}:
-            await self.start_session(session.session_id)
-
+        await self.start_session(session.session_id)
         return session
